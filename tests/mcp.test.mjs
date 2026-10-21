@@ -40,14 +40,14 @@ test('MCP stdio discovers pages, validates arguments, preserves approvals and un
 
 test('MCP read-only mode uses the user allowlist and stdio forwards only configured secrets', async t => {
   const f = await fixture(t);
-  const oldKey = process.env.GOON_API_KEY, oldForwarded = process.env.GOON_TEST_FORWARD;
-  process.env.GOON_API_KEY = 'must-not-inherit'; process.env.GOON_TEST_FORWARD = 'explicit-value';
+  const oldKey = process.env.VYEN_API_KEY, oldForwarded = process.env.VYEN_TEST_FORWARD;
+  process.env.VYEN_API_KEY = 'must-not-inherit'; process.env.VYEN_TEST_FORWARD = 'explicit-value';
   t.after(() => {
-    if (oldKey === undefined) delete process.env.GOON_API_KEY; else process.env.GOON_API_KEY = oldKey;
-    if (oldForwarded === undefined) delete process.env.GOON_TEST_FORWARD; else process.env.GOON_TEST_FORWARD = oldForwarded;
+    if (oldKey === undefined) delete process.env.VYEN_API_KEY; else process.env.VYEN_API_KEY = oldKey;
+    if (oldForwarded === undefined) delete process.env.VYEN_TEST_FORWARD; else process.env.VYEN_TEST_FORWARD = oldForwarded;
   });
   const registry = new ToolRegistry(f.cwd, async () => true, true);
-  const manager = new McpManager(stdio({ readOnlyTools: ['echo'], envFrom: { FORWARDED: 'GOON_TEST_FORWARD' } }), f.cwd);
+  const manager = new McpManager(stdio({ readOnlyTools: ['echo'], envFrom: { FORWARDED: 'VYEN_TEST_FORWARD' } }), f.cwd);
   t.after(() => manager.close());
   await manager.connect(registry);
   assert(!Object.keys(registry.schemas()).includes(mcpToolName('local', 'danger-tool')));
@@ -59,7 +59,7 @@ test('MCP read-only mode uses the user allowlist and stdio forwards only configu
 test('MCP Streamable HTTP uses bearer env credentials and executes real protocol calls', async t => {
   const f = await fixture(t), clients = [];
   const http = createServer(async (request, response) => {
-    assert.equal(request.headers.authorization, 'Bearer goon-mcp-test-token');
+    assert.equal(request.headers.authorization, 'Bearer vyen-mcp-test-token');
     if (request.method !== 'POST') { response.writeHead(405).end(); return; }
     const server = mockMcpServer(); clients.push(server);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
@@ -69,10 +69,10 @@ test('MCP Streamable HTTP uses bearer env credentials and executes real protocol
   });
   await new Promise(resolve => http.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await Promise.all(clients.map(c => c.close())); http.closeAllConnections(); await new Promise(resolve => http.close(resolve)); });
-  process.env.GOON_MCP_TEST_TOKEN = 'goon-mcp-test-token';
-  t.after(() => { delete process.env.GOON_MCP_TEST_TOKEN; });
+  process.env.VYEN_MCP_TEST_TOKEN = 'vyen-mcp-test-token';
+  t.after(() => { delete process.env.VYEN_MCP_TEST_TOKEN; });
   const config = mcpConfigSchema.parse({ servers: { remote: { transport: 'http', url: `http://127.0.0.1:${http.address().port}/mcp`,
-    bearerEnv: 'GOON_MCP_TEST_TOKEN', readOnlyTools: ['echo'] } } });
+    bearerEnv: 'VYEN_MCP_TEST_TOKEN', readOnlyTools: ['echo'] } } });
   const registry = new ToolRegistry(f.cwd, async () => false);
   const manager = new McpManager(config, f.cwd); t.after(() => manager.close());
   await manager.connect(registry);
@@ -94,7 +94,7 @@ test('real CLI dispatches MCP tools and startup failure releases session locks',
   const result = await cli(f, p.url, ['--read-only', '-p', 'use MCP']).done;
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /MCP done/);
-  await writeFile(path, JSON.stringify({ servers: { broken: { transport: 'stdio', command: 'goon-nonexistent-binary-123' } } }));
+  await writeFile(path, JSON.stringify({ servers: { broken: { transport: 'stdio', command: 'vyen-nonexistent-binary-123' } } }));
   const broken = await cli(f, p.url, ['-p', 'do nothing']).done;
   assert.equal(broken.code, 1);
   assert.deepEqual((await readdir(join(f.data, 'vyen/sessions'))).filter(n => n.endsWith('.lock')), []);
@@ -104,8 +104,8 @@ test('real CLI dispatches MCP tools and startup failure releases session locks',
 
 test('MCP request timeout leaves no registered tools and redacts configured credentials', async t => {
   const f = await fixture(t);
-  process.env.GOON_MCP_ERROR_TOKEN = 'mcp-error-secret';
-  t.after(() => { delete process.env.GOON_MCP_ERROR_TOKEN; });
+  process.env.VYEN_MCP_ERROR_TOKEN = 'mcp-error-secret';
+  t.after(() => { delete process.env.VYEN_MCP_ERROR_TOKEN; });
   const http = createServer(async (request, response) => {
     for await (const _ of request) { /* drain the request */ }
     response.writeHead(401, { 'content-type': 'text/plain' }); response.end('Rejected mcp-error-secret');
@@ -114,7 +114,7 @@ test('MCP request timeout leaves no registered tools and redacts configured cred
   t.after(() => { http.closeAllConnections(); return new Promise(resolve => http.close(resolve)); });
   const registry = new ToolRegistry(f.cwd, async () => true);
   const config = mcpConfigSchema.parse({ servers: { broken: { transport: 'http', url: `http://127.0.0.1:${http.address().port}/mcp`,
-    bearerEnv: 'GOON_MCP_ERROR_TOKEN', timeoutMs: 200 } } });
+    bearerEnv: 'VYEN_MCP_ERROR_TOKEN', timeoutMs: 200 } } });
   const manager = new McpManager(config, f.cwd);
   await assert.rejects(manager.connect(registry), error => !error.message.includes('mcp-error-secret'));
   assert.deepEqual(manager.tools, []);

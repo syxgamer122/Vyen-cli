@@ -55,7 +55,7 @@ const existing = tags.find(t => t.name === tag);
 if (existing && existing.sha !== head) throw new Error(`Refusing to move existing tag ${tag}.`);
 const liveHead = (await git('ls-remote', 'origin', 'refs/heads/main')).split(/\s/)[0];
 if (liveHead !== remote) { console.log('Main advanced during packaging; release skipped.'); process.exit(0); }
-if (!existing) await git('tag', '-a', tag, '-m', `Goon CLI ${tag}`, head);
+if (!existing) await git('tag', '-a', tag, '-m', `Vyen CLI ${tag}`, head);
 const refs = changed ? ['HEAD:refs/heads/main', `refs/tags/${tag}`] : [`refs/tags/${tag}`];
 await git('push', '--atomic', 'origin', ...refs);
 
@@ -65,8 +65,8 @@ const releaseResponse = await fetch(`https://api.github.com/repos/${repository}/
 if (releaseResponse.status !== 404 && !releaseResponse.ok) throw new Error(`Cannot inspect existing release: HTTP ${releaseResponse.status}`);
 const release = releaseResponse.ok ? await releaseResponse.json() : null;
 const notes = join(packed.output, 'release-notes.md');
-await writeFile(notes, `Goon CLI ${tag}\n\nIndependent coding harness for Termux and external APIs.\n\nChecks: Node 22.16 and 24 tests, TypeScript and lint; packed install/version smoke test.\n\nInstall or update:\n\n\`\`\`bash\nnpm install -g https://github.com/${repository}/releases/latest/download/goon-cli.tgz --omit=dev\n\`\`\`\n\nAssets include the versioned npm package, a stable goon-cli.tgz alias and SHA-256 checksums. Requires Node >=22.16.0. No paid API or Android-device verification is performed by CI.\n\nSource commit: ${head}\n`);
-if (!release) await command('gh', ['release', 'create', tag, '--repo', repository, '--verify-tag', '--draft', '--title', `Goon CLI ${tag}`, '--notes-file', notes], root);
+await writeFile(notes, `Vyen CLI ${tag}\n\nIndependent coding harness for Termux and external APIs.\n\nChecks: Node 22.16 and 24 tests, TypeScript and lint; packed install/version smoke test.\n\nInstall or update:\n\n\`\`\`bash\nnpm install -g https://github.com/${repository}/releases/latest/download/vyen-cli.tgz --omit=dev\n\`\`\`\n\nAssets include the versioned npm package, a stable vyen-cli.tgz alias and SHA-256 checksums. Requires Node >=22.16.0. No paid API or Android-device verification is performed by CI.\n\nSource commit: ${head}\n`);
+if (!release) await command('gh', ['release', 'create', tag, '--repo', repository, '--verify-tag', '--draft', '--title', `Vyen CLI ${tag}`, '--notes-file', notes], root);
 await command('gh', ['release', 'upload', tag, ...packed.files, '--repo', repository, '--clobber'], root);
 await command('gh', ['release', 'edit', tag, '--repo', repository, '--draft=false', '--latest'], root);
 console.log(`Published https://github.com/${repository}/releases/tag/${tag}`);

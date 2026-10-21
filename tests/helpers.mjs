@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
 export async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'goon-test-'));
+  const root = await mkdtemp(join(tmpdir(), 'vyen-test-'));
   const cwd = join(root, 'workspace');
   await mkdir(cwd);
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -44,8 +44,8 @@ export function sse(response, { text = '', calls = [], reasoning = '', textChunk
   response.end('data: [DONE]\n\n');
 }
 export function cli(f, url, args = [], options = {}) {
-  const child = spawn(process.execPath, [resolve(process.env.GOON_TEST_BIN ?? 'bin/goon.mjs'), '--cwd', f.cwd, '--base-url', url, '--model', 'test-model', ...args], {
-    env: { ...process.env, XDG_CONFIG_HOME: f.config, XDG_DATA_HOME: f.data, GOON_API_KEY: 'test-secret-never-echo', ...options.env },
+  const child = spawn(process.execPath, [resolve(process.env.VYEN_TEST_BIN ?? process.env.GOON_TEST_BIN ?? 'bin/vyen.mjs'), '--cwd', f.cwd, '--base-url', url, '--model', 'test-model', ...args], {
+    env: { ...process.env, XDG_CONFIG_HOME: f.config, XDG_DATA_HOME: f.data, VYEN_API_KEY: 'test-secret-never-echo', ...options.env },
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
   });
   const origKill = child.kill.bind(child);

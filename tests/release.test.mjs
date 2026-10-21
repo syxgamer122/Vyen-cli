@@ -22,8 +22,8 @@ test('reruns reuse the same tagged commit and explicit higher versions are respe
 });
 
 test('version synchronization preserves dependencies and rejects a divergent lockfile', () => {
-  const manifest = { name: 'goon-cli', version: '0.1.0', dependencies: { ai: '6.0.193' } };
-  const lock = { version: '0.1.0', packages: { '': { version: '0.1.0', name: 'goon-cli' }, 'node_modules/ai': { version: '6.0.193' } } };
+  const manifest = { name: 'vyen-cli', version: '0.1.0', dependencies: { ai: '6.0.193' } };
+  const lock = { version: '0.1.0', packages: { '': { version: '0.1.0', name: 'vyen-cli' }, 'node_modules/ai': { version: '6.0.193' } } };
   const next = setManifestVersion(manifest, lock, '0.1.1');
   assert.equal(next.manifest.version, '0.1.1');
   assert.equal(next.lock.version, '0.1.1');
@@ -39,6 +39,6 @@ test('CLI version comes from the installed package manifest', async () => {
   const lock = JSON.parse(await readFile('npm-shrinkwrap.json', 'utf8'));
   assert.equal(lock.version, manifest.version, 'npm-shrinkwrap.json version must match package.json');
   assert.equal(lock.packages?.['']?.version, manifest.version, 'npm-shrinkwrap.json root package version must match package.json');
-  const { stdout } = await promisify(execFile)(process.execPath, ['bin/goon.mjs', '--version']);
+  const { stdout } = await promisify(execFile)(process.execPath, ['bin/vyen.mjs', '--version']);
   assert.equal(stdout.trim(), `vyen cli ${manifest.version}`);
 });

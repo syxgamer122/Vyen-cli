@@ -4,5 +4,5 @@ release-out/
 *.tgz
 !release/*.tgz
 .env
-.goon/
+.vyen/
 .refs/

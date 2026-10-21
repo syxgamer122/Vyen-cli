@@ -1,11 +1,11 @@
 {
-  "name": "goon-cli",
+  "name": "vyen-cli",
   "version": "0.2.23",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
-      "name": "goon-cli",
+      "name": "vyen-cli",
       "version": "0.2.23",
       "license": "MIT",
       "dependencies": {
@@ -18,7 +18,7 @@
         "zod": "4.6.5"
       },
       "bin": {
-        "goon": "bin/goon.mjs"
+        "vyen": "bin/vyen.mjs"
       },
       "devDependencies": {
         "@types/node": "^22.0.0",

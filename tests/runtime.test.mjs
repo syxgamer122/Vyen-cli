@@ -313,7 +313,7 @@ test('Plan Mode blocks mutating tools until exit_plan_mode is approved, @file me
     model: 'test-model',
     baseUrl: p.url,
     apiKey: 'fake',
-    keyEnv: 'GOON_API_KEY',
+    keyEnv: 'VYEN_API_KEY',
     contextWindow: 8192,
     maxOutputTokens: 512,
     timeoutMs: 5000,
@@ -490,7 +490,7 @@ test('AI Gateway ultra-compatibility: session affinity headers, 4 gateway models
     baseUrl: p.url,
     model: 'space-bunny',
     effort: 'max',
-    keyEnv: 'GOON_API_KEY',
+    keyEnv: 'VYEN_API_KEY',
     apiKey: 'test-secret-never-echo',
     cwd: f.cwd,
     contextWindow: 1048576,
@@ -543,7 +543,7 @@ test('Harness retries transient HTTP 500 API errors up to 3 times and SessionSto
     provider: 'openai-compatible',
     baseUrl: p.url,
     model: 'test-model',
-    keyEnv: 'GOON_API_KEY',
+    keyEnv: 'VYEN_API_KEY',
     apiKey: 'test-secret-never-echo',
     cwd: f.cwd,
     contextWindow: 32000,
@@ -571,7 +571,7 @@ test('Harness retries transient HTTP 500 API errors up to 3 times and SessionSto
   assert.equal(retryEvents[0].maxRetries, 3);
   await s1.close();
 
-  // Create a newer 0-message empty session (simulating starting `goon` before running `/resume` or `goon resume`)
+  // Create a newer 0-message empty session (simulating starting `vyen` before running `/resume` or `vyen resume`)
   await new Promise(resolve => setTimeout(resolve, 15));
   const emptySession = await SessionStore.open(sessionsRoot, config);
   assert.equal(emptySession.session.messages.length, 0);

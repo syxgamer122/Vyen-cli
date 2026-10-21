@@ -62,9 +62,9 @@ test('real TUI pseudo-terminal handles status, resize, approval and clean exit',
   const p = await provider(t, (_, response, n) => n === 1 ? sse(response, {
     calls: [{ id: 'ui-write', name: 'write_file', input: { path: 'ui.txt', content: 'approved from TUI' } }],
   }) : sse(response, { text: 'Created by TUI.' }));
-  const child = spawn('python3', [resolve('tests/fixtures/terminal.py'), process.execPath, resolve(process.env.GOON_TEST_BIN ?? 'bin/goon.mjs'),
+  const child = spawn('python3', [resolve('tests/fixtures/terminal.py'), process.execPath, resolve(process.env.VYEN_TEST_BIN ?? process.env.GOON_TEST_BIN ?? 'bin/vyen.mjs'),
     '--cwd', f.cwd, '--model', 'test-model', '--base-url', p.url], {
-    env: { ...process.env, GOON_API_KEY: 'tui-test-key', XDG_CONFIG_HOME: f.config, XDG_DATA_HOME: f.data },
+    env: { ...process.env, VYEN_API_KEY: 'tui-test-key', XDG_CONFIG_HOME: f.config, XDG_DATA_HOME: f.data },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   t.after(() => child.kill('SIGKILL'));
@@ -124,13 +124,13 @@ test('TUI supports slash-command Tab completion, Shift+Tab mode toggle, Alt+. ef
 
   const f = await fixture(t);
   const oldConfigHome = process.env.XDG_CONFIG_HOME;
-  const oldKey = process.env.GOON_API_KEY;
+  const oldKey = process.env.VYEN_API_KEY;
   process.env.XDG_CONFIG_HOME = f.config;
-  delete process.env.GOON_API_KEY;
+  delete process.env.VYEN_API_KEY;
   t.after(() => {
     if (oldConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = oldConfigHome;
-    if (oldKey !== undefined) process.env.GOON_API_KEY = oldKey;
+    if (oldKey !== undefined) process.env.VYEN_API_KEY = oldKey;
   });
 
   // Step 1: provider=4 (OpenRouter), Step 2: URL, Step 3: API Key, Step 4: pick discovered model #1, Step 5: effort=xhigh
@@ -520,7 +520,7 @@ test('Windows nul device bug prevention: sanitizeBashCommand, WorkspaceFiles rej
     assert.match(toWinExtendedPath('D:\\testcli\\nul'), /^\\\\\?\\D:\\testcli\\nul$/i);
   }
 
-  const dir = await mkdtemp(join(tmpdir(), 'goon-nul-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'vyen-nul-test-'));
   try {
     const files = new WorkspaceFiles(dir);
     await assert.rejects(() => files.write('nul', 'bad'), /Windows reserved device name/);
@@ -737,7 +737,7 @@ test('redesign: formatTokenCount and readGitBranch agree with independent oracle
   const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  const root = await mkdtemp(join(tmpdir(), 'goon-branch-'));
+  const root = await mkdtemp(join(tmpdir(), 'vyen-branch-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   // Normal repo, nested cwd.
   await mkdir(join(root, 'repo', '.git'), { recursive: true });
@@ -816,13 +816,13 @@ test('setup: cancelling the wizard mid-way persists neither the API key nor the 
   const { runSetupWizard } = await import('../dist/index.js');
   const f = await fixture(t);
   const oldConfigHome = process.env.XDG_CONFIG_HOME;
-  const oldKey = process.env.GOON_API_KEY;
+  const oldKey = process.env.VYEN_API_KEY;
   process.env.XDG_CONFIG_HOME = f.config;
-  delete process.env.GOON_API_KEY;
+  delete process.env.VYEN_API_KEY;
   t.after(() => {
     if (oldConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = oldConfigHome;
-    if (oldKey !== undefined) process.env.GOON_API_KEY = oldKey;
+    if (oldKey !== undefined) process.env.VYEN_API_KEY = oldKey;
   });
 
   const answers = ['4', 'https://openrouter.ai/api/v1', 'sk-cancelled-secret-key'];

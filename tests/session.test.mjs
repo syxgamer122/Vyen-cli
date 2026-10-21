@@ -19,7 +19,7 @@ test('an all-digit 8-char session ID prefix resumes by prefix instead of being t
   const byDigits = await SessionStore.open(root, input, '12345678');
   assert.equal(byDigits.session.id, digitId);
   await byDigits.close();
-  // Small numbers keep their list-index meaning (goon resume 1).
+  // Small numbers keep their list-index meaning (vyen resume 1).
   const byIndex = await SessionStore.open(root, input, '1');
   assert.ok([digitId, seed.session.id].includes(byIndex.session.id));
   await byIndex.close();
