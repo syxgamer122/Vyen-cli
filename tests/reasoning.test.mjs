@@ -58,7 +58,7 @@ test('real CLI hides split inline/native reasoning and preserves original provid
   assert.equal(events.at(-1).text, 'Inspecting.Done.');
   assert.equal(events.filter(e => e.type === 'reasoning').length, 0);
   const id = events[0].id;
-  const stored = await readFile(join(f.data, 'goon/sessions', `${id}.json`), 'utf8');
+  const stored = await readFile(join(f.data, 'vyen/sessions', `${id}.json`), 'utf8');
   assert(stored.includes(raw)); assert(stored.includes('native-private'));
   const resumed = await cli(f, p.url, ['--json', '--resume', id, '-p', 'continue']).done;
   assert.equal(resumed.code, 0, resumed.stderr + resumed.stdout);
@@ -146,7 +146,7 @@ test('Anthropic thinking signatures and raw inline text survive the next tool re
   assert(!result.stdout.includes('private')); assert(!result.stdout.includes('signature-fixture'));
   const events = result.stdout.trim().split('\n').map(JSON.parse);
   assert.equal(events.at(-1).text, 'Inspecting.Done.');
-  const transcript = await readFile(join(f.data, 'goon/sessions', `${events[0].id}.json`), 'utf8');
+  const transcript = await readFile(join(f.data, 'vyen/sessions', `${events[0].id}.json`), 'utf8');
   assert(transcript.includes('signature-fixture-unchanged')); assert(transcript.includes(raw));
 });
 
@@ -180,7 +180,7 @@ test('thinking mode: real reasoning is replayed verbatim and reasoning-less tool
   const run = await cli(f, p.url, ['--json', '-p', 'read both files']).done;
   assert.equal(run.code, 0, run.stderr + run.stdout);
   assert.equal(p.requests.length, 3);
-  const stored = await readFile(join(f.data, 'goon/sessions', `${JSON.parse(run.stdout.split('\n')[0]).id}.json`), 'utf8');
+  const stored = await readFile(join(f.data, 'vyen/sessions', `${JSON.parse(run.stdout.split('\n')[0]).id}.json`), 'utf8');
   assert(!stored.includes('reasoning_content'), 'the empty marker is request-only; stored history stays the provider original');
 });
 

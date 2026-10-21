@@ -74,7 +74,7 @@ test('real TUI pseudo-terminal handles status, resize, approval and clean exit',
   assert.equal(result, 0, stderr + stdout);
   assert.deepEqual(JSON.parse(stdout), { code: 0, entered: true, restored: true, canonical: true });
   assert.equal(await readFile(join(f.cwd, 'ui.txt'), 'utf8'), 'approved from TUI');
-  assert(!(await readdir(join(f.data, 'goon/sessions'))).some(n => n.endsWith('.lock')));
+  assert(!(await readdir(join(f.data, 'vyen/sessions'))).some(n => n.endsWith('.lock')));
 });
 
 test('TUI separates opt-in reasoning from answers and consumes compact child progress', async t => {
@@ -151,7 +151,7 @@ test('TUI supports slash-command Tab completion, Shift+Tab mode toggle, Alt+. ef
   assert.equal(updated.effort, 'xhigh');
   assert.match(outputLog, /Setup Saved/);
 
-  const rawConfig = await readFile(join(f.config, 'goon', 'config.json'), 'utf8');
+  const rawConfig = await readFile(join(f.config, 'vyen', 'config.json'), 'utf8');
   assert(!rawConfig.includes('sk-or-wizard-secret-key'));
   const runtime = await resolveRuntime(updated, f.cwd);
   assert.equal(runtime.apiKey, 'sk-or-wizard-secret-key');

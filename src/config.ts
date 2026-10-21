@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { migrateLegacyData } from './migrate.js';
 
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
@@ -12,7 +13,7 @@ export const configSchema = z.object({
   baseUrl: z.string().url().optional(),
   model: z.string().trim().min(1).optional(),
   effort: z.enum(EFFORT_LEVELS).optional(),
-  keyEnv: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).default('GOON_API_KEY'),
+  keyEnv: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).default('VYEN_API_KEY'),
   contextWindow: z.number().int().min(8192).max(2_000_000).default(128_000),
   maxOutputTokens: z.number().int().min(128).max(131_072).default(16_384),
   timeoutMs: z.number().int().min(1000).max(1_800_000).default(300_000),
@@ -24,10 +25,12 @@ export const configSchema = z.object({
 }).strict();
 export type Config = z.infer<typeof configSchema>;
 export interface RuntimeConfig extends Config { cwd: string; apiKey: string; dataDir: string; baseUrl: string; model: string }
-export const configDir = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'goon');
+export const configDir = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'vyen');
 export const configPath = () => join(configDir(), 'config.json');
 export const credentialsPath = () => join(configDir(), 'credentials.json');
-export const dataDir = () => join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'goon');
+export const dataDir = () => join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'vyen');
+export const legacyConfigDir = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'goon');
+export const legacyDataDir = () => join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'goon');
 
 const credentialsSchema = z.record(z.string(), z.string());
 
@@ -52,9 +55,17 @@ export async function saveCredential(keyEnv: string, apiKey: string): Promise<vo
 export async function resolveApiKey(config: Config): Promise<string | undefined> {
   const fromEnv = process.env[config.keyEnv]?.trim();
   if (fromEnv) return fromEnv;
+  // A goon installation kept its key in GOON_API_KEY. Honour it so an
+  // existing shell profile still works after the rename.
+  if (config.keyEnv !== 'GOON_API_KEY') {
+    const legacy = process.env.GOON_API_KEY?.trim();
+    if (legacy) return legacy;
+  }
   const stored = await loadCredentials();
   const fromStore = stored[config.keyEnv]?.trim();
-  return fromStore || undefined;
+  if (fromStore) return fromStore;
+  if (config.keyEnv !== 'GOON_API_KEY') return stored['GOON_API_KEY']?.trim() || undefined;
+  return undefined;
 }
 
 export const DEFAULT_GATEWAY_URL = 'https://api.yuristore.xyz/v1';
@@ -77,19 +88,40 @@ export function normalizeGatewayUrl(rawUrl: string): string {
 }
 
 export async function loadConfig(overrides: Record<string, unknown> = {}): Promise<Config> {
+  // Migrate first: the legacy config.json has to exist at the new path before
+  // it is read below.
+  await migrateLegacyData({
+    legacyConfigDir: legacyConfigDir(),
+    legacyDataDir: legacyDataDir(),
+    configDir: configDir(),
+    dataDir: dataDir(),
+  });
   let stored: unknown = {};
   try { stored = JSON.parse(await readFile(configPath(), 'utf8')); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   const validated = configSchema.parse(stored);
   const env: Record<string, unknown> = {};
-  for (const [key, name] of Object.entries({
-    provider: 'GOON_PROVIDER', baseUrl: 'GOON_BASE_URL', model: 'GOON_MODEL', effort: 'GOON_EFFORT',
-    keyEnv: 'GOON_KEY_ENV', contextWindow: 'GOON_CONTEXT_WINDOW', maxOutputTokens: 'GOON_MAX_OUTPUT_TOKENS',
-    timeoutMs: 'GOON_TIMEOUT_MS', runTokenBudget: 'GOON_RUN_TOKEN_BUDGET',
-    inlineReasoning: 'GOON_INLINE_REASONING',
-  })) {
-    if (process.env[name] !== undefined) env[key] = ['contextWindow', 'maxOutputTokens', 'timeoutMs', 'runTokenBudget'].includes(key)
-      ? Number(process.env[name]) : process.env[name];
+  // VYEN_* wins; the older GOON_* names stay honoured so an existing shell
+  // profile keeps working after the rename.
+  const ENV_SOURCES: Record<string, string[]> = {
+    provider: ['VYEN_PROVIDER', 'GOON_PROVIDER'],
+    baseUrl: ['VYEN_BASE_URL', 'GOON_BASE_URL'],
+    model: ['VYEN_MODEL', 'GOON_MODEL'],
+    effort: ['VYEN_EFFORT', 'GOON_EFFORT'],
+    keyEnv: ['VYEN_KEY_ENV', 'GOON_KEY_ENV'],
+    contextWindow: ['VYEN_CONTEXT_WINDOW', 'GOON_CONTEXT_WINDOW'],
+    maxOutputTokens: ['VYEN_MAX_OUTPUT_TOKENS', 'GOON_MAX_OUTPUT_TOKENS'],
+    timeoutMs: ['VYEN_TIMEOUT_MS', 'GOON_TIMEOUT_MS'],
+    runTokenBudget: ['VYEN_RUN_TOKEN_BUDGET', 'GOON_RUN_TOKEN_BUDGET'],
+    inlineReasoning: ['VYEN_INLINE_REASONING', 'GOON_INLINE_REASONING'],
+  };
+  const NUMERIC_KEYS = ['contextWindow', 'maxOutputTokens', 'timeoutMs', 'runTokenBudget'];
+  for (const [key, names] of Object.entries(ENV_SOURCES)) {
+    for (const name of names) {
+      if (process.env[name] === undefined) continue;
+      env[key] = NUMERIC_KEYS.includes(key) ? Number(process.env[name]) : process.env[name];
+      break;
+    }
   }
   const merged = { ...validated, ...env, ...overrides };
   if (env.runTokenBudget === undefined && overrides.runTokenBudget === undefined) {

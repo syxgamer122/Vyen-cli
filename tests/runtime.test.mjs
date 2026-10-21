@@ -30,10 +30,10 @@ test('real CLI streams tool arguments, writes, resumes and preserves reasoning t
   assert.equal(second.code, 0, second.stderr);
   assert.equal(await readFile(join(f.cwd, 'hello.txt'), 'utf8'), 'goodbye\n');
   assert.equal(p.requests.length, 5);
-  const session = JSON.parse(await readFile(join(f.data, 'goon/sessions', `${events[0].id}.json`), 'utf8'));
+  const session = JSON.parse(await readFile(join(f.data, 'vyen/sessions', `${events[0].id}.json`), 'utf8'));
   assert.equal(session.tokens, 550);
   assert(!JSON.stringify(session).includes('test-secret-never-echo'));
-  assert.deepEqual((await readdir(join(f.data, 'goon/sessions'))).filter(n => n.endsWith('.lock')), []);
+  assert.deepEqual((await readdir(join(f.data, 'vyen/sessions'))).filter(n => n.endsWith('.lock')), []);
 });
 
 test('noninteractive mutations fail closed and end the run', async t => {
@@ -82,7 +82,7 @@ test('SIGINT cancels HTTP and releases the session lock', async t => {
   running.child.kill('SIGINT');
   const result = await running.done;
   assert.equal(result.code, 130, result.stderr + result.stdout);
-  assert.deepEqual((await readdir(join(f.data, 'goon/sessions'))).filter(n => n.endsWith('.lock')), []);
+  assert.deepEqual((await readdir(join(f.data, 'vyen/sessions'))).filter(n => n.endsWith('.lock')), []);
 });
 
 test('incomplete response never executes a partially streamed tool', async t => {
@@ -139,7 +139,7 @@ test('init saves only configuration, doctor probes /models without calling compl
   const p = await provider(t, () => { throw new Error('Doctor must not call chat completions'); });
   const init = await cli(f, p.url, ['init']).done;
   assert.equal(init.code, 0, init.stderr);
-  const saved = await readFile(join(f.config, 'goon/config.json'), 'utf8');
+  const saved = await readFile(join(f.config, 'vyen/config.json'), 'utf8');
   assert(!saved.includes('test-secret-never-echo'));
   assert.equal(JSON.parse(saved).model, 'test-model');
   const doctor = await cli(f, p.url, ['doctor']).done;
@@ -591,8 +591,8 @@ test('Harness retries transient HTTP 500 API errors up to 3 times and SessionSto
   const oldCfgHome = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = f.config;
   try {
-    await mkdir(join(f.config, 'goon'), { recursive: true });
-    await writeFile(join(f.config, 'goon', 'config.json'), JSON.stringify({ model: 'gpt-5.4', runTokenBudget: 120000 }), 'utf8');
+    await mkdir(join(f.config, 'vyen'), { recursive: true });
+    await writeFile(join(f.config, 'vyen', 'config.json'), JSON.stringify({ model: 'gpt-5.4', runTokenBudget: 120000 }), 'utf8');
     const migratedCfg = await loadConfig();
     assert.equal(migratedCfg.runTokenBudget, 0, 'Legacy 120000 runTokenBudget should migrate to 0 (unlimited)');
   } finally {

@@ -40,7 +40,7 @@ test('real CLI delegates isolated research contexts, caps concurrency at two and
   assert.equal(maximum, 2); assert.equal(children, 3);
   const events = result.stdout.trim().split('\n').map(JSON.parse), parent = events[0].id;
   assert.equal(events.filter(e => e.type === 'subagent' && e.state === 'done').length, 3);
-  const names = await readdir(join(f.data, 'goon/subagents', parent));
+  const names = await readdir(join(f.data, 'vyen/subagents', parent));
   assert.equal(names.filter(n => n.endsWith('.json')).length, 3);
   assert(!names.some(n => n.endsWith('.lock')));
   assert.equal(events.at(-1).text, 'Reports combined.');
@@ -110,9 +110,9 @@ test('SIGINT cancels and drains active subagents and releases all locks', async 
   const result = await running.done;
   assert.equal(result.code, 130, result.stdout + result.stderr);
   const parent = JSON.parse(result.stdout.split('\n')[0]).id;
-  assert(!(await readdir(join(f.data, 'goon/subagents', parent))).some(n => n.endsWith('.lock')));
-  assert(!(await readdir(join(f.data, 'goon/sessions'))).some(n => n.endsWith('.lock')));
-  const session = JSON.parse(await readFile(join(f.data, 'goon/sessions', `${parent}.json`), 'utf8'));
+  assert(!(await readdir(join(f.data, 'vyen/subagents', parent))).some(n => n.endsWith('.lock')));
+  assert(!(await readdir(join(f.data, 'vyen/sessions'))).some(n => n.endsWith('.lock')));
+  const session = JSON.parse(await readFile(join(f.data, 'vyen/sessions', `${parent}.json`), 'utf8'));
   assert.equal(session.messages.at(-1).content[0].toolCallId, 'delegate1');
 });
 
@@ -157,7 +157,7 @@ test('JSON child progress is independent of text token count and carries task on
     assert(tasks.includes(own[0].task));
     assert(own.slice(1).every(e => !('task' in e)));
     assert.deepEqual(own.filter(e => e.state === 'progress').map(e => e.event.type), ['usage', 'tool', 'tool', 'usage']);
-    const root = join(f.data, 'goon/subagents', events[0].id);
+    const root = join(f.data, 'vyen/subagents', events[0].id);
     const transcript = await readFile(join(root, `${id}.json`), 'utf8');
     assert(transcript.includes('PREAMBLE')); assert(transcript.includes('child private'));
   }

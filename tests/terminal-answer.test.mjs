@@ -22,7 +22,7 @@ for (const [name, reply] of [
     const f = await fixture(t), p = await provider(t, (_, response) => sse(response, reply));
     const events = failedAnswer(await cli(f, p.url, ['--json', '-p', 'answer']).done);
     assert.equal(p.requests.length, 1, 'no automatic paid retries for missing answers');
-    const root = join(f.data, 'goon/sessions');
+    const root = join(f.data, 'vyen/sessions');
     assert(!(await readdir(root)).some(n => n.endsWith('.lock')));
     const stored = JSON.parse(await readFile(join(root, `${events[0].id}.json`), 'utf8'));
     assert.equal(stored.tokens, 110, 'usage survives a failed terminal answer');
@@ -53,7 +53,7 @@ test('earlier tool narration is not a terminal answer; completed mutation is pre
   const events = failedAnswer(first), id = events[0].id;
   assert(events.some(e => e.type === 'text' && e.text.includes('I ')));
   assert.equal(await readFile(join(f.cwd, 'once.txt'), 'utf8'), 'done once');
-  const root = join(f.data, 'goon/sessions');
+  const root = join(f.data, 'vyen/sessions');
   const session = JSON.parse(await readFile(join(root, `${id}.json`), 'utf8'));
   assert(session.messages.some(m => m.role === 'tool' && m.content.some(p => p.toolCallId === 'write-once')));
   const resumed = await cli(f, p.url, ['--json', '--resume', id, '-p', 'report what happened']).done;
@@ -106,7 +106,7 @@ test('Anthropic redacted thinking without text deltas fails while preserving SDK
   const events = failedAnswer(result);
   assert(!events.some(e => e.type === 'reasoning'));
   assert(!result.stdout.includes('redacted-private-fixture'));
-  const raw = await readFile(join(f.data, 'goon/sessions', `${events[0].id}.json`), 'utf8');
+  const raw = await readFile(join(f.data, 'vyen/sessions', `${events[0].id}.json`), 'utf8');
   assert(raw.includes('redacted-private-fixture'));
 });
 

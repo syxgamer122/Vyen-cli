@@ -82,8 +82,8 @@ test('MCP Streamable HTTP uses bearer env credentials and executes real protocol
 
 test('real CLI dispatches MCP tools and startup failure releases session locks', async t => {
   const f = await fixture(t);
-  await mkdir(join(f.config, 'goon'), { recursive: true });
-  const path = join(f.config, 'goon/mcp.json');
+  await mkdir(join(f.config, 'vyen'), { recursive: true });
+  const path = join(f.config, 'vyen/mcp.json');
   await writeFile(path, JSON.stringify(stdio({ readOnlyTools: ['echo'] })));
   const echo = mcpToolName('local', 'echo');
   const p = await provider(t, (body, response, n) => {
@@ -97,7 +97,7 @@ test('real CLI dispatches MCP tools and startup failure releases session locks',
   await writeFile(path, JSON.stringify({ servers: { broken: { transport: 'stdio', command: 'goon-nonexistent-binary-123' } } }));
   const broken = await cli(f, p.url, ['-p', 'do nothing']).done;
   assert.equal(broken.code, 1);
-  assert.deepEqual((await readdir(join(f.data, 'goon/sessions'))).filter(n => n.endsWith('.lock')), []);
+  assert.deepEqual((await readdir(join(f.data, 'vyen/sessions'))).filter(n => n.endsWith('.lock')), []);
   const bypass = await cli(f, p.url, ['--no-mcp', '-p', 'bypass broken config']).done;
   assert.equal(bypass.code, 0, bypass.stderr);
 });
@@ -129,8 +129,8 @@ test('MCP request timeout leaves no registered tools and redacts configured cred
 
 test('SIGTERM during MCP initialization preserves exit status, kills the server and unlocks the session', async t => {
   const f = await fixture(t);
-  await mkdir(join(f.config, 'goon'), { recursive: true });
-  await writeFile(join(f.config, 'goon/mcp.json'), JSON.stringify({ servers: { waiting: {
+  await mkdir(join(f.config, 'vyen'), { recursive: true });
+  await writeFile(join(f.config, 'vyen/mcp.json'), JSON.stringify({ servers: { waiting: {
     transport: 'stdio', command: process.execPath, args: ['-e', "require('node:fs').writeFileSync('mcp-ready', String(process.pid)); process.stdin.resume()"],
   } } }));
   const running = cli(f, 'http://127.0.0.1:1/v1', ['-p', 'never contact model']);
@@ -149,7 +149,7 @@ test('SIGTERM during MCP initialization preserves exit status, kills the server 
   } else {
     assert.equal(result.code, 143, result.stderr);
     assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
-    assert(!(await readdir(join(f.data, 'goon/sessions'))).some(n => n.endsWith('.lock')));
+    assert(!(await readdir(join(f.data, 'vyen/sessions'))).some(n => n.endsWith('.lock')));
   }
 });
 
