@@ -4,6 +4,8 @@ export { ToolRegistry, formatTodos, normalizeToolName, normalizeToolInput, sanit
 export type { ToolDefinition, ToolCall, Approve, Approval, RunBudget } from './tools.js';
 export { SessionStore, sameWorkspace, repairInterrupted, fileBackupSchema, turnCheckpointSchema, todoItemSchema } from './session.js';
 export type { Session, SessionSummary, FileBackup, TurnCheckpoint, TodoItem } from './session.js';
+export { migrateLegacyData, MIGRATION_MARKER } from './migrate.js';
+export type { MigrationReport } from './migrate.js';
 export { createModel, buildProviderOptions, discoverModels, KNOWN_GATEWAY_MODELS, resolveModelCapabilities, formatModelBadge } from './provider.js';
 export type { DiscoveredModel, ProviderOptionsMap } from './provider.js';
 export { loadConfig, resolveRuntime, resolveApiKey, saveCredential, credentialsPath, EFFORT_LEVELS, DEFAULT_GATEWAY_URL, normalizeGatewayUrl } from './config.js';
