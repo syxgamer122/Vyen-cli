@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { migrateLegacyData, MIGRATION_MARKER } from '../dist/migrate.js';
 import { loadConfig, resolveApiKey } from '../dist/config.js';
+import { resolveExecutable } from '../dist/process.js';
 
 const dirs = async t => {
   const root = await mkdtemp(join(tmpdir(), 'vyen-migrate-test-'));
@@ -104,6 +105,13 @@ test('the vyen config directory is used and the legacy goon directory is migrate
     if (previousKey === undefined) delete process.env.VYEN_API_KEY; else process.env.VYEN_API_KEY = previousKey;
   });
 
+  // The CLI migrates once at startup; loadConfig itself only reads.
+  await migrateLegacyData({
+    legacyConfigDir: join(root, 'config', 'goon'),
+    legacyDataDir: join(root, 'data', 'goon'),
+    configDir: fresh,
+    dataDir: join(root, 'data', 'vyen'),
+  });
   const config = await loadConfig();
   assert.equal(config.model, 'legacy-model');
   assert.equal(config.keyEnv, 'GOON_API_KEY');
@@ -139,4 +147,91 @@ test('an API key exported as GOON_API_KEY still resolves after the rename', asyn
   const config = await loadConfig();
   assert.equal(config.keyEnv, 'VYEN_API_KEY');
   assert.equal(await resolveApiKey(config), 'legacy-secret');
+});
+
+// --- regressions for the final review ---
+
+test('migration copies the subagents tree so prior child transcripts stay visible', async t => {
+  const d = await dirs(t);
+  await mkdir(join(d.legacyDataDir, 'subagents', 'parent-1'), { recursive: true });
+  await writeFile(join(d.legacyDataDir, 'subagents', 'parent-1', 'child.json'), '{"id":"child"}');
+  const report = await migrateLegacyData(d);
+  assert.equal(report.migrated, true);
+  assert.equal(await readFile(join(d.dataDir, 'subagents', 'parent-1', 'child.json'), 'utf8'), '{"id":"child"}');
+});
+
+test('an interrupted directory copy resumes because files are merged one by one', async t => {
+  const d = await dirs(t);
+  // The previous run copied one session file and died before the rest.
+  await mkdir(join(d.dataDir, 'sessions'), { recursive: true });
+  await writeFile(join(d.dataDir, 'sessions', 'a.json'), '{"copied":true}');
+  await writeFile(join(d.legacyDataDir, 'sessions', 'b.json'), '{"b":1}');
+  const report = await migrateLegacyData(d);
+  assert.equal(report.migrated, true);
+  assert.equal(await readFile(join(d.dataDir, 'sessions', 'a.json'), 'utf8'), '{"copied":true}');
+  assert.equal(await readFile(join(d.dataDir, 'sessions', 'b.json'), 'utf8'), '{"b":1}');
+});
+
+test('two simultaneous first launches both succeed and leave a valid tree', async t => {
+  const d = await dirs(t);
+  const [first, second] = await Promise.all([migrateLegacyData(d), migrateLegacyData(d)]);
+  assert.equal(first.error, undefined);
+  assert.equal(second.error, undefined);
+  assert.equal(await readFile(join(d.configDir, 'config.json'), 'utf8'), '{"model":"legacy-model"}');
+  assert.equal(await readFile(join(d.dataDir, 'sessions', 'a.json'), 'utf8'), '{}');
+});
+
+test('a migrated goon keyEnv still resolves a vyen API key from the environment', async t => {
+  const root = await isolate(t, 'vyen-keyenv-test-');
+  const legacy = join(root, 'config', 'goon');
+  await mkdir(legacy, { recursive: true });
+  await writeFile(join(legacy, 'config.json'), JSON.stringify({ model: 'm', keyEnv: 'GOON_API_KEY' }));
+  const previous = { vyen: process.env.VYEN_API_KEY, legacy: process.env.GOON_API_KEY };
+  process.env.VYEN_API_KEY = 'vyen-secret';
+  delete process.env.GOON_API_KEY;
+  t.after(() => {
+    if (previous.vyen === undefined) delete process.env.VYEN_API_KEY; else process.env.VYEN_API_KEY = previous.vyen;
+    if (previous.legacy === undefined) delete process.env.GOON_API_KEY; else process.env.GOON_API_KEY = previous.legacy;
+  });
+
+  await migrateLegacyData({
+    legacyConfigDir: join(root, 'config', 'goon'),
+    legacyDataDir: join(root, 'data', 'goon'),
+    configDir: join(root, 'config', 'vyen'),
+    dataDir: join(root, 'data', 'vyen'),
+  });
+  const config = await loadConfig();
+  assert.equal(config.keyEnv, 'GOON_API_KEY');
+  assert.equal(await resolveApiKey(config), 'vyen-secret');
+});
+
+test('the vyen key wins over a stale legacy key in the environment', async t => {
+  const root = await isolate(t, 'vyen-key-priority-test-');
+  const previous = { vyen: process.env.VYEN_API_KEY, legacy: process.env.GOON_API_KEY };
+  delete process.env.VYEN_API_KEY;
+  process.env.GOON_API_KEY = 'stale-legacy-secret';
+  t.after(() => {
+    if (previous.vyen === undefined) delete process.env.VYEN_API_KEY; else process.env.VYEN_API_KEY = previous.vyen;
+    if (previous.legacy === undefined) delete process.env.GOON_API_KEY; else process.env.GOON_API_KEY = previous.legacy;
+  });
+
+  const config = await loadConfig();
+  await mkdir(join(root, 'config', 'vyen'), { recursive: true });
+  await writeFile(join(root, 'config', 'vyen', 'credentials.json'), JSON.stringify({ VYEN_API_KEY: 'stored-secret' }));
+  assert.equal(await resolveApiKey(config), 'stored-secret');
+});
+
+test('resolveExecutable falls back to GOON_BASH when VYEN_BASH is unset', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'vyen-bash-test-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const fake = join(root, 'bash.exe');
+  await writeFile(fake, '');
+  const previous = { vyen: process.env.VYEN_BASH, legacy: process.env.GOON_BASH };
+  delete process.env.VYEN_BASH;
+  process.env.GOON_BASH = fake;
+  t.after(() => {
+    if (previous.vyen === undefined) delete process.env.VYEN_BASH; else process.env.VYEN_BASH = previous.vyen;
+    if (previous.legacy === undefined) delete process.env.GOON_BASH; else process.env.GOON_BASH = previous.legacy;
+  });
+  assert.equal(resolveExecutable('bash'), fake);
 });

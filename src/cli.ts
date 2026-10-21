@@ -10,6 +10,9 @@ import {
   type EffortLevel,
   configPath,
   dataDir,
+  legacyConfigDir,
+  legacyDataDir,
+  configDir,
   loadConfig,
   normalizeGatewayUrl,
   resolveApiKey,
@@ -300,6 +303,20 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       if (typeof value === 'string') overrides[key] = ['contextWindow', 'maxOutputTokens', 'runTokenBudget', 'timeoutMs'].includes(key) ? Number(value) : value;
     }
     if (values['show-reasoning'] !== undefined) overrides.showReasoning = values['show-reasoning'];
+    // A legacy goon installation is migrated once, here, so that reading the
+    // configuration stays a pure read for everyone else.
+    const { migrateLegacyData } = await import('./migrate.js');
+    const migration = await migrateLegacyData({
+      legacyConfigDir: legacyConfigDir(),
+      legacyDataDir: legacyDataDir(),
+      configDir: configDir(),
+      dataDir: dataDir(),
+    });
+    if (migration.error) {
+      stderr.write(`vyen: could not migrate the legacy goon data (${migration.error}). Copy ${legacyConfigDir()} to ${configDir()} manually.\n`);
+    } else if (migration.copied.length) {
+      stderr.write(`vyen: migrated ${migration.copied.length} entries from ${legacyConfigDir()} to ${configDir()}: ${migration.copied.join(', ')}\n`);
+    }
     let config: Config = await loadConfig(overrides);
     if (positionals[0] === 'mcp') {
       const { loadMcpConfig, saveMcpConfig, mcpConfigPath, McpManager, importCodexMcpServers } = await import('./mcp.js');

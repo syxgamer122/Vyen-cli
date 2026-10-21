@@ -3,7 +3,6 @@ import { join, resolve } from 'node:path';
 import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { migrateLegacyData } from './migrate.js';
 
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
@@ -53,19 +52,21 @@ export async function saveCredential(keyEnv: string, apiKey: string): Promise<vo
 }
 
 export async function resolveApiKey(config: Config): Promise<string | undefined> {
-  const fromEnv = process.env[config.keyEnv]?.trim();
-  if (fromEnv) return fromEnv;
-  // A goon installation kept its key in GOON_API_KEY. Honour it so an
-  // existing shell profile still works after the rename.
-  if (config.keyEnv !== 'GOON_API_KEY') {
-    const legacy = process.env.GOON_API_KEY?.trim();
-    if (legacy) return legacy;
-  }
+  // The new name always wins over the legacy one, whether it comes from the
+  // environment or from the credential store: a stale exported GOON_API_KEY
+  // must not shadow the VYEN_API_KEY that `vyen setup` stored. A custom
+  // keyEnv is an explicit choice and is consulted first.
+  const custom = config.keyEnv === 'VYEN_API_KEY' || config.keyEnv === 'GOON_API_KEY' ? undefined : config.keyEnv;
+  const fromEnv = (name: string | undefined) => (name ? process.env[name]?.trim() || undefined : undefined);
+  const fromEnvironment = fromEnv(custom) ?? fromEnv('VYEN_API_KEY');
+  if (fromEnvironment) return fromEnvironment;
   const stored = await loadCredentials();
-  const fromStore = stored[config.keyEnv]?.trim();
-  if (fromStore) return fromStore;
-  if (config.keyEnv !== 'GOON_API_KEY') return stored['GOON_API_KEY']?.trim() || undefined;
-  return undefined;
+  const fromStore = (name: string | undefined) => (name ? stored[name]?.trim() || undefined : undefined);
+  return fromStore(custom)
+    ?? fromStore('VYEN_API_KEY')
+    ?? fromEnv('GOON_API_KEY')
+    ?? fromStore('GOON_API_KEY')
+    ?? undefined;
 }
 
 export const DEFAULT_GATEWAY_URL = 'https://api.yuristore.xyz/v1';
@@ -88,14 +89,6 @@ export function normalizeGatewayUrl(rawUrl: string): string {
 }
 
 export async function loadConfig(overrides: Record<string, unknown> = {}): Promise<Config> {
-  // Migrate first: the legacy config.json has to exist at the new path before
-  // it is read below.
-  await migrateLegacyData({
-    legacyConfigDir: legacyConfigDir(),
-    legacyDataDir: legacyDataDir(),
-    configDir: configDir(),
-    dataDir: dataDir(),
-  });
   let stored: unknown = {};
   try { stored = JSON.parse(await readFile(configPath(), 'utf8')); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }

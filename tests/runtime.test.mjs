@@ -14,6 +14,29 @@ test('the CLI identifies itself as vyen in help, version and error output', asyn
   assert.doesNotMatch(help.stdout, /goon/i);
 });
 
+test('the openai-compatible provider namespace matches its providerOptions key', async () => {
+  const { buildProviderOptions, OPENAI_COMPATIBLE_PROVIDER_NAME } = await import('../dist/provider.js');
+  const options = buildProviderOptions({ provider: 'openai-compatible', effort: 'high' });
+  assert.ok(options);
+  assert.ok(
+    OPENAI_COMPATIBLE_PROVIDER_NAME in options,
+    `providerOptions must carry the key ${OPENAI_COMPATIBLE_PROVIDER_NAME} that the provider reads`,
+  );
+  assert.equal(options[OPENAI_COMPATIBLE_PROVIDER_NAME].reasoningEffort, 'high');
+});
+
+test('a failed data migration is reported to the user instead of silently ignored', async t => {
+  const f = await fixture(t);
+  const { writeFile, mkdir } = await import('node:fs/promises');
+  const { cli } = await import('./helpers.mjs');
+  // A legacy directory exists, but the target path is a file, so creating
+  // the vyen config directory fails.
+  await mkdir(join(f.config, 'goon'), { recursive: true });
+  await writeFile(join(f.config, 'vyen'), 'not a directory');
+  const result = await cli(f, 'http://127.0.0.1:1', ['--json', '-p', 'hi']).done;
+  assert.match(result.stdout + result.stderr, /migrat/i);
+});
+
 test('real CLI streams tool arguments, writes, resumes and preserves reasoning through edit', async t => {
   const f = await fixture(t);
   const p = await provider(t, (body, response, n) => {

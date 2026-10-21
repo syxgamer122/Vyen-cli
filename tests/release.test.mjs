@@ -42,3 +42,20 @@ test('CLI version comes from the installed package manifest', async () => {
   const { stdout } = await promisify(execFile)(process.execPath, ['bin/vyen.mjs', '--version']);
   assert.equal(stdout.trim(), `vyen cli ${manifest.version}`);
 });
+
+test('the published archive lists the shipped docs explicitly so internal plans cannot leak', async () => {
+  const manifest = JSON.parse(await readFile('package.json', 'utf8'));
+  assert.ok(!manifest.files.includes('docs'), 'listing the whole docs directory would ship internal plan documents');
+  for (const doc of ['docs/SPEC.md', 'docs/MCP.md', 'docs/VALIDATION.md', 'docs/REFERENCE_REVIEW.md']) {
+    assert.ok(manifest.files.includes(doc), `${doc} must still be published`);
+  }
+});
+
+test('the README documents an install command that can actually work', async () => {
+  const readme = await readFile('README.md', 'utf8');
+  const manifest = JSON.parse(await readFile('package.json', 'utf8'));
+  if (manifest.private) {
+    assert.doesNotMatch(readme, /npm install -g vyen-cli/, 'a private package cannot be installed from the npm registry');
+    assert.match(readme, /releases\/latest\/download\/vyen-cli\.tgz/);
+  }
+});

@@ -14,6 +14,9 @@ try {
 
 export type ProviderOptionsMap = Record<string, Record<string, string>>;
 
+/** The provider name doubles as the providerOptions namespace it reads. */
+export const OPENAI_COMPATIBLE_PROVIDER_NAME = 'vyen';
+
 export function buildProviderOptions(config: Pick<Config, 'provider' | 'effort'>): ProviderOptionsMap | undefined {
   if (!config.effort) return undefined;
   const effort: EffortLevel = config.effort;
@@ -26,7 +29,7 @@ export function buildProviderOptions(config: Pick<Config, 'provider' | 'effort'>
     return { openai: { reasoningEffort: normalized } };
   }
   return {
-    vyen: { reasoningEffort: effort },
+    [OPENAI_COMPATIBLE_PROVIDER_NAME]: { reasoningEffort: effort },
     openaiCompatible: { reasoningEffort: effort },
   };
 }
@@ -102,7 +105,7 @@ export function createModel(config: RuntimeConfig, sessionId?: string): Language
   };
   if (config.provider === 'anthropic') return createAnthropic(options)(config.model!);
   if (config.provider === 'openai-responses') return createOpenAI(options).responses(config.model!);
-  return createOpenAICompatible({ ...options, name: 'vyen', includeUsage: true }).chatModel(config.model!);
+  return createOpenAICompatible({ ...options, name: OPENAI_COMPATIBLE_PROVIDER_NAME, includeUsage: true }).chatModel(config.model!);
 }
 
 export interface DiscoveredModel {
