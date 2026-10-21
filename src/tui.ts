@@ -12,7 +12,7 @@ const fg = (r: number, g: number, b: number) => `\x1b[38;2;${r};${g};${b}m`;
 const bgc = (r: number, g: number, b: number) => `\x1b[48;2;${r};${g};${b}m`;
 
 /**
- * goon palette (truecolor, tuned for dark terminals). Violet is the brand/assistant voice, sky marks
+ * vyen palette (truecolor, tuned for dark terminals). Violet is the brand/assistant voice, sky marks
  * things you can act on (commands, paths, code), mint/rose/amber carry status, slate carries chrome.
  */
 export const THEME = {
@@ -150,7 +150,7 @@ const SLASH_DESCRIPTIONS: Record<string, string> = {
   '/tools': 'list available tools (built-in + MCP)',
   '/sessions': 'list saved sessions',
   '/clear': 'clear the screen (history is kept)',
-  '/exit': 'quit goon cli',
+  '/exit': 'quit vyen cli',
 };
 
 // oxlint-disable-next-line no-control-regex
@@ -308,7 +308,7 @@ function styleBoxLine(line: string): string {
   const content = m[1];
   const close = m[2] ? `${T.faint}│${R}` : '';
   let styled: string;
-  const title = /^(\s*)(◆ goon)(\s+)(v\S+)(\s+)(.*?)(\s*)$/.exec(content);
+  const title = /^(\s*)(◆ vyen)(\s+)(v\S+)(\s+)(.*?)(\s*)$/.exec(content);
   const field = /^(\s{2,4})([a-z]+)(\s{2,})(.*)$/.exec(content);
   if (title) {
     styled = `${title[1]}${T.brandBold}${title[2]}${R}${title[3]}${T.faint}${title[4]}${R}${title[5]}${T.muted}${title[6]}${R}${title[7]}`;
@@ -420,7 +420,7 @@ export class TerminalUI {
   private cursor = 0;
   private scroll = 0;
   private maxScroll = 0;
-  private label = 'goon> ';
+  private label = 'vyen> ';
   private status = 'Ready';
   private modeLabel = 'ask';
   private effortLabel = 'default';
@@ -987,7 +987,7 @@ export class TerminalUI {
   }
 
   question(
-    label = 'goon> ',
+    label = 'vyen> ',
     signal?: AbortSignal,
     remember = false,
     opts: { escCancels?: boolean; escHint?: string } = {},
@@ -1278,7 +1278,7 @@ export class TerminalUI {
         'Add-Type -AssemblyName System.Drawing;',
         'if ([System.Windows.Forms.Clipboard]::ContainsImage()) {',
         '  $img = [System.Windows.Forms.Clipboard]::GetImage();',
-        "  $p = Join-Path ([System.IO.Path]::GetTempPath()) ('goon-clip-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.png');",
+        "  $p = Join-Path ([System.IO.Path]::GetTempPath()) ('vyen-clip-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.png');",
         '  $img.Save($p, [System.Drawing.Imaging.ImageFormat]::Png);',
         "  Write-Output ('IMG:' + $p);",
         '} elseif ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {',
@@ -1323,7 +1323,7 @@ export class TerminalUI {
    */
   private slashPopup(): { matches: string[]; index: number } {
     const typed = this.input.join('');
-    if (this.label !== 'goon> ' || !typed.startsWith('/') || /\s/.test(typed)) {
+    if (this.label !== 'vyen> ' || !typed.startsWith('/') || /\s/.test(typed)) {
       this.popupFor = '';
       this.popupIndex = 0;
       return { matches: [], index: 0 };
@@ -2308,7 +2308,7 @@ export class TerminalUI {
     const busy = this.status === 'Running' || this.status === 'Connecting MCP' || this.status === 'Compacting';
     const indicator = busy ? SPINNER[this.spinTick % SPINNER.length] : '●';
     const rich = columns >= 48 && rows >= 12;
-    const asking = this.label !== 'goon> ';
+    const asking = this.label !== 'vyen> ';
 
     const titleParts = this.title.split(' · ');
     const modelName = titleParts[0] || this.title;
@@ -2323,7 +2323,7 @@ export class TerminalUI {
     this.lastBodyTotalLines = all.length;
 
     const todoGroup: Seg[] = this.todoLabel ? [[`${GLYPH.todo} `, T.brand], [this.todoLabel, T.muted]] : [];
-    const brandSegs: Seg[] = [[' ', ''], [GLYPH.brand, T.brandBold], [' goon', T.strong]];
+    const brandSegs: Seg[] = [[' ', ''], [GLYPH.brand, T.brandBold], [' vyen', T.strong]];
 
     // Full-screen Transcript overlay (Ctrl+T or /transcript)
     if (this.inTranscriptOverlay) {
@@ -2358,7 +2358,7 @@ export class TerminalUI {
     if (this.workspaceName) leftHeader.push([' · ', T.faint], [this.workspaceName, T.text]);
     if (this.branch) leftHeader.push([' · ', T.faint], [this.branch, T.info]);
     leftHeader.push([' · ', T.faint], [sessionLabel, T.muted]);
-    const header = rich ? this.band(leftHeader, [todoGroup, this.contextGroup()], safeCols, rich) : clip(`goon · ${sessionLabel}`);
+    const header = rich ? this.band(leftHeader, [todoGroup, this.contextGroup()], safeCols, rich) : clip(`vyen · ${sessionLabel}`);
 
     // Live status row (Working / scroll / esc hints / attachments / notices)
     let statusLine = '';

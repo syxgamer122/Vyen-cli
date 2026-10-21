@@ -26,7 +26,7 @@ export function buildProviderOptions(config: Pick<Config, 'provider' | 'effort'>
     return { openai: { reasoningEffort: normalized } };
   }
   return {
-    goon: { reasoningEffort: effort },
+    vyen: { reasoningEffort: effort },
     openaiCompatible: { reasoningEffort: effort },
   };
 }
@@ -102,7 +102,7 @@ export function createModel(config: RuntimeConfig, sessionId?: string): Language
   };
   if (config.provider === 'anthropic') return createAnthropic(options)(config.model!);
   if (config.provider === 'openai-responses') return createOpenAI(options).responses(config.model!);
-  return createOpenAICompatible({ ...options, name: 'goon', includeUsage: true }).chatModel(config.model!);
+  return createOpenAICompatible({ ...options, name: 'vyen', includeUsage: true }).chatModel(config.model!);
 }
 
 export interface DiscoveredModel {

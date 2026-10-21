@@ -147,9 +147,9 @@ export async function loadConfig(overrides: Record<string, unknown> = {}): Promi
 }
 
 export async function resolveRuntime(config: Config, cwd: string): Promise<RuntimeConfig> {
-  if (!config.model) throw new Error('Missing model. Run "goon setup" or "goon init --model MODEL --base-url URL".');
+  if (!config.model) throw new Error('Missing model. Run "vyen setup" or "vyen init --model MODEL --base-url URL".');
   const apiKey = await resolveApiKey(config);
-  if (!apiKey) throw new Error(`Missing ${config.keyEnv}. Run "goon setup" or set ${config.keyEnv} in your shell.`);
+  if (!apiKey) throw new Error(`Missing ${config.keyEnv}. Run "vyen setup" or set ${config.keyEnv} in your shell.`);
   const baseUrl = config.baseUrl ? normalizeGatewayUrl(config.baseUrl) : DEFAULT_GATEWAY_URL;
   return { ...config, model: config.model, baseUrl, apiKey, cwd: await realpath(resolve(cwd)), dataDir: dataDir() };
 }

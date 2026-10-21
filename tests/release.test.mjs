@@ -40,5 +40,5 @@ test('CLI version comes from the installed package manifest', async () => {
   assert.equal(lock.version, manifest.version, 'npm-shrinkwrap.json version must match package.json');
   assert.equal(lock.packages?.['']?.version, manifest.version, 'npm-shrinkwrap.json root package version must match package.json');
   const { stdout } = await promisify(execFile)(process.execPath, ['bin/goon.mjs', '--version']);
-  assert.equal(stdout.trim(), `goon cli ${manifest.version}`);
+  assert.equal(stdout.trim(), `vyen cli ${manifest.version}`);
 });

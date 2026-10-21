@@ -18,10 +18,10 @@ function terminal(t) {
 test('TUI edits Unicode input, recalls history and restores terminal state on close', async t => {
   const tty = terminal(t);
   assert.equal(tty.input.isRaw, true);
-  const first = tty.ui.question('goon> ', undefined, true);
+  const first = tty.ui.question('vyen> ', undefined, true);
   tty.key('xin chào', undefined); tty.key('', 'left'); tty.key('', 'backspace'); tty.key('a', 'a'); tty.key('', 'return');
   assert.equal(await first, 'xin chao');
-  const second = tty.ui.question('goon> ', undefined, true);
+  const second = tty.ui.question('vyen> ', undefined, true);
   tty.key('', 'up'); tty.key('', 'return'); assert.equal(await second, 'xin chao');
   tty.ui.close(); tty.ui.close();
   assert.equal(tty.input.isRaw, false);
@@ -103,7 +103,7 @@ test('TUI supports slash-command Tab completion, Shift+Tab mode toggle, Alt+. ef
   const efforts = [];
   tty.ui.onToggleMode = () => { modeToggles++; tty.ui.setMode('auto'); };
   tty.ui.onCycleEffort = dir => { efforts.push(dir); tty.ui.setEffort('xhigh'); };
-  const q = tty.ui.question('goon> ', undefined, true);
+  const q = tty.ui.question('vyen> ', undefined, true);
   tty.key('', 'tab', { shift: true });
   assert.equal(modeToggles, 1);
   tty.key('.', '.', { meta: true });
@@ -278,7 +278,7 @@ test('Codex TUI collapses pasted ScreenClip image paths into [Image #1], prevent
   }
 
   // 2. Start prompt question and test Up/Down & SGR Mouse Wheel scrollback when transcript overflows
-  const q = tty.ui.question('goon> ', undefined, true);
+  const q = tty.ui.question('vyen> ', undefined, true);
   await new Promise(resolve => setTimeout(resolve, 25));
 
   // Press Up arrow on empty input -> scrolls up in transcript and displays "↑ Scrolled up" banner
@@ -390,7 +390,7 @@ test('Codex TUI renders rounded composer text box with spacer gap, pipe-free thi
 
   // Next question(remember=true) automatically dequeues and resolves the queued prompt
   tty.ui.setStatus('Ready');
-  const dequeued = await tty.ui.question('goon> ', undefined, true);
+  const dequeued = await tty.ui.question('vyen> ', undefined, true);
   assert.equal(dequeued, 'queued follow-up task');
 });
 
@@ -418,7 +418,7 @@ test('Codex TUI backtrack/revert removes reverted turns from screen, restores pr
   assert.match(frame, /Upstream provider returned HTTP 500:/);
 
   // Start idle composer question and press Esc twice (Esc Esc) to trigger /revert
-  const q1 = tty.ui.question('goon> ', undefined, true);
+  const q1 = tty.ui.question('vyen> ', undefined, true);
   await new Promise(resolve => setTimeout(resolve, 20));
 
   tty.key('', 'escape');
@@ -434,7 +434,7 @@ test('Codex TUI backtrack/revert removes reverted turns from screen, restores pr
   tty.ui.setInput('can u play valorant', true);
   tty.ui.setNotice('↺ Rewound 1 turn — edit prompt below, Enter to resend, or Esc Esc to rewind further');
 
-  const q2 = tty.ui.question('goon> ', undefined, true);
+  const q2 = tty.ui.question('vyen> ', undefined, true);
   await new Promise(resolve => setTimeout(resolve, 25));
 
   frame = stripVTControlCharacters(tty.ui.renderedFrame());
@@ -616,7 +616,7 @@ test('redesign: header band shows workspace, branch and a provider-reported cont
   tty.ui.setContextWindow(200_000);
   await new Promise(resolve => setTimeout(resolve, 25));
   let header = stripVTControlCharacters(tty.ui.renderedFrame().split('\r\n')[0]);
-  assert.match(header, /◆ goon · testcli · feature\/redesign/);
+  assert.match(header, /◆ vyen · testcli · feature\/redesign/);
   assert(!header.includes('ctx'), 'meter stays hidden until occupancy is known');
   assert(!header.includes('test-model'), 'header must not repeat the model name');
 
@@ -649,7 +649,7 @@ test('redesign: slash popup lists matching commands with descriptions and Tab st
   const tty = terminal(t);
   tty.output.columns = 100;
   tty.output.rows = 24;
-  const q = tty.ui.question('goon> ', undefined, true);
+  const q = tty.ui.question('vyen> ', undefined, true);
   tty.key('/rev', undefined);
   await new Promise(resolve => setTimeout(resolve, 25));
   const frame = stripVTControlCharacters(tty.ui.renderedFrame());
@@ -663,7 +663,7 @@ test('redesign: slash popup lists matching commands with descriptions and Tab st
   assert(!/rewind turn\(s\)/.test(stripVTControlCharacters(tty.ui.renderedFrame())), 'popup closes after submit');
 
   // ↓ / ↑ move the popup selection and must never clear the composer (history recall used to wipe it).
-  const q2 = tty.ui.question('goon> ', undefined, true);
+  const q2 = tty.ui.question('vyen> ', undefined, true);
   tty.key('/rev', undefined);
   tty.key('', 'down');
   await new Promise(resolve => setTimeout(resolve, 25));
@@ -714,7 +714,7 @@ test('redesign: no rendered row exceeds the terminal width at any size, across e
     tty.ui.event({ type: 'subagent', id: 'abcdef123456', state: 'start', task: 'task words '.repeat(30) });
     tty.ui.event({ type: 'text', text: '# ' + 'Heading '.repeat(20) + '\n- ' + 'bullet '.repeat(40) + '\n> ' + 'quote '.repeat(40) + '\n```js\n' + 'const z = 1; '.repeat(30) + '\n```\n| ' + 'c '.repeat(80) + '| d |\n|---|---|\n| e | f |\n' });
     tty.ui.setStatus('Running');
-    tty.ui.question('goon> ', undefined, true).catch(() => {});
+    tty.ui.question('vyen> ', undefined, true).catch(() => {});
     tty.key('/re', undefined);
     await new Promise(resolve => setTimeout(resolve, 40));
     for (const line of tty.ui.renderedFrame().split('\r\n')) {
@@ -860,7 +860,7 @@ test('Codex paste handling collapses multi-line and long pastes into [Pasted tex
   tty.output.rows = 24;
 
   // 1. Bracketed paste of 25 lines via real stream write (emits per-char + return/enter events)
-  const q1 = tty.ui.question('goon> ', undefined, true);
+  const q1 = tty.ui.question('vyen> ', undefined, true);
   const lines25 = Array.from({ length: 25 }, (_, i) => `line ${i + 1}: const value_${i + 1} = ${i + 1};`).join('\r\n');
   tty.input.write(`\x1b[200~${lines25}\x1b[201~`);
   await new Promise(resolve => setTimeout(resolve, 25));
@@ -885,7 +885,7 @@ test('Codex paste handling collapses multi-line and long pastes into [Pasted tex
   assert(!frame.includes('const value_15'), 'Transcript echo must collapse expanded paste back to pill');
 
   // 2. Long single-line paste (> 150 chars), atomic Backspace, and multiple pastes (#1, #2)
-  const q2 = tty.ui.question('goon> ', undefined, true);
+  const q2 = tty.ui.question('vyen> ', undefined, true);
   const longSingleLine = 'x'.repeat(200);
   tty.input.write(`\x1b[200~${longSingleLine}\x1b[201~`);
   await new Promise(resolve => setTimeout(resolve, 25));
@@ -910,7 +910,7 @@ test('Codex paste handling collapses multi-line and long pastes into [Pasted tex
   assert.equal(submitted2, 'alpha line\nbeta line\ngamma line');
 
   // 3. Up-arrow history recall and setInput (from /revert) rehydrate paste placeholders and expand on submit
-  const q3 = tty.ui.question('goon> ', undefined, true);
+  const q3 = tty.ui.question('vyen> ', undefined, true);
   tty.key('', 'up');
   await new Promise(resolve => setTimeout(resolve, 25));
   frame = stripVTControlCharacters(tty.ui.renderedFrame());

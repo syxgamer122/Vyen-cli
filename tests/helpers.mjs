@@ -52,7 +52,7 @@ export function cli(f, url, args = [], options = {}) {
   child.kill = (sig = 'SIGTERM') => {
     if (process.platform === 'win32' && (sig === 'SIGINT' || sig === 'SIGTERM') && child.connected) {
       try {
-        child.send({ type: 'goon:signal', signal: sig });
+        child.send({ type: 'vyen:signal', signal: sig });
         return true;
       } catch {
         // fall through

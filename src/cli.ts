@@ -25,14 +25,14 @@ import type { McpManager } from './mcp.js';
 import { EFFORT_DESCRIPTIONS, parseEffortInput, runSetupWizard } from './setup.js';
 import { discoverModels, formatModelBadge, resolveModelCapabilities, type DiscoveredModel } from './provider.js';
 
-const HELP = `goon cli ${VERSION} — independent coding harness
+const HELP = `vyen cli ${VERSION} — independent coding harness
 
-Usage: goon [options] [prompt]
-       goon resume [ID|latest|number]
-       goon setup
-       goon init --provider openai-compatible --base-url URL --model MODEL [--effort LEVEL]
-       goon doctor | sessions
-       goon mcp list | check [name] | get <name> | add <name> ... | remove <name> | import-codex [name...]
+Usage: vyen [options] [prompt]
+       vyen resume [ID|latest|number]
+       vyen setup
+       vyen init --provider openai-compatible --base-url URL --model MODEL [--effort LEVEL]
+       vyen doctor | sessions
+       vyen mcp list | check [name] | get <name> | add <name> ... | remove <name> | import-codex [name...]
 
 Options:
   -p, --prompt TEXT          Run one task (or pipe a prompt on stdin)
@@ -41,7 +41,7 @@ Options:
       --base-url URL         Provider API root, usually ending in /v1
       --model NAME           Exact model ID from your provider
       --effort LEVEL         Reasoning effort: low | medium | high | xhigh | max
-      --key-env NAME         Credential variable (default GOON_API_KEY)
+      --key-env NAME         Credential variable (default VYEN_API_KEY)
       --resume ID|latest     Resume a saved session in this workspace
       --yes                 Approve file changes and shell commands automatically
       --read-only           Read tools and research agents; no writes or shell
@@ -64,7 +64,7 @@ Interactive commands:
   /plan, /revert, /undo, /checkpoints, /todo, /compact, /diff, /review, /fork, /rename,
   /delete, /export, /init, /status, /tools, /sessions, /debug-config, /warnings, /doctor, /clear, /exit, or !<cmd>.
 Shortcuts: Shift+Tab mode, Ctrl+T transcript, Ctrl+O copy, Alt+. / Alt+, effort, Tab autocomplete, Esc Esc rewind, Ctrl+C cancel.
-API keys are read from environment variables or ~/.config/goon/credentials.json.
+API keys are read from environment variables or ~/.config/vyen/credentials.json.
 Shell commands run as your OS user; approvals are not an OS sandbox.
 `;
 
@@ -84,7 +84,7 @@ export function welcomeBanner(
     visibleLength(text) <= cols ? padEndVisible(text, cols) : padEndVisible(`${sliceVisible(text, cols - 1)}…`, cols);
   const line = (content: string) => `│${fit(content, inner)}│`;
   const field = (label: string, value: string) => line(`   ${label.padEnd(10)} ${value}`);
-  const left = ` ◆ goon  v${VERSION}`;
+  const left = ` ◆ vyen  v${VERSION}`;
   const right = `${mode === 'auto' ? 'auto-approve' : mode} · effort ${effort ?? 'default'} `;
   const gap = Math.max(1, inner - visibleLength(left) - visibleLength(right));
   const host = baseUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
@@ -235,7 +235,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       });
       const name = addParsed.positionals[0];
       if (!name) {
-        throw new Error('Usage: goon mcp add <name> (--url <URL> [--bearer-env ENV] | -- <command> [args...])');
+        throw new Error('Usage: vyen mcp add <name> (--url <URL> [--bearer-env ENV] | -- <command> [args...])');
       }
       const envMap: Record<string, string> = {};
       for (const pair of (addParsed.values.env as string[] | undefined) ?? []) {
@@ -292,7 +292,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     } });
     jsonOutput = values.json === true;
     if (values.help) { stdout.write(HELP); return; }
-    if (values.version) { stdout.write(`goon cli ${VERSION}\n`); return; }
+    if (values.version) { stdout.write(`vyen cli ${VERSION}\n`); return; }
     const overrides: Record<string, unknown> = {};
     for (const [flag, key] of Object.entries({ provider: 'provider', 'base-url': 'baseUrl', model: 'model', effort: 'effort', 'key-env': 'keyEnv',
       'context-window': 'contextWindow', 'max-output-tokens': 'maxOutputTokens', 'run-token-budget': 'runTokenBudget', 'timeout-ms': 'timeoutMs', 'inline-reasoning': 'inlineReasoning' })) {
@@ -331,7 +331,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         return;
       }
       if (sub !== 'check') {
-        throw new Error('Usage: goon mcp list | check [name] | get <name> | add <name> ... | remove <name> | import-codex [name...]');
+        throw new Error('Usage: vyen mcp list | check [name] | get <name> | add <name> ... | remove <name> | import-codex [name...]');
       }
       const targetFilter = positionals[2];
       const filteredConfig = targetFilter
@@ -360,7 +360,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       }
       if (!config.model) throw new Error('Specify --model and optionally --base-url/--provider.');
       await saveConfig(config);
-      stdout.write(`Saved ${configPath()}\nSet ${config.keyEnv} in your shell, then run goon in your project.\n`);
+      stdout.write(`Saved ${configPath()}\nSet ${config.keyEnv} in your shell, then run vyen in your project.\n`);
       return;
     }
     if (positionals[0] === 'doctor') {
@@ -464,7 +464,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       rl?.close(); tui?.close(); process.exitCode = 143;
     };
     const onIpcSignal = (msg: unknown) => {
-      if (msg && typeof msg === 'object' && (msg as { type?: string }).type === 'goon:signal') {
+      if (msg && typeof msg === 'object' && (msg as { type?: string }).type === 'vyen:signal') {
         const sig = (msg as { signal?: string }).signal;
         if (sig === 'SIGINT') stop();
         else if (sig === 'SIGTERM') terminate();
@@ -739,7 +739,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               : '';
           const cleaned = text.replace(/<referenced_file[\s\S]*?<\/referenced_file>/g, '[attached file]').replace(/\s+/g, ' ').trim();
           if (cleaned) {
-            lines.push(`  ${m.role === 'user' ? '▸ You' : '◆ Goon'}: ${cleaned.slice(0, 140)}${cleaned.length > 140 ? '…' : ''}`);
+            lines.push(`  ${m.role === 'user' ? '▸ You' : '◆ Vyen'}: ${cleaned.slice(0, 140)}${cleaned.length > 140 ? '…' : ''}`);
           }
         }
         lines.push('╰──────────────────────────────────────────────────────────────────────────────────╯\n');
@@ -752,7 +752,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         display(welcomeBanner(runtime.model, runtime.provider, runtime.baseUrl, runtime.effort, runtime.cwd, store.session.id, mode));
         renderResumedHistory();
       }
-      else display(`goon · ${runtime.model} · session ${store.session.id}\n`);
+      else display(`vyen · ${runtime.model} · session ${store.session.id}\n`);
       const run = async (input: string) => {
         if (Buffer.byteLength(input) > 1024 * 1024) throw new Error('Prompt exceeds 1 MiB.');
         denied = false;
@@ -835,7 +835,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             '  /sessions                         List saved workspace sessions\n' +
             '  /doctor                           Check environment health\n' +
             '  /clear                            Clear screen (or press Ctrl+L)\n' +
-            '  /exit                             Exit goon (or press Ctrl+D on empty input)\n' +
+            '  /exit                             Exit vyen (or press Ctrl+D on empty input)\n' +
             '  !<command>                        Execute shell command directly & record in context\n' +
             '  @<filepath> / $<skill-name>       Attach workspace file or invoke SKILL.md in prompt\n'
           );
@@ -946,7 +946,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           const skills = await discoverSkills(runtime.cwd);
           if (!arg || arg.toLowerCase() === 'list') {
             if (!skills.length) {
-              display('No SKILL.md skills found in .agents/skills, .codex/skills, skills/, or ~/.config/goon/skills.\n');
+              display('No SKILL.md skills found in .agents/skills, .codex/skills, skills/, or ~/.config/vyen/skills.\n');
             } else {
               const lines = skills.map(s => `  $${s.name.padEnd(22)} [${s.scope}] — ${s.description}`);
               display(`Available Skills (${skills.length}) — mention $<name> in any prompt to activate:\n${lines.join('\n')}\n`);
@@ -1251,7 +1251,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           const entries = Object.entries(cfg.servers);
           const statusMap = new Map((manager?.statuses ?? []).map(s => [s.name, s]));
           if (!entries.length) {
-            display(`No MCP servers configured in ${mcpConfigPath()}.\nTip: Run "/mcp import-codex" or "goon mcp add <name> -- <cmd> [args...]"\n`);
+            display(`No MCP servers configured in ${mcpConfigPath()}.\nTip: Run "/mcp import-codex" or "vyen mcp add <name> -- <cmd> [args...]"\n`);
           } else {
             const lines = entries.map(([name, s]) => {
               const target = s.transport === 'stdio' ? `${s.command}${s.args.length ? ' ' + s.args.join(' ') : ''}` : s.url;
@@ -1362,10 +1362,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         }
         if (cmdInput === '/export' || cmdInput.startsWith('/export ')) {
           const { writeFile } = await import('node:fs/promises');
-          const outName = cmdInput.slice(7).trim() || `goon-session-${store.session.id.slice(0, 8)}.md`;
+          const outName = cmdInput.slice(7).trim() || `vyen-session-${store.session.id.slice(0, 8)}.md`;
           const targetFile = await tools.files.path(outName);
           const lines: string[] = [
-            `# Goon Session ${store.session.title ?? store.session.id}`,
+            `# Vyen Session ${store.session.title ?? store.session.id}`,
             `- **Model**: ${runtime.model} (${runtime.provider})`,
             `- **Updated**: ${store.session.updatedAt}`,
             '',
@@ -1382,7 +1382,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         if (cmdInput === '/fork' || cmdInput.startsWith('/fork ')) {
           const title = cmdInput.slice(5).trim() || undefined;
           const forkedId = await store.forkToNewFile(title);
-          display(`Forked current session (${store.session.messages.length} messages) -> new session ID: ${forkedId}\nSwitch to it now with: /resume ${forkedId.slice(0, 8)} (or goon --resume ${forkedId.slice(0, 8)})\n`);
+          display(`Forked current session (${store.session.messages.length} messages) -> new session ID: ${forkedId}\nSwitch to it now with: /resume ${forkedId.slice(0, 8)} (or vyen --resume ${forkedId.slice(0, 8)})\n`);
           return true;
         }
         if (cmdInput.startsWith('!')) {
@@ -1435,7 +1435,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             input = initialAutoCommand;
             initialAutoCommand = undefined;
           } else {
-            try { input = (await question(tui ? 'goon> ' : '\ngoon> ', undefined, true)).trim(); }
+            try { input = (await question(tui ? 'vyen> ' : '\nvyen> ', undefined, true)).trim(); }
             catch { break; }
           }
           if (!input) continue;
@@ -1724,7 +1724,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           if (input === '/fork' || input.startsWith('/fork ')) {
             const title = input.slice(5).trim() || undefined;
             const forkedId = await store.forkToNewFile(title);
-            display(`Forked current session (${store.session.messages.length} messages) -> new session ID: ${forkedId}\nSwitch to it now with: /resume ${forkedId.slice(0, 8)} (or goon --resume ${forkedId.slice(0, 8)})\n`);
+            display(`Forked current session (${store.session.messages.length} messages) -> new session ID: ${forkedId}\nSwitch to it now with: /resume ${forkedId.slice(0, 8)} (or vyen --resume ${forkedId.slice(0, 8)})\n`);
             continue;
           }
           if (input === '/new' || input.startsWith('/new ')) {
@@ -1839,10 +1839,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           }
           if (input === '/export' || input.startsWith('/export ')) {
             const { writeFile } = await import('node:fs/promises');
-            const outName = input.slice(7).trim() || `goon-session-${store.session.id.slice(0, 8)}.md`;
+            const outName = input.slice(7).trim() || `vyen-session-${store.session.id.slice(0, 8)}.md`;
             const targetFile = await tools.files.path(outName);
             const lines: string[] = [
-              `# Goon Session ${store.session.title ?? store.session.id}`,
+              `# Vyen Session ${store.session.title ?? store.session.id}`,
               `- **Model**: ${runtime.model} (${runtime.provider})`,
               `- **Updated**: ${store.session.updatedAt}`,
               '',
@@ -2178,7 +2178,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   } catch (error) {
     const message = cleanTerminal(safeError(error, apiKey));
     if (jsonOutput) stdout.write(JSON.stringify({ type: 'error', message }) + '\n');
-    else stderr.write(`goon: ${message}\n`);
+    else stderr.write(`vyen: ${message}\n`);
     if (process.exitCode !== 130 && process.exitCode !== 143) process.exitCode = 1;
   }
 }

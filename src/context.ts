@@ -374,7 +374,7 @@ export async function systemPrompt(
     memories.length > 0
       ? `\nPersistent user memories:\n${memories.map(m => `- ${m.text}`).join('\n')}`
       : '';
-  return `You are Goon, an independent terminal coding agent. Work in ${config.cwd}.
+  return `You are Vyen, an independent terminal coding agent. Work in ${config.cwd}.
 Date: ${new Date().toISOString().slice(0, 10)}. Platform: ${process.platform}. Model: ${config.model} (effort: ${config.effort ?? 'default'}).
 Complete the user's requested coding task, inspecting files before changing them.
 Prefer small, reviewable changes. Run relevant checks and report actual results.

@@ -351,7 +351,7 @@ export class WorkspaceFiles {
   private async writeRaw(file: string, content: string, mode: number, existing: boolean) {
     this.assertNotWindowsReserved(file);
     await mkdir(dirname(file), { recursive: true });
-    const temporary = join(dirname(file), `.goon-${randomUUID()}.tmp`);
+    const temporary = join(dirname(file), `.vyen-${randomUUID()}.tmp`);
     const handle = await open(temporary, 'wx', mode);
     try {
       await handle.writeFile(content, 'utf8');

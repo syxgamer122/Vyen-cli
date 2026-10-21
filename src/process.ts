@@ -9,7 +9,7 @@ const HARD_OUTPUT_LIMIT = 4 * 1024 * 1024;
 export function resolveExecutable(command: string): string {
   if (command !== 'bash' || process.platform !== 'win32') return command;
   const candidates = [
-    process.env.GOON_BASH,
+    process.env.VYEN_BASH ?? process.env.GOON_BASH,
     'C:\\Program Files\\Git\\bin\\bash.exe',
     'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
     process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Programs', 'Git', 'bin', 'bash.exe') : undefined,

@@ -114,7 +114,7 @@ export async function runSetupWizard(initialConfig?: Config, io?: SetupIO): Prom
   const discover = io?.discover ?? ((url, key, prov) => discoverModels(url, key, prov));
 
   try {
-    const setupTitle = `╭─── ✻ goon cli v${VERSION} · Interactive Setup `;
+    const setupTitle = `╭─── ✻ vyen cli v${VERSION} · Interactive Setup `;
     const setupTopDashes = '─'.repeat(Math.max(1, 70 - visibleLength(setupTitle)));
     write(
       `\n${setupTitle}${setupTopDashes}╮\n` +

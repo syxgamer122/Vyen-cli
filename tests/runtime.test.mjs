@@ -4,6 +4,16 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fixture, provider, sse, cli } from './helpers.mjs';
 
+test('the CLI identifies itself as vyen in help, version and error output', async t => {
+  const f = await fixture(t);
+  const version = await cli(f, 'http://127.0.0.1:1', ['--version']).done;
+  assert.match(version.stdout, /^vyen cli /);
+  const help = await cli(f, 'http://127.0.0.1:1', ['--help']).done;
+  assert.match(help.stdout, /vyen cli /);
+  assert.match(help.stdout, /VYEN_API_KEY/);
+  assert.doesNotMatch(help.stdout, /goon/i);
+});
+
 test('real CLI streams tool arguments, writes, resumes and preserves reasoning through edit', async t => {
   const f = await fixture(t);
   const p = await provider(t, (body, response, n) => {
