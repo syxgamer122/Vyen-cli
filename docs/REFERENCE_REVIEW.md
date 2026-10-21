@@ -11,7 +11,7 @@ This is a design review and an independent implementation, not a runtime import.
 
 ## Sources and decisions
 
-| Boundary | Reference implementation inspected | Goon decision |
+| Boundary | Reference implementation inspected | Vyen decision |
 |---|---|---|
 | Provider reasoning vs answer | ZCode [runner-normalization.ts](https://github.com/zai-org/ZCode/blob/aac4755666d09fdcd70272fcf063c077a639015f/apps/zcode-cli/packages/adapters/src/model/runner-normalization.ts) maps text/reasoning start, delta and end independently. DSH [translate.ts](https://github.com/deepseek-ai/deepseek-harness/blob/1517a4dbca0a2789ff1d41ba439600f8547d23fa/packages/llm/llm-deepseek/src/translate.ts) separates text/thinking and retains reasoning signatures in replay metadata. | Keep SDK response messages unchanged. Project visible answers separately. Native reasoning has its own opt-in event, never a text event. |
 | Background delta cost | ZCode [zcodeSessionEventCoalescer.ts](https://github.com/zai-org/ZCode/blob/aac4755666d09fdcd70272fcf063c077a639015f/packages/services/src/zcode-agent/zcodeSessionEventCoalescer.ts) batches reconstructible deltas and flushes before controls. DSH [assistant-stream.ts](https://github.com/deepseek-ai/deepseek-harness/blob/1517a4dbca0a2789ff1d41ba439600f8547d23fa/packages/llm/llm/src/assistant-stream.ts) packs adjacent deltas without repeating event envelopes. | The parent does not display child text, so its progress channel omits child text/reasoning entirely. No timer, token batching or repeated full task payload is needed there. Completed child messages remain in child sessions. |
@@ -24,13 +24,13 @@ Additional ZCode contracts inspected: `contracts/src/model/index.ts`,
 `docs/subagent-respond-to-coordinator.md`. DSH's block assembler, headless
 reasoning surface and subagent capability/result types were also inspected.
 
-## Inline think compatibility is a Goon policy
+## Inline think compatibility is a Vyen policy
 
 Neither reference above proves that arbitrary `<think>` strings should be
 removed from all text. They provide typed reasoning boundaries for protocols
 that supply them. A gateway that inlines these tags needs a compatibility rule.
 
-Goon's default `leading-think` presentation policy recognizes one or more leading
+Vyen's default `leading-think` presentation policy recognizes one or more leading
 case-insensitive `<think>...</think>` blocks, permitting leading whitespace and
 nested markers. It holds marker suffixes across arbitrary SSE chunks, does not
 scan accumulated reasoning again, and keeps an unclosed block in the reasoning
@@ -38,17 +38,17 @@ channel. Once visible answer text starts, later tags are literal. Code fences,
 inline code and prose containing think tags therefore remain intact.
 
 A bare literal think element at the very start is ambiguous. Use
-`--inline-reasoning off` (or GOON_INLINE_REASONING=off) for that endpoint/task.
+`--inline-reasoning off` (or VYEN_INLINE_REASONING=off) for that endpoint/task.
 This rule is a display compatibility heuristic, not a semantic reasoning detector
 or secret scrubber. It does not claim to recognize every gateway's tag format.
 
 The installed AI SDK's `extractReasoningMiddleware` was inspected as well.
 Applying a model middleware would change assembled response content and replay
-shape. Goon instead applies its projection to emitted/returned text, child
+shape. Vyen instead applies its projection to emitted/returned text, child
 reports and generated compaction summaries. Original completed provider messages,
 native reasoning and opaque metadata stay available for the next tool step or
-resume. Failed/aborted streams retain Goon's existing partial-transcript limits;
-Goon does not implement either upstream's complete durable token event journal.
+resume. Failed/aborted streams retain Vyen's existing partial-transcript limits;
+Vyen does not implement either upstream's complete durable token event journal.
 
 `--show-reasoning` opts into separate `reasoning` NDJSON events or labeled
 stderr/TUI output. The default emits neither native nor extracted reasoning.
@@ -126,7 +126,7 @@ inject close failures and verify terminal ordering, lock cleanup and capacity
 reuse, as well as every split point in think markers, literal code, resume,
 compaction, cancellation, truncation and opt-in rendering.
 
-Goon still has no durable event replay cursor, coordinator inbox, continuable
+Vyen still has no durable event replay cursor, coordinator inbox, continuable
 child catalog, adaptive provider retry ledger or compact per-token audit journal.
 Copying those systems piecemeal would add ownership and recovery contracts that
 this implementation does not yet provide. Parent text streaming and the TUI's

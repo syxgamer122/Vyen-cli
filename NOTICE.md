@@ -1,6 +1,6 @@
 # Project identity and references
 
-Goon CLI is an independent implementation. It is not an official Z.ai,
+Vyen CLI is an independent implementation. It is not an official Z.ai,
 DeepSeek, Anthropic or OpenAI product. No ZCode or DeepSeek Harness runtime
 source is copied into this distribution or used as a dependency.
 
@@ -15,7 +15,7 @@ Design references inspected for version 0.1.0:
   interfaces, bounded parallel-safe tool scheduling, exclusive mutation
   barriers, ordered results and conservative recovery after interruption.
 
-Goon uses the Vercel AI SDK and its provider adapters for protocol handling.
+Vyen uses the Vercel AI SDK and its provider adapters for protocol handling.
 Dependencies retain their own licenses in their installed package directories.
 The implementation and build process use no official Claude Code binary.
 

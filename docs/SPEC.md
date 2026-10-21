@@ -1,4 +1,4 @@
-# Goon CLI 0.2
+# Vyen CLI 0.2
 
 Independent implementation informed by ZCode's separation of runtime, provider,
 tools and persistence. No ZCode runtime source is copied or loaded.
@@ -7,7 +7,7 @@ tools and persistence. No ZCode runtime source is copied or loaded.
 
 - CLI owns terminal input, flags and lifetime. Provider configuration comes
   only from user config, environment and flags. MCP has a separate user-only
-  mcp.json. Priority: flags > GOON_* environment > user config > defaults.
+  mcp.json. Priority: flags > VYEN_* environment > user config > defaults.
   Credentials are resolved at runtime through keyEnv and are never saved by init.
 - Harness owns ModelMessage history, token accounting, tool result pairing and
   compaction. A streamed response must complete before any tool executes. Reads

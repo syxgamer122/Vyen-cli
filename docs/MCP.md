@@ -1,9 +1,9 @@
 # MCP tools
 
-Goon is an MCP client, using `@modelcontextprotocol/sdk` 1.32.1. It supports
+Vyen is an MCP client, using `@modelcontextprotocol/sdk` 1.32.1. It supports
 stdio processes and Streamable HTTP endpoints. Servers are configured only in
-`$XDG_CONFIG_HOME/goon/mcp.json` (default `~/.config/goon/mcp.json`). Provider
-`goon init` does not change this file. Project-local MCP config is not loaded.
+`$XDG_CONFIG_HOME/vyen/mcp.json` (default `~/.config/vyen/mcp.json`). Provider
+`vyen init` does not change this file. Project-local MCP config is not loaded.
 
 ## Example
 
@@ -43,11 +43,11 @@ fails startup. An HTTP server without authentication can omit bearerEnv. No
 account login or OAuth flow is performed; configure a token usable by the server.
 HTTP redirects carrying credentials are rejected.
 
-`goon mcp list` lists names, transport and read-only allowlists without connecting.
-`goon mcp check` starts/connects enabled servers, enumerates tools (including
+`vyen mcp list` lists names, transport and read-only allowlists without connecting.
+`vyen mcp check` starts/connects enabled servers, enumerates tools (including
 paginated lists), prints original and stable namespaced names, then closes them.
 Neither command requires a model key. `check` does run configured stdio commands.
-Normal `goon` startup connects enabled servers before the first model request.
+Normal `vyen` startup connects enabled servers before the first model request.
 `--no-mcp` skips configuration loading and connection for that invocation.
 
 ## Permissions and lifetime
@@ -58,7 +58,7 @@ entries. Server-provided readOnlyHint annotations do not grant this exemption.
 Read-only mode exposes only built-in read tools, research delegation and MCP
 allowlisted tools. This is tool policy, not an OS sandbox: MCP processes run as
 this user, and starting a server can itself perform I/O. Remote tools execute on
-the remote service. Goon cannot enforce remote filesystem containment.
+the remote service. Vyen cannot enforce remote filesystem containment.
 
 JSON Schema arguments are validated locally before dispatch. Results are bounded
 at 32k characters; non-text blocks are represented by markers. A tool result with
