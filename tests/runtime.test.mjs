@@ -5,12 +5,33 @@ import { join } from 'node:path';
 import { fixture, provider, sse, cli } from './helpers.mjs';
 
 test('every permission mode change in the CLI goes through the shared helper', async () => {
-  // The defect this guards against was a mode-change site that forgot to
-  // restore tools.readOnly / tools.planMode. The helper is unit-tested; this
-  // check makes sure no site bypasses it.
+  // The defect these guard against was a mode-change site that forgot to
+  // restore the registry's permission fields, and a /cd that forgot to drop
+  // the checkpoints of the workspace it left. The helper is unit-tested; these
+  // checks make sure no site bypasses it.
   const source = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /tools\.readOnly\s*=/, 'tools.readOnly must only be set by applyPermissionMode');
-  assert.doesNotMatch(source, /tools\.planMode\s*=/, 'tools.planMode must only be set by applyPermissionMode');
+
+  // No registry may have its permission fields assigned directly, whatever the
+  // variable is called.
+  assert.doesNotMatch(source, /\w+\.(readOnly|planMode)\s*=/,
+    'the permission fields must only be set by applyPermissionMode');
+
+  // Every assignment to the mode must be followed by the helper call, so a
+  // deleted call cannot leave the registry out of sync with the label.
+  const lines = source.split('\n');
+  const assignments = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => /^\s*mode\s*=[^=]/.test(line));
+  assert.ok(assignments.length >= 7, `expected the mode to be assigned in several places, found ${assignments.length}`);
+  for (const { index } of assignments) {
+    const next = lines.slice(index + 1, index + 3).join('\n');
+    assert.match(next, /applyPermissionMode\(/,
+      `the mode assignment at line ${index + 1} must be followed by applyPermissionMode`);
+  }
+
+  // The /cd handler must drop the checkpoints of the workspace it leaves.
+  assert.match(source, /retargetSessionWorkspace\(store,/,
+    'the /cd handler must retarget the session workspace');
 });
 
 test('leaving plan mode restores read-only enforcement instead of unlocking mutations', async () => {

@@ -593,8 +593,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             return true;
           }
           return reply === 'y' || reply === 'yes';
-        }, currentMode === 'readonly');
-        reg.planMode = currentMode === 'plan';
+        });
+        // One mechanism maps a permission mode onto a registry.
+        applyPermissionMode(reg, currentMode);
         if (rl || tui) {
           reg.askUser = async (questions, callSignal) => {
             const out: Record<string, string[]> = {};

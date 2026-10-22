@@ -612,7 +612,13 @@ export class McpManager {
 
   private error(error: unknown): Error {
     let message = error instanceof Error ? error.message : String(error);
-    const redact = (value: string | undefined) => {
+    // A value that came from the environment is a credential, so it is
+    // redacted whatever its length. A literal config string only needs the
+    // length floor, so ordinary words in an error message stay readable.
+    const redactSecret = (value: string | undefined) => {
+      if (value) message = message.split(value).join('[REDACTED]');
+    };
+    const redactLiteral = (value: string | undefined) => {
       if (value && value.length >= 8) message = message.split(value).join('[REDACTED]');
     };
     for (const server of Object.values(this.config.servers)) {
@@ -623,7 +629,7 @@ export class McpManager {
               ...(server.bearerEnv ? [server.bearerEnv] : []),
               ...Object.values(server.envHeaders ?? {}),
             ];
-      for (const name of names) redact(process.env[name]);
+      for (const name of names) redactSecret(process.env[name]);
       // A placeholder resolves to an environment value that never appears in
       // the config file, so redacting the literal config string does not
       // protect the secret it stands for.
@@ -634,10 +640,10 @@ export class McpManager {
         if (!raw) continue;
         const placeholder = parseEnvPlaceholder(raw);
         if (placeholder) {
-          redact(process.env[placeholder.name]);
-          redact(placeholder.fallback);
+          redactSecret(process.env[placeholder.name]);
+          redactSecret(placeholder.fallback);
         } else {
-          redact(raw);
+          redactLiteral(raw);
         }
       }
     }

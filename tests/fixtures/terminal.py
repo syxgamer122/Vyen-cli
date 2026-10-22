@@ -49,7 +49,10 @@ try:
         os.write(master, b'\x1b.')
         time.sleep(0.5)
         os.write(master, b'\x03')
-        wait_for('cancel', 'abort')
+        # 'cancelled' and 'abort' cannot appear in the static chrome, which
+        # reads 'Ctrl+C cancel' - matching the bare word would match the
+        # footer long before Ctrl+C is pressed.
+        wait_for('cancelled', 'abort')
         os.write(master, b'/exit\r')
         child.wait(timeout=15)
         print(json.dumps({'code': child.returncode, 'cancelled': True}))
