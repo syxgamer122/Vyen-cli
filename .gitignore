@@ -6,3 +6,5 @@ release-out/
 .env
 .vyen/
 .refs/
+
+.superpowers/
