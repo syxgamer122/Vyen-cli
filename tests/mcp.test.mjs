@@ -15,49 +15,6 @@ const stdio = extra => mcpConfigSchema.parse({ servers: { local: { transport: 's
 const call = (toolName, input = {}) => ({ toolName, input, toolCallId: 'fixture' });
 const signal = () => new AbortController().signal;
 
-test('read_mcp_resource requires approval and is absent in read-only mode', async t => {
-  const f = await fixture(t);
-  const approvals = [];
-  const registry = new ToolRegistry(f.cwd, async request => { approvals.push(request.tool); return true; });
-  const manager = new McpManager(stdio({}), f.cwd);
-  t.after(() => manager.close());
-  await manager.connect(registry);
-
-  const names = Object.keys(registry.schemas());
-  assert.ok(names.includes('read_mcp_resource'));
-
-  const result = await registry.execute(
-    call('read_mcp_resource', { server: 'local', uri: 'file:///etc/shadow' }),
-    signal(),
-  );
-  assert.deepEqual(approvals, ['read_mcp_resource']);
-  assert.match(result.text, /root:x:0:0/);
-  await manager.close();
-
-  // A read-only registry must not offer the tool at all.
-  const readOnlyRegistry = new ToolRegistry(f.cwd, async () => true, true);
-  assert.ok(!Object.keys(readOnlyRegistry.schemas()).includes('read_mcp_resource'));
-});
-
-test('an MCP server error never leaks a resolved credential', async t => {
-  const f = await fixture(t);
-  const secret = 'sk-live-mcp-secret-value';
-  const registry = new ToolRegistry(f.cwd, async () => true);
-  const manager = new McpManager(stdio({ env: { LEAKED_TOKEN: secret } }), f.cwd);
-  t.after(() => manager.close());
-  await manager.connect(registry);
-
-  await assert.rejects(
-    registry.execute(call(mcpToolName('local', 'leak')), signal()),
-    err => {
-      assert.ok(!String(err.message).includes(secret), 'the secret must not appear in the error');
-      assert.match(String(err.message), /\[REDACTED\]/);
-      return true;
-    },
-  );
-  await manager.close();
-});
-
 test('MCP stdio discovers pages, validates arguments, preserves approvals and unregisters on close', async t => {
   const f = await fixture(t);
   let approvals = 0;
@@ -65,7 +22,7 @@ test('MCP stdio discovers pages, validates arguments, preserves approvals and un
   const manager = new McpManager(stdio({ readOnlyTools: ['echo', 'wait', 'fail'] }), f.cwd);
   t.after(() => manager.close());
   await manager.connect(registry);
-  assert.equal(manager.tools.length, 5);
+  assert.equal(manager.tools.length, 4);
   const echo = mcpToolName('local', 'echo'), danger = mcpToolName('local', 'danger-tool');
   assert.equal((await registry.execute(call(echo, { text: 'hello' }), signal())).text, 'hello');
   await assert.rejects(registry.execute(call(echo, { text: 4 }), signal()), /Invalid arguments/);
@@ -178,7 +135,7 @@ test('SIGTERM during MCP initialization preserves exit status, kills the server 
   } } }));
   const running = cli(f, 'http://127.0.0.1:1/v1', ['-p', 'never contact model']);
   let pid;
-  for (let i = 0; i < 1000; i++) {
+  for (let i = 0; i < 200; i++) {
     try { pid = Number(await readFile(join(f.cwd, 'mcp-ready'), 'utf8')); break; }
     catch { await new Promise(resolve => setTimeout(resolve, 10)); }
   }

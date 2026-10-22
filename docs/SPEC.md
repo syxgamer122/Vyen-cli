@@ -11,7 +11,7 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   Credentials are resolved at runtime through keyEnv and are never saved by init.
 - Harness owns ModelMessage history, token accounting, tool result pairing and
   compaction. A streamed response must complete before any tool executes. Reads
-  can run in consecutive batches of two; mutations execute in declaration order.
+  can run in consecutive batches of up to six; mutations execute in declaration order.
 - SessionStore owns atomic JSON checkpoints and a process lock. A session is
   bound to its real workspace. Loading repairs interrupted tool calls with error
   results; it never replays a side effect. A live lock is never stolen.
@@ -35,9 +35,7 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   are namespaced, schema-validated and bounded. Only user readOnlyTools entries
   bypass approvals; remote annotations do not grant privileges. Stdio inherits
   the SDK default environment plus explicit envFrom mappings. HTTP bearer keys
-  come from env variables. No sampling, OAuth, prompts or legacy SSE. Resources
-are listed and read through dedicated tools; reading a resource requires
-approval, because the server can return any content it holds.
+  come from env variables. No sampling, OAuth, resources, prompts or legacy SSE.
 - Subagents own separate transcripts under subagents/PARENT_UUID. Research uses
   at most two concurrent children globally per manager; editing tasks are serial
   mutation barriers. Children share the parent's approval callback and run budget,
@@ -92,7 +90,5 @@ same tagged commit repairs the same release instead of bumping again. Superseded
 source commits are skipped. Release jobs are serialized, use contents:write only
 in their publishing job, upload npm archives plus SHA-256 checksums to a draft,
 and publish the release only after uploads complete. The repository GITHUB_TOKEN
-does not trigger recursive push workflows. The npm registry publishes the
-package on a version tag, with provenance; the GitHub release carries the same
-tarball plus SHA-256 checksums for machines that cannot reach the registry.
-Automatic updating of installed clients is not enabled by this workflow.
+does not trigger recursive push workflows. No npm registry publishing or
+automatic updating of installed clients is enabled by this workflow.

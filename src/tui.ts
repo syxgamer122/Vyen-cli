@@ -4,39 +4,44 @@ import { emitKeypressEvents, type Key } from 'node:readline';
 import type { ReadStream, WriteStream } from 'node:tty';
 import { stripVTControlCharacters } from 'node:util';
 import type { HarnessEvent, ToolEventMeta } from './harness.js';
+import { formatGoalStatusIndicator, type SessionGoal } from './session.js';
 import type { SubagentEvent } from './subagents.js';
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 const fg = (r: number, g: number, b: number) => `\x1b[38;2;${r};${g};${b}m`;
-const bgc = (r: number, g: number, b: number) => `\x1b[48;2;${r};${g};${b}m`;
 
 /**
- * vyen palette (truecolor, tuned for dark terminals). Violet is the brand/assistant voice, sky marks
- * things you can act on (commands, paths, code), mint/rose/amber carry status, slate carries chrome.
+ * vyen palette. Chrome uses the terminal's own default colour plus bold/dim, so it reads well on
+ * light and dark themes alike; nothing is drawn as a background fill. One accent (violet) marks
+ * vyen's own voice: the prompt marker, the answer glyph, the spinner. Green/red/amber appear only
+ * where they carry status (diffs, failures, approvals, auto-approve), sky only for code and commands.
  */
+const DIM = '\x1b[2m';
+const BOLD = '\x1b[1m';
+const DEFAULT_FG = '\x1b[39m';
 export const THEME = {
   reset: '\x1b[0m',
   brand: fg(167, 139, 250),
-  brandBold: `\x1b[1m${fg(167, 139, 250)}`,
-  thinking: fg(150, 135, 200),
-  bullet: fg(129, 120, 190),
-  text: fg(226, 232, 240),
-  strong: `\x1b[1m${fg(241, 245, 249)}`,
-  muted: fg(148, 163, 184),
-  faint: fg(100, 116, 139),
+  brandBold: `${BOLD}${fg(167, 139, 250)}`,
+  thinking: DIM,
+  bullet: DIM,
+  text: DEFAULT_FG,
+  strong: BOLD,
+  muted: DIM,
+  faint: DIM,
   info: fg(125, 211, 252),
   ok: fg(74, 222, 128),
-  err: fg(251, 113, 133),
+  err: fg(248, 113, 113),
   warn: fg(251, 191, 36),
-  codeText: fg(203, 213, 225),
-  bandBg: bgc(24, 26, 36),
-  userBg: bgc(36, 38, 54),
-  codeBg: bgc(22, 24, 33),
-  addBg: bgc(18, 52, 35),
-  addFg: fg(134, 239, 172),
-  delBg: bgc(66, 24, 32),
-  delFg: fg(253, 164, 175),
+  codeText: DEFAULT_FG,
+  bandBg: '',
+  userBg: '',
+  codeBg: '',
+  addBg: '',
+  addFg: fg(74, 222, 128),
+  delBg: '',
+  delFg: fg(248, 113, 113),
 } as const;
 
 /** Single-column glyph vocabulary for transcript cells (none are Extended_Pictographic, so width() = 1). */
@@ -64,24 +69,55 @@ const CELL_TONES: Record<string, string> = {
   '○': THEME.muted,
   '●': THEME.ok,
   '✗': THEME.err,
-  '±': THEME.info,
+  '±': THEME.text,
   '◈': THEME.brand,
-  '≡': THEME.brand,
+  '≡': THEME.muted,
   '▲': THEME.warn,
   '◌': THEME.faint,
-  '↻': THEME.info,
-  '↺': THEME.warn,
+  '↻': THEME.muted,
+  '↺': THEME.muted,
   '◇': THEME.brand,
 };
 
 /** Private-use code point marking user-turn lines inside the plain-text transcript. */
 const USER_MARK = '\uE000';
+const TRANSCRIPT_MAX_CHARS = 160_000;
+const TRANSCRIPT_KEEP_CHARS = 120_000;
+
+/** Parser state carried from one transcript line to the next (see renderStyledBodyLines). */
+interface ParseState {
+  block: 'normal' | 'answer' | 'reasoning';
+  inCode: boolean;
+  inDiff: boolean;
+  answerFirst: boolean;
+  lastWasUser: boolean;
+  inBanner: boolean;
+}
+const initialParseState = (): ParseState => ({ block: 'normal', inCode: false, inDiff: false, answerFirst: false, lastWasUser: false, inBanner: false });
+/** First line of the welcome banner (see welcomeBanner in cli.ts). */
+const BANNER_TITLE_RE = /^◆ vyen v\S+\s*$/;
+const BANNER_LABEL_RE = /(^|\s)(model|effort|mode|gateway|workspace|session|branch)(?= )/g;
+
+/**
+ * Rows already produced for a transcript prefix. While a turn streams, the transcript only grows,
+ * so each frame parses just the new tail instead of re-wrapping and re-styling the whole session.
+ */
+interface BodyCache {
+  cols: number;
+  rich: boolean;
+  showReasoning: boolean;
+  /** Transcript prefix (ending right after a newline) whose rows are cached. */
+  source: string;
+  state: ParseState;
+  rows: Row[];
+  styled: string[];
+}
 
 type Seg = [text: string, sgr: string];
 type RowKind =
   | 'blank' | 'user' | 'answer' | 'normal' | 'heading' | 'quote' | 'rule' | 'table'
   | 'reasoningHead' | 'reasoning' | 'codeHead' | 'code' | 'codeFoot'
-  | 'cell' | 'child' | 'diff' | 'diffMeta' | 'box' | 'hint';
+  | 'cell' | 'child' | 'diff' | 'diffMeta' | 'box' | 'hint' | 'bannerTitle' | 'banner';
 interface Row {
   kind: RowKind;
   pre: string;
@@ -97,8 +133,8 @@ export function formatTokenCount(n: number): string {
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
 }
 export const SLASH_COMMANDS = [
-  '/help', '/setup', '/model', '/effort', '/mode', '/auto', '/yolo', '/view', '/transcript',
-  '/copy', '/btw', '/side', '/goal', '/recap', '/skills', '/memories', '/presets', '/mention',
+  '/help', '/setup', '/key', '/model', '/effort', '/mode', '/auto', '/yolo', '/view', '/transcript',
+  '/copy', '/btw', '/side', '/goal', '/recap', '/skills', '/prompts', '/memories', '/presets', '/mention',
   '/cd', '/pwd', '/mcp', '/subagents', '/agent', '/plan', '/revert', '/undo',
   '/checkpoints', '/todo', '/resume', '/new', '/delete', '/compact', '/diff', '/review', '/fork', '/rename',
   '/export', '/init', '/status', '/tools', '/sessions', '/debug-config', '/warnings', '/doctor', '/clear', '/exit',
@@ -134,7 +170,7 @@ const SLASH_DESCRIPTIONS: Record<string, string> = {
   '/compact': 'summarize history to free context',
   '/diff': 'show git diff in workspace (including untracked files)',
   '/review': 'run code review on current diff, branch, or commit',
-  '/resume': 'resume a saved session',
+  '/resume': 'resume a session: this folder or all projects (←→ to switch)',
   '/new': 'start a fresh session',
   '/delete': 'delete a saved session by id or current session',
   '/debug-config': 'show resolved config paths, model capabilities, and settings',
@@ -142,6 +178,8 @@ const SLASH_DESCRIPTIONS: Record<string, string> = {
   '/status': 'show session & token status',
   '/doctor': 'verify environment & gateway /models',
   '/setup': 'run the provider / model setup wizard',
+  '/key': 'replace the stored API key (input hidden)',
+  '/prompts': 'list custom prompt files (.vyen/prompts/*.md); run with /prompts:<name>',
   '/todo': 'show or clear the todo checklist',
   '/fork': 'fork this session into a new one',
   '/rename': 'rename the current session',
@@ -163,12 +201,26 @@ export function terminalText(value: string): string {
     .replace(CONTROL_CHARS_RE, '');
 }
 
-const width = (c: string) =>
+const slowWidth = (c: string) =>
   /\p{Mark}/u.test(c)
     ? 0
     : /[\p{Extended_Pictographic}\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe6f\uff01-\uff60]/u.test(c)
       ? 2
       : 1;
+// Column width per BMP code point, filled lazily (stored as width + 1; 0 = not computed yet).
+// Rendering measures every character of the transcript, so two Unicode regex tests per character
+// were the dominant cost of a frame.
+const widthCache = new Uint8Array(0x10000);
+const width = (c: string) => {
+  const code = c.charCodeAt(0);
+  if (code < 0x300) return 1; // ASCII and Latin-1/Extended-A/B: never wide, never combining
+  if (c.length !== 1) return slowWidth(c); // astral plane (emoji): rare
+  const cached = widthCache[code];
+  if (cached) return cached - 1;
+  const w = slowWidth(c);
+  widthCache[code] = w + 1;
+  return w;
+};
 
 export function wrapTerminal(text: string, columns: number): string[] {
   const maxCols = Math.max(1, columns);
@@ -210,17 +262,30 @@ export function sliceVisible(str: string, maxCols: number): string {
   return out;
 }
 
+/** Clips a line that may contain SGR sequences to `cols` visible columns, keeping the styles. */
+export function sliceAnsiLine(line: string, cols: number): string {
+  if (visibleLength(line) <= cols) return line;
+  let out = '';
+  let used = 0;
+  // oxlint-disable-next-line no-control-regex
+  for (const part of line.split(/(\x1b\[[0-9;]*m)/)) {
+    if (part.startsWith('\x1b[')) { out += part; continue; }
+    for (const c of part) {
+      const w = width(c);
+      if (used + w > cols) return `${out}\x1b[0m`;
+      out += c;
+      used += w;
+    }
+  }
+  return out;
+}
+
 export function padEndVisible(str: string, cols: number): string {
   const sliced = sliceVisible(str, cols);
   const vis = visibleLength(sliced);
   return `${sliced}${' '.repeat(Math.max(0, cols - vis))}`;
 }
 
-function padRightAnsi(str: string, cols: number, bgAnsi = ''): string {
-  const vis = visibleLength(str);
-  const pad = Math.max(0, cols - vis);
-  return `${bgAnsi}${str}${bgAnsi}${' '.repeat(pad)}\x1b[0m`;
-}
 
 /** Format inline Markdown (**bold**, `code`, [label](url), ~~strike~~) into ANSI spans. */
 export function formatInlineMarkdown(raw: string, baseSgr = '\x1b[0m'): string {
@@ -400,6 +465,34 @@ const LARGE_PASTE_CHAR_THRESHOLD = 150;
 const ATOMIC_PLACEHOLDER_END_RE = /(\[(?:Image #\d+|Pasted text #\d+[^\]]*)\]\s?)$/;
 const ATOMIC_PLACEHOLDER_START_RE = /^(\[(?:Image #\d+|Pasted text #\d+[^\]]*)\]\s?)/;
 
+/** One selectable row of a tabbed picker (see TerminalUI.pick). */
+export interface PickerItem {
+  id: string;
+  /** Main text (left, clipped with an ellipsis). */
+  label: string;
+  /** Short right-aligned facts, e.g. folder, age, message count. */
+  meta?: string;
+  /** Extra line shown under the list for the selected row only (e.g. the full path). */
+  detail?: string;
+  /** Additional text matched by the type-to-filter box. */
+  search?: string;
+}
+export interface PickerTab {
+  label: string;
+  items: PickerItem[];
+  /** Shown when the tab (or the filter result) is empty. */
+  empty?: string;
+}
+interface PickerState {
+  title: string;
+  tabs: PickerTab[];
+  tab: number;
+  index: number;
+  filter: string;
+  action: string;
+  resolve: (value: { tab: number; item: PickerItem } | undefined) => void;
+}
+
 /** Rejection reason when the user presses Esc on a question opened with `escCancels`. */
 export class InputCancelledError extends Error {
   constructor() {
@@ -474,6 +567,8 @@ export class TerminalUI {
   private escCancels = false;
   private escHint = 'skip';
   private turnSnapshots: string[] = [];
+  private masked = false;
+  private picker?: PickerState;
   private inputRestoredFromRevert = false;
   private escPrimed?: 'backtrack' | 'clear';
   private escPrimeTimer?: NodeJS.Timeout;
@@ -484,6 +579,7 @@ export class TerminalUI {
   private branch = '';
   private contextWindow = 0;
   private contextUsed?: number;
+  private goal?: SessionGoal;
   onToggleMode?: () => void;
   onCycleEffort?: (direction: 1 | -1) => void;
   onToggleTranscript?: (active: boolean) => void;
@@ -627,7 +723,9 @@ export class TerminalUI {
       const pending = this.pending;
       this.pending = undefined;
       pending.cleanup();
-      pending.resolve('a');
+      // Approve this one request only. Answering "always" would keep the tool auto-approved after
+      // the user cycles on to plan/readonly/ask (Shift+Tab passes through auto on the way).
+      pending.resolve('y');
     }
     this.schedule();
   }
@@ -689,6 +787,130 @@ export class TerminalUI {
     this.schedule();
   }
 
+  setGoal(goal: SessionGoal | undefined) {
+    this.goal = goal;
+    this.schedule();
+  }
+
+  /**
+   * Shows a tabbed list above the prompt and resolves with the chosen row, or undefined on Esc.
+   * ←/→ or Tab switch tabs, ↑/↓ (PgUp/PgDn, Home/End) move, typing filters every tab, Enter picks.
+   */
+  pick(title: string, tabs: PickerTab[], options: { initialTab?: number; action?: string } = {}): Promise<{ tab: number; item: PickerItem } | undefined> {
+    if (this.closed) return Promise.resolve(undefined);
+    this.picker?.resolve(undefined);
+    return new Promise(resolve => {
+      this.picker = {
+        title: terminalText(title),
+        tabs: tabs.map(t => ({ ...t, label: terminalText(t.label) })),
+        tab: Math.max(0, Math.min(tabs.length - 1, options.initialTab ?? 0)),
+        index: 0,
+        filter: '',
+        action: options.action ?? 'select',
+        resolve: value => {
+          this.picker = undefined;
+          this.needsFullClear = true;
+          this.schedule(0);
+          resolve(value);
+        },
+      };
+      this.scroll = 0;
+      this.schedule(0);
+    });
+  }
+
+  isPicking(): boolean {
+    return this.picker !== undefined;
+  }
+
+  private pickerMatches(state: PickerState, tab = state.tab): PickerItem[] {
+    const items = state.tabs[tab]?.items ?? [];
+    const words = state.filter.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return items;
+    return items.filter(item => {
+      const haystack = `${item.label} ${item.meta ?? ''} ${item.detail ?? ''} ${item.search ?? ''} ${item.id}`.toLowerCase();
+      return words.every(word => haystack.includes(word));
+    });
+  }
+
+  private pickerKey(text: string | undefined, key: Key): void {
+    const state = this.picker!;
+    const matches = this.pickerMatches(state);
+    const page = Math.max(3, (this.target.rows || 24) - 12);
+    const switchTab = (delta: number) => {
+      state.tab = (state.tab + delta + state.tabs.length) % state.tabs.length;
+      state.index = 0;
+    };
+    if (key.name === 'escape' || (key.ctrl && key.name === 'c')) state.resolve(undefined);
+    else if (key.name === 'return' || key.name === 'enter') {
+      const item = matches[state.index];
+      if (item) state.resolve({ tab: state.tab, item });
+    } else if (key.name === 'right' || (key.name === 'tab' && !key.shift)) switchTab(1);
+    else if (key.name === 'left' || (key.name === 'tab' && key.shift) || key.sequence === '\x1b[Z') switchTab(-1);
+    else if (key.name === 'up' || (key.ctrl && key.name === 'p')) state.index = Math.max(0, state.index - 1);
+    else if (key.name === 'down' || (key.ctrl && key.name === 'n')) state.index = Math.min(Math.max(0, matches.length - 1), state.index + 1);
+    else if (key.name === 'pageup') state.index = Math.max(0, state.index - page);
+    else if (key.name === 'pagedown') state.index = Math.min(Math.max(0, matches.length - 1), state.index + page);
+    else if (key.name === 'home') state.index = 0;
+    else if (key.name === 'end') state.index = Math.max(0, matches.length - 1);
+    else if (key.name === 'backspace') { state.filter = state.filter.slice(0, -1); state.index = 0; }
+    else if (key.ctrl && key.name === 'u') { state.filter = ''; state.index = 0; }
+    else if (text && !key.ctrl && !key.meta && !/[\r\n]/.test(text)) {
+      state.filter = (state.filter + terminalText(text)).slice(0, 120);
+      state.index = 0;
+    }
+    if (this.picker) this.schedule(0);
+  }
+
+  /** Picker rows rendered between the transcript and the prompt rule. */
+  private pickerLines(state: PickerState, cols: number, maxRows: number): string[] {
+    const T = THEME;
+    const R = T.reset;
+    const lines: string[] = [];
+    const tabsText = state.tabs.map((t, i) => {
+      const count = this.pickerMatches(state, i).length;
+      const label = `${t.label} ${count}`;
+      return i === state.tab ? `${T.brandBold}${label}${R}` : `${T.faint}${label}${R}`;
+    }).join('   ');
+    lines.push(sliceAnsiLine(`${T.strong}${state.title}${R}   ${tabsText}`, cols));
+    const matches = this.pickerMatches(state);
+    const listRows = Math.max(1, maxRows - 3);
+    if (!matches.length) {
+      const empty = state.filter ? `No match for "${state.filter}"` : state.tabs[state.tab]?.empty ?? 'Nothing here yet';
+      lines.push(`${T.faint}  ${sliceVisible(empty, Math.max(1, cols - 2))}${R}`);
+    } else {
+      state.index = Math.min(state.index, matches.length - 1);
+      const start = Math.min(Math.max(0, state.index - listRows + 1), Math.max(0, matches.length - listRows));
+      for (let i = start; i < Math.min(matches.length, start + listRows); i++) {
+        const item = matches[i];
+        const selected = i === state.index;
+        const meta = item.meta ? sliceVisible(terminalText(item.meta), Math.max(0, Math.floor(cols * 0.45))) : '';
+        const metaCols = visibleLength(meta);
+        const labelRoom = Math.max(4, cols - 2 - metaCols - (metaCols ? 3 : 0));
+        let label = terminalText(item.label).replace(/\s+/g, ' ');
+        if (visibleLength(label) > labelRoom) label = `${sliceVisible(label, labelRoom - 1)}…`;
+        const gap = ' '.repeat(Math.max(metaCols ? 3 : 0, cols - 2 - visibleLength(label) - metaCols));
+        lines.push(selected
+          ? `${T.brandBold}› ${R}${T.strong}${label}${R}${gap}${T.faint}${meta}${R}`
+          : `  ${label}${gap}${T.faint}${meta}${R}`);
+      }
+      const detail = matches[state.index]?.detail;
+      if (detail) lines.push(`${T.faint}  ${sliceVisible(terminalText(detail), Math.max(1, cols - 2))}${R}`);
+    }
+    return lines;
+  }
+
+  /** Queues input (prompt or command) to be returned by the next main-prompt question(). */
+  queuePrompt(text: string) {
+    if (!text.trim()) return;
+    this.queuedPrompts.push(text);
+    this.schedule(0);
+  }
+
+  hasQueuedPrompts(): boolean {
+    return this.queuedPrompts.length > 0;
+  }
+
   private flushExploreGroup() {
     if (!this.exploreGroup.length) return;
     const reads = this.exploreGroup.filter(e => e.kind === 'read').map(e => e.summary);
@@ -706,7 +928,17 @@ export class TerminalUI {
 
   private appendTranscript(text: string, forceBottom = false) {
     const wasAtBottom = this.scroll === 0;
-    this.transcript = (this.transcript + terminalText(text)).slice(-120_000);
+    let next = this.transcript + terminalText(text);
+    if (next.length > TRANSCRIPT_MAX_CHARS) {
+      // Trim in large steps (so the incremental renderer rarely has to start over) and only at a
+      // block boundary: cutting inside a code fence used to render the rest of the session as code.
+      const from = next.length - TRANSCRIPT_KEEP_CHARS;
+      const boundary = next.indexOf('\n[normal]\n', from);
+      const lineBreak = next.indexOf('\n', from);
+      const cut = boundary >= 0 && boundary < next.length - 1 ? boundary + 1 : lineBreak >= 0 ? lineBreak + 1 : from;
+      next = next.slice(cut);
+    }
+    this.transcript = next;
     if (forceBottom || wasAtBottom) this.scroll = 0;
     this.schedule(16);
   }
@@ -856,6 +1088,8 @@ export class TerminalUI {
     } else if (event.type === 'plan_exit') {
       this.flushExploreGroup();
       this.appendCell(`\n${GLYPH.todo} Plan approved — exited plan mode\n`);
+    } else if (event.type === 'goal') {
+      this.goal = event.goal;
     } else if (event.type === 'usage') {
       this.tokens += event.total;
       // Prompt + completion of the latest request is the provider's own measure of context occupancy.
@@ -990,12 +1224,14 @@ export class TerminalUI {
     label = 'vyen> ',
     signal?: AbortSignal,
     remember = false,
-    opts: { escCancels?: boolean; escHint?: string } = {},
+    opts: { escCancels?: boolean; escHint?: string; mask?: boolean } = {},
   ): Promise<string> {
     if (this.closed) return Promise.reject(new Error('Terminal closed.'));
     if (this.pending) return Promise.reject(new Error('A terminal question is already active.'));
     signal?.throwIfAborted();
     this.label = terminalText(label);
+    // Secrets (API keys) render as bullets and never enter the prompt history.
+    this.masked = Boolean(opts.mask) && !remember;
     this.escCancels = Boolean(opts.escCancels);
     this.escHint = opts.escHint ?? (opts.escCancels ? 'cancel' : /y\/N/.test(label) ? 'deny' : 'skip');
     if (remember && this.queuedPrompts.length > 0) {
@@ -1015,7 +1251,14 @@ export class TerminalUI {
     this.remember = remember;
     const result = new Promise<string>((resolve, reject) => {
       const abort = () => this.reject(new Error('Input cancelled.'));
-      this.pending = { resolve, reject, cleanup: () => signal?.removeEventListener('abort', abort) };
+      this.pending = {
+        resolve,
+        reject,
+        cleanup: () => {
+          this.masked = false;
+          signal?.removeEventListener('abort', abort);
+        },
+      };
       signal?.addEventListener('abort', abort, { once: true });
     });
     this.schedule();
@@ -1103,6 +1346,13 @@ export class TerminalUI {
    * placeholders (Codex `apply_paste` pattern) so the composer never floods or lags.
    */
   private handlePaste(rawText: string, allowCoalesce = false) {
+    if (this.picker) {
+      // Pasting while a picker is open goes into its filter (first line only).
+      this.picker.filter = (this.picker.filter + terminalText(rawText.split(/\r?\n/)[0] ?? '')).slice(0, 120);
+      this.picker.index = 0;
+      this.schedule(0);
+      return;
+    }
     const normalized = terminalText(rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
     const cleaned =
       !normalized.slice(0, -1).includes('\n') && normalized.endsWith('\n')
@@ -1411,6 +1661,10 @@ export class TerminalUI {
       const pasted = this.bracketedPasteBuffer;
       this.bracketedPasteBuffer = '';
       this.handlePaste(pasted);
+      return;
+    }
+    if (this.picker && !this.inBracketedPaste) {
+      this.pickerKey(text, key);
       return;
     }
 
@@ -1880,10 +2134,29 @@ export class TerminalUI {
    * rows, wraps every row to `columns` BEFORE styling (prefixes included), then paints each row.
    * No emitted row can exceed the terminal width, so soft-wrap cursor drift is impossible.
    */
+  private bodyCache?: BodyCache;
+
   private renderStyledBodyLines(columns: number, rich: boolean): string[] {
     const cols = Math.max(4, columns);
     const showReasoning = this.viewMode !== 'normal' || this.inTranscriptOverlay;
-    const rows: Row[] = [];
+    const transcript = this.transcript;
+    const cache = this.bodyCache;
+    const reuse = cache !== undefined
+      && cache.cols === cols && cache.rich === rich && cache.showReasoning === showReasoning
+      && transcript.length >= cache.source.length && transcript.startsWith(cache.source);
+    const st: ParseState = reuse ? { ...cache!.state } : initialParseState();
+    const rows: Row[] = reuse ? cache!.rows.slice() : [];
+    const baseStyled = reuse ? cache!.styled : [];
+    const baseSource = reuse ? cache!.source : '';
+    const rawLines = transcript.slice(baseSource.length).split('\n');
+
+    // Checkpoint for the next frame: the start of the last (possibly still streaming) line, moved
+    // back past any table rows because a growing table changes the column widths of earlier rows.
+    let checkpoint = rawLines.length - 1;
+    while (checkpoint > 0 && isTableRow(rawLines[checkpoint - 1])) checkpoint--;
+    let checkpointRows = rows.length;
+    let checkpointState: ParseState = { ...st };
+
     const lastKind = (): RowKind | undefined => rows[rows.length - 1]?.kind;
     const lastContentKind = (): RowKind | undefined => {
       for (let i = rows.length - 1; i >= 0; i--) if (rows[i].kind !== 'blank') return rows[i].kind;
@@ -1896,6 +2169,27 @@ export class TerminalUI {
       const chunks = wrapChunks(text, cols - visibleLength(first), cols - visibleLength(cont), words);
       chunks.forEach((chunk, i) => rows.push({ kind, pre: i === 0 ? first : cont, text: chunk, ...extra }));
     };
+
+    // Pre-scan contiguous Markdown table blocks so every row of a table shares column widths.
+    const tableWidths = new Map<number, number[]>();
+    for (let i = 0; i < rawLines.length; i++) {
+      if (!isTableRow(rawLines[i])) continue;
+      let j = i;
+      const widths: number[] = [];
+      while (j < rawLines.length && isTableRow(rawLines[j])) {
+        const trimmedRow = rawLines[j].trim();
+        if (!TABLE_SEPARATOR_RE.test(trimmedRow)) {
+          splitTableCells(trimmedRow).forEach((c, k) => {
+            widths[k] = Math.max(widths[k] ?? 0, visibleLength(displayedCell(c)));
+          });
+        }
+        j++;
+      }
+      for (let k = i; k < j; k++) tableWidths.set(k, widths);
+      i = j - 1;
+    }
+
+    let lineIndex = -1;
 
     /** Markdown-aware paragraph row. `base` is the indent every row starts with; `lead` replaces it on the first row. */
     const pushMarkdown = (rawLine: string, base: string, lead: string | undefined, paraKind: RowKind) => {
@@ -1942,47 +2236,25 @@ export class TerminalUI {
       wrapInto(paraKind, rawLine.slice(indent.length), firstPre(base + indent), base + indent);
     };
 
-    // Pre-scan contiguous Markdown table blocks so every row of a table shares column widths.
-    const rawLines = this.transcript.split('\n');
-    const tableWidths = new Map<number, number[]>();
-    for (let i = 0; i < rawLines.length; i++) {
-      if (!isTableRow(rawLines[i])) continue;
-      let j = i;
-      const widths: number[] = [];
-      while (j < rawLines.length && isTableRow(rawLines[j])) {
-        const trimmedRow = rawLines[j].trim();
-        if (!TABLE_SEPARATOR_RE.test(trimmedRow)) {
-          splitTableCells(trimmedRow).forEach((c, k) => {
-            widths[k] = Math.max(widths[k] ?? 0, visibleLength(displayedCell(c)));
-          });
-        }
-        j++;
-      }
-      for (let k = i; k < j; k++) tableWidths.set(k, widths);
-      i = j - 1;
-    }
-
-    let block: 'normal' | 'answer' | 'reasoning' = 'normal';
-    let inCode = false;
-    let inDiff = false;
-    let answerFirst = false;
-    let lastWasUser = false;
-    let lineIndex = -1;
-
     for (const rawLine of rawLines) {
       lineIndex++;
+      if (lineIndex === checkpoint) {
+        checkpointRows = rows.length;
+        checkpointState = { ...st };
+      }
       const trimmed = rawLine.trim();
       if (rawLine === '[normal]') {
-        block = 'normal';
-        inCode = false;
-        inDiff = false;
-        answerFirst = false;
+        st.block = 'normal';
+        st.inCode = false;
+        st.inDiff = false;
+        st.answerFirst = false;
+        st.inBanner = false;
         continue;
       }
       if (rawLine.startsWith('[reasoning')) {
-        block = 'reasoning';
-        inCode = false;
-        inDiff = false;
+        st.block = 'reasoning';
+        st.inCode = false;
+        st.inDiff = false;
         if (showReasoning) {
           blank();
           rows.push({ kind: 'reasoningHead', pre: '', text: `${GLYPH.thinking} Thinking` });
@@ -1991,77 +2263,91 @@ export class TerminalUI {
       }
       if (rawLine.startsWith('[answer]')) {
         blank();
-        block = 'answer';
-        inCode = false;
-        inDiff = false;
-        answerFirst = true;
+        st.block = 'answer';
+        st.inCode = false;
+        st.inDiff = false;
+        st.answerFirst = true;
         continue;
       }
       if (rawLine.startsWith(USER_MARK)) {
-        if (!lastWasUser) blank();
-        wrapInto('user', rawLine.slice(USER_MARK.length), lastWasUser ? '   ' : ` ${GLYPH.user} `, '   ');
-        lastWasUser = true;
-        block = 'normal';
-        inCode = false;
-        inDiff = false;
+        if (!st.lastWasUser) blank();
+        wrapInto('user', rawLine.slice(USER_MARK.length), st.lastWasUser ? '  ' : `${GLYPH.user} `, '  ');
+        st.lastWasUser = true;
+        st.block = 'normal';
+        st.inCode = false;
+        st.inDiff = false;
         continue;
       }
-      if (lastWasUser) {
-        lastWasUser = false;
+      if (st.lastWasUser) {
+        st.lastWasUser = false;
         blank();
       }
-      if (block === 'reasoning' && !showReasoning) continue;
+      if (st.block === 'reasoning' && !showReasoning) continue;
 
       if (trimmed.startsWith('```')) {
-        if (inCode) {
-          inCode = false;
-          rows.push({ kind: 'codeFoot', pre: '', text: '' });
+        if (st.inCode) {
+          st.inCode = false;
+          blank();
         } else {
-          inCode = true;
-          inDiff = false;
-          answerFirst = false;
+          st.inCode = true;
+          st.inDiff = false;
+          st.answerFirst = false;
           rows.push({ kind: 'codeHead', pre: '', text: trimmed.slice(3).trim() || 'code' });
         }
         continue;
       }
-      if (inCode) {
-        wrapInto('code', rawLine.replace(/\t/g, '  ').trimEnd(), '   ', '   ', {}, false);
+      if (st.inCode) {
+        wrapInto('code', rawLine.replace(/\t/g, '  ').trimEnd(), '    ', '    ', {}, false);
         continue;
       }
 
       if (!trimmed) {
-        if (block === 'reasoning') continue;
-        if (block === 'answer' && answerFirst) continue;
+        st.inBanner = false;
+        if (st.block === 'reasoning') continue;
+        if (st.block === 'answer' && st.answerFirst) continue;
         blank();
         continue;
       }
 
-      if (block === 'reasoning') {
+      if (st.block === 'reasoning') {
         wrapInto('reasoning', rawLine.trimEnd(), '  ', '  ');
         continue;
       }
 
-      if (block === 'answer') {
-        const lead = answerFirst ? `${GLYPH.answer} ` : undefined;
-        answerFirst = false;
+      if (st.block === 'answer') {
+        const lead = st.answerFirst ? `${GLYPH.answer} ` : undefined;
+        st.answerFirst = false;
         pushMarkdown(rawLine.trimEnd(), '  ', lead, 'answer');
         continue;
       }
 
       // ── normal block: tool cells, diffs, CLI output, banner ──
+      if (BANNER_TITLE_RE.test(rawLine)) {
+        blank();
+        rows.push({ kind: 'bannerTitle', pre: '', text: trimmed });
+        st.inBanner = true;
+        continue;
+      }
+      if (st.inBanner) {
+        if (rawLine.startsWith('  ')) {
+          wrapInto('banner', trimmed, '  ', '    ');
+          continue;
+        }
+        st.inBanner = false;
+      }
       const cell = CELL_RE.exec(rawLine);
       if (cell) {
         blank();
-        inDiff = cell[1] === GLYPH.edit || /^(?:Edited|Added|Deleted|Wrote|Created|Updated)\b/.test(cell[2]);
+        st.inDiff = cell[1] === GLYPH.edit || /^(?:Edited|Added|Deleted|Wrote|Created|Updated)\b/.test(cell[2]);
         wrapInto('cell', cell[2].trimEnd(), `${cell[1]} `, '  ', { glyph: cell[1] });
         continue;
       }
       if (/^(?:--- |\+\+\+ |@@ )/.test(rawLine)) {
-        inDiff = true;
+        st.inDiff = true;
         rows.push({ kind: 'diffMeta', pre: '  ', text: sliceVisible(rawLine.trimEnd(), Math.max(1, cols - 2)) });
         continue;
       }
-      if (inDiff) {
+      if (st.inDiff) {
         const numbered = /^ {4}([ \d]{4}) ([+\- ])(.*)$/.exec(rawLine);
         const unified = numbered ? undefined : /^([+\- ])(.*)$/.exec(rawLine);
         if (numbered || unified) {
@@ -2075,7 +2361,7 @@ export class TerminalUI {
           rows.push({ kind: 'diffMeta', pre: '    ', text: sliceVisible(trimmed, Math.max(1, cols - 4)) });
           continue;
         }
-        inDiff = false;
+        st.inDiff = false;
       }
 
       const prevKind = lastContentKind();
@@ -2097,7 +2383,24 @@ export class TerminalUI {
       pushMarkdown(rawLine.trimEnd(), '', undefined, 'normal');
     }
 
-    return rows.map(row => (rich ? this.styleRow(row, cols) : plainRow(row, cols)));
+    const cachedRowCount = reuse ? cache!.rows.length : 0;
+    const styled = baseStyled.slice(0, cachedRowCount);
+    for (let i = cachedRowCount; i < rows.length; i++) {
+      styled.push(rich ? this.styleRow(rows[i], cols) : plainRow(rows[i], cols));
+    }
+    // Remember everything before the checkpoint line for the next frame.
+    let consumed = 0;
+    for (let i = 0; i < checkpoint; i++) consumed += rawLines[i].length + 1;
+    this.bodyCache = {
+      cols,
+      rich,
+      showReasoning,
+      source: transcript.slice(0, baseSource.length + consumed),
+      state: checkpointState,
+      rows: rows.slice(0, checkpointRows),
+      styled: styled.slice(0, checkpointRows),
+    };
+    return styled;
   }
 
   /** Paints one typed transcript row. Every branch preserves the row's visible width. */
@@ -2113,16 +2416,16 @@ export class TerminalUI {
       case 'blank':
         return '';
       case 'user': {
-        const base = `${T.userBg}${T.strong}`;
-        const pre = row.pre.trim() ? `${T.userBg}${T.brandBold}${row.pre}${R}` : `${T.userBg}${row.pre}`;
-        return padRightAnsi(`${pre}${base}${formatInlineMarkdown(row.text, `${R}${base}`)}`, cols, T.userBg);
+        // The user's turn: accent marker, bold text, no background bar.
+        const pre = row.pre.trim() ? `${T.brandBold}${row.pre}${R}` : row.pre;
+        return `${pre}${T.strong}${formatInlineMarkdown(row.text, `${R}${T.strong}`)}${R}`;
       }
       case 'answer':
         return `${answerPre(row.pre)}${md(row.text, T.text)}`;
       case 'normal':
         return `${prefix(row.pre, T.bullet)}${formatInlineMarkdown(row.text)}`;
       case 'heading': {
-        const tone = row.level === 1 ? `${T.brandBold}\x1b[4m` : T.brandBold;
+        const tone = row.level === 1 ? `${T.strong}\x1b[4m` : T.strong;
         return `${answerPre(row.pre)}${md(row.text, tone)}`;
       }
       case 'quote': {
@@ -2144,21 +2447,20 @@ export class TerminalUI {
       case 'reasoning':
         return `${row.pre}${md(row.text, `${T.faint}\x1b[3m`)}`;
       case 'codeHead':
-        return `  ${padRightAnsi(`${T.faint} ${sliceVisible(row.text, Math.max(1, cols - 4))}`, cols - 2, T.codeBg)}`;
+        return `  ${T.faint}${sliceVisible(row.text, Math.max(1, cols - 2))}${R}`;
       case 'code':
-        return `  ${padRightAnsi(`${T.codeText} ${row.text}`, cols - 2, T.codeBg)}`;
+        // A dim gutter instead of a background block: readable on any terminal theme.
+        return `  ${T.faint}│${R} ${row.text}`;
       case 'codeFoot':
-        return `  ${padRightAnsi('', cols - 2, T.codeBg)}`;
+        return '';
       case 'cell':
         return this.styleCell(row);
       case 'child':
         return this.styleChild(row);
       case 'diff': {
-        const bg = row.sign === '+' ? T.addBg : row.sign === '-' ? T.delBg : '';
-        const fg = row.sign === '+' ? T.addFg : row.sign === '-' ? T.delFg : T.muted;
+        const tone = row.sign === '+' ? `${T.addBg}${T.addFg}` : row.sign === '-' ? `${T.delBg}${T.delFg}` : T.muted;
         const num = /^(\s*\d*)/.exec(row.pre)?.[1] ?? '';
-        const content = `${T.faint}${num}${R}${bg}${fg}${row.pre.slice(num.length)}${row.text}`;
-        return bg ? padRightAnsi(content, cols, bg) : `${content}${R}`;
+        return `${T.faint}${num}${R}${tone}${row.pre.slice(num.length)}${row.text}${R}`;
       }
       case 'diffMeta':
         return `${row.pre}${row.text.startsWith('@@') ? T.info : T.faint}${row.text}${R}`;
@@ -2166,6 +2468,16 @@ export class TerminalUI {
         return styleBoxLine(row.text);
       case 'hint':
         return `${T.faint}${row.text}${R}`;
+      case 'bannerTitle': {
+        const [, version = ''] = /^◆ vyen (v\S+)/.exec(row.text) ?? [];
+        return `${T.brandBold}${GLYPH.brand}${R} ${T.strong}vyen${R} ${T.faint}${version}${R}`;
+      }
+      case 'banner': {
+        if (/^\/help\b/.test(row.text)) {
+          return `${row.pre}${T.faint}${row.text.replace(/(\/help|shift\+tab|(?:^|\s)[@$!](?= ))/g, tok => `${R}${tok}${T.faint}`)}${R}`;
+        }
+        return `${row.pre}${row.text.replace(BANNER_LABEL_RE, (_, lead: string, label: string) => `${lead}${T.faint}${label}${R}`)}`;
+      }
     }
   }
 
@@ -2252,22 +2564,22 @@ export class TerminalUI {
   }
 
   /**
-   * Builds a full-width header/footer band: left segments are clipped last, right groups are dropped
-   * (front first) when the terminal is too narrow, so the band never exceeds `cols` visible columns.
+   * Lays out one full-width line: left segments are clipped last, right groups are dropped
+   * (front first) when the terminal is too narrow, so the line never exceeds `cols` columns.
    */
   private band(left: Seg[], right: Seg[][], cols: number, rich: boolean): string {
     const T = THEME;
-    const sep: Seg = [' · ', T.faint];
+    const sep: Seg = ['   ', ''];
     const flatten = (groups: Seg[][]): Seg[] => groups.flatMap((g, i) => (i === 0 ? g : [sep, ...g]));
     const plainWidth = (segs: Seg[]) => visibleLength(segs.map(s => s[0]).join(''));
-    const leftMin = Math.min(plainWidth(left), 12);
+    // The left side (mode, model, effort) keeps up to 60% of the width before right groups are dropped.
+    const leftMin = Math.min(plainWidth(left), Math.floor(cols * 0.6));
     const groups = right.filter(g => g.length > 0);
     while (groups.length && leftMin + plainWidth(flatten(groups)) + 2 > cols) groups.shift();
     const rightSegs = flatten(groups);
-    if (rightSegs.length) rightSegs.push([' ', '']);
     const rightWidth = plainWidth(rightSegs);
-    const leftAvail = Math.max(0, cols - rightWidth - (rightWidth ? 1 : 0));
-    const paint = (text: string, sgr: string) => (rich && sgr ? `${sgr}${text}${T.reset}${T.bandBg}` : text);
+    const leftAvail = Math.max(0, cols - rightWidth - (rightWidth ? 2 : 0));
+    const paint = (text: string, sgr: string) => (rich && sgr ? `${sgr}${text}${T.reset}` : text);
     let used = 0;
     let leftOut = '';
     for (const [text, sgr] of left) {
@@ -2279,22 +2591,16 @@ export class TerminalUI {
     }
     const gap = ' '.repeat(Math.max(0, cols - used - rightWidth));
     const rightOut = rightSegs.map(([text, sgr]) => paint(text, sgr)).join('');
-    return rich ? `${T.bandBg}${leftOut}${gap}${rightOut}${T.reset}` : `${leftOut}${gap}${rightOut}`.trimEnd();
+    return rightOut ? `${leftOut}${gap}${rightOut}` : leftOut;
   }
 
+  /** Context occupancy as a short percentage, coloured only when it starts to matter. */
   private contextGroup(): Seg[] {
     if (!this.contextWindow || this.contextUsed === undefined) return [];
     const T = THEME;
     const pct = Math.max(0, Math.min(100, Math.round((this.contextUsed / this.contextWindow) * 100)));
-    const cells = 8;
-    const filled = Math.min(cells, Math.round((pct / 100) * cells));
-    const tone = pct >= 90 ? T.err : pct >= 70 ? T.warn : T.brand;
-    return [
-      ['ctx ', T.faint],
-      ['▰'.repeat(filled), tone],
-      ['▱'.repeat(cells - filled), T.faint],
-      [` ${pct}%`, pct >= 70 ? tone : T.muted],
-    ];
+    const tone = pct >= 90 ? T.err : pct >= 70 ? T.warn : T.faint;
+    return [[`ctx ${pct}%`, tone]];
   }
 
   private render() {
@@ -2313,7 +2619,7 @@ export class TerminalUI {
     const titleParts = this.title.split(' · ');
     const modelName = titleParts[0] || this.title;
     const sessionLabel = titleParts.slice(1).join(' · ') || 'session';
-    const elapsedStr = this.turnStartedAt ? `${formatCompactDuration(Date.now() - this.turnStartedAt)} • ` : '';
+    const elapsed = this.turnStartedAt ? formatCompactDuration(Date.now() - this.turnStartedAt) : '';
 
     // Body lines with strict width bound & scroll-anchor lock when scrolled up
     const all = this.renderStyledBodyLines(safeCols, rich);
@@ -2322,14 +2628,45 @@ export class TerminalUI {
     }
     this.lastBodyTotalLines = all.length;
 
-    const todoGroup: Seg[] = this.todoLabel ? [[`${GLYPH.todo} `, T.brand], [this.todoLabel, T.muted]] : [];
-    const brandSegs: Seg[] = [[' ', ''], [GLYPH.brand, T.brandBold], [' vyen', T.strong]];
+    const activeTurnSec = this.turnStartedAt ? (Date.now() - this.turnStartedAt) / 1000 : 0;
+    const goalIndicator = this.goal ? formatGoalStatusIndicator(this.goal, activeTurnSec) : '';
+    const goalTone =
+      this.goal?.status === 'active'
+        ? T.brand
+        : this.goal?.status === 'complete'
+          ? T.ok
+          : this.goal?.status === 'paused'
+            ? T.muted
+            : T.warn;
+    const goalGroup: Seg[] = goalIndicator ? [[goalIndicator, goalTone]] : [];
+    const todoGroup: Seg[] = this.todoLabel ? [[`todo ${this.todoLabel}`, T.faint]] : [];
+    const tokenGroup: Seg[] = [[`${formatTokenCount(this.tokens)} tokens`, T.faint]];
 
-    // Full-screen Transcript overlay (Ctrl+T or /transcript)
+    // A picker (e.g. /resume) replaces the status/popup rows and turns the prompt into its filter.
+    if (this.picker) {
+      const state = this.picker;
+      const maxPickerRows = Math.max(4, Math.min(18, rows - 6));
+      const pickerLines = this.pickerLines(state, safeCols, maxPickerRows);
+      const height = Math.max(1, rows - pickerLines.length - 3);
+      this.maxScroll = Math.max(0, all.length - height);
+      this.scroll = 0;
+      const body = all.slice(Math.max(0, all.length - height));
+      while (body.length < height) body.push('');
+      const filter = sliceVisible(state.filter, Math.max(1, safeCols - 3));
+      const promptLine = `${T.brandBold}› ${T.reset}${filter || `${T.faint}type to filter${T.reset}`}`;
+      const hints = `←→ tabs   ↑↓ select   enter ${state.action}   esc cancel`;
+      const footer = rich ? `${T.faint}${clip(hints)}${T.reset}` : clip(hints);
+      const screenLines = [...body, ...pickerLines, `${T.faint}${'─'.repeat(safeCols)}${T.reset}`, promptLine, footer];
+      const cursorSeq = `\x1b[${screenLines.length - 1};${Math.min(safeCols, 3 + visibleLength(filter))}H\x1b[?25h`;
+      this.flushScreenLines(screenLines, columns, rows, cursorSeq);
+      return;
+    }
+
+    // Full-screen transcript (Ctrl+T or /transcript): one dim line above and below the history.
     if (this.inTranscriptOverlay) {
       const txHeader = this.band(
-        [...brandSegs, [' · ', T.faint], ['TRANSCRIPT', T.brandBold], [' · ', T.faint], [sessionLabel, T.muted]],
-        [todoGroup],
+        [[`${GLYPH.brand} `, T.brandBold], ['transcript', T.strong], [`   ${sessionLabel}`, T.faint]],
+        [goalGroup, todoGroup],
         safeCols,
         rich,
       );
@@ -2339,13 +2676,10 @@ export class TerminalUI {
       const end = all.length - this.scroll;
       const body = all.slice(Math.max(0, end - height), end);
       while (body.length < height) body.push('');
-
-      const live: Seg[] = busy
-        ? [[`${indicator} `, T.brand], ['Working', T.strong], [` (${elapsedStr}esc to interrupt)`, T.faint], [' · ', T.faint]]
-        : [];
+      const live: Seg[] = busy ? [[`${indicator} `, T.brand], ['working', T.text], [`  ${elapsed}   `, T.faint]] : [];
       const txFooter = this.band(
-        [[' ', ''], ...live, [`line ${Math.max(1, end)}/${Math.max(1, all.length)}`, T.muted]],
-        [[['↑↓ PgUp/PgDn scroll · Home/End · q / Esc / Ctrl+T back', T.faint]]],
+        [...live, [`line ${Math.max(1, end)} of ${Math.max(1, all.length)}`, T.faint]],
+        [[['↑↓ scroll   esc back', T.faint]]],
         safeCols,
         rich,
       );
@@ -2353,45 +2687,40 @@ export class TerminalUI {
       return;
     }
 
-    // Header band: brand · workspace · branch · session  ……  todo · context meter
-    const leftHeader: Seg[] = [...brandSegs];
-    if (this.workspaceName) leftHeader.push([' · ', T.faint], [this.workspaceName, T.text]);
-    if (this.branch) leftHeader.push([' · ', T.faint], [this.branch, T.info]);
-    leftHeader.push([' · ', T.faint], [sessionLabel, T.muted]);
-    const header = rich ? this.band(leftHeader, [todoGroup, this.contextGroup()], safeCols, rich) : clip(`vyen · ${sessionLabel}`);
-
-    // Live status row (Working / scroll / esc hints / attachments / notices)
+    // Live status row: only says something when there is something to say.
     let statusLine = '';
     if (this.scroll > 0) {
-      const text = clip(`↑ Scrolled up ${this.scroll}/${this.maxScroll} lines · wheel/↑↓ scroll · ctrl+t transcript · End/Esc bottom`);
-      statusLine = rich ? `${T.info}${text}${T.reset}` : text;
+      const text = clip(`↑ ${this.scroll} lines above the latest output   End or Esc returns`);
+      statusLine = rich ? `${T.faint}${text}${T.reset}` : text;
     } else if (this.escPrimed === 'backtrack' || this.escPrimed === 'clear') {
-      const text = clip(this.escPrimed === 'backtrack' ? 'Press Esc again to rewind & edit previous prompt' : 'Press Esc again to clear input');
+      const text = clip(this.escPrimed === 'backtrack' ? 'Press Esc again to rewind and edit the previous prompt' : 'Press Esc again to clear the input');
       statusLine = rich ? `${T.warn}${text}${T.reset}` : text;
-    } else if ((this.attachedImages.size > 0 || this.pastedTexts.size > 0) && !busy) {
-      const imgItems = [...this.attachedImages.entries()].map(([k, p]) => `${k}: ${basename(p)}`);
-      const pasteItems = [...this.pastedTexts.keys()];
-      const items = [...imgItems, ...pasteItems].join(' · ');
-      const text = clip(`📎 Attached ${items} (Enter to send · Backspace to remove)`);
-      statusLine = rich ? `${T.info}${text}${T.reset}` : text;
     } else if (busy) {
-      const toolsText = `• Working (${elapsedStr}esc to interrupt · ctrl+t transcript)`;
-      const body = wrapTerminal(toolsText.slice(2), Math.max(1, safeCols - 2))[0];
+      const working = this.status === 'Running' ? 'Working' : this.status;
+      const tail = `  ${elapsed}   esc to interrupt`;
       statusLine = rich
-        ? `${T.brandBold}${indicator}${T.reset} ${T.strong}${body.slice(0, 7)}${T.reset}${T.faint}${body.slice(7)}${T.reset}`
-        : clip(toolsText);
+        ? `${T.brand}${indicator}${T.reset} ${working}${T.faint}${clip(tail)}${T.reset}`
+        : clip(`${indicator} ${working}${tail}`);
+    } else if ((this.attachedImages.size > 0 || this.pastedTexts.size > 0)) {
+      const imgItems = [...this.attachedImages.entries()].map(([k, p]) => `${k} ${basename(p)}`);
+      const items = [...imgItems, ...this.pastedTexts.keys()].join('  ');
+      const text = clip(`attached  ${items}   backspace removes`);
+      statusLine = rich ? `${T.faint}${text}${T.reset}` : text;
     } else if (this.statusNotice) {
       const text = clip(this.statusNotice);
-      statusLine = rich ? `${T.muted}${text}${T.reset}` : text;
+      statusLine = rich ? `${T.faint}${text}${T.reset}` : text;
+    } else if (this.goal && this.goal.status !== 'complete') {
+      const text = clip(`${GLYPH.brand} ${goalIndicator}   ${this.goal.objective}`);
+      statusLine = rich ? `${goalTone}${text}${T.reset}` : text;
     } else if (!(currentInput.startsWith('/') && !/\s/.test(currentInput))) {
-      const text = clip([...this.toolStates.values()].slice(-2).join(' | '));
+      const text = clip([...this.toolStates.values()].slice(-2).join('   '));
       statusLine = rich && text ? `${T.faint}${text}${T.reset}` : text;
     }
 
     if (!rich) {
       // Compact fallback for tiny (<48x12) terminals
-      const footer = clip(`${this.status} · ${this.tokens} tokens · Ctrl+C cancel · PgUp/PgDn scroll`);
-      const height = Math.max(2, rows - 4);
+      const footer = clip(`${this.status}  ${this.tokens} tokens  ctrl+c cancel`);
+      const height = Math.max(2, rows - 3);
       this.maxScroll = Math.max(0, all.length - height);
       this.scroll = Math.min(this.scroll, this.maxScroll);
       const end = all.length - this.scroll;
@@ -2403,25 +2732,25 @@ export class TerminalUI {
       const { visibleBeforeCursor, shownInput } = this.sliceInputWindow(inputAvailCols);
       const prompt = wrapTerminal(label + shownInput, safeCols)[0];
       const cursorColumn = Math.min(columns, labelCols + visibleLength(visibleBeforeCursor) + 1);
-      const screenLines = [header, ...body, statusLine, footer, prompt];
-      const cursorSeq = this.pending ? `\x1b[${screenLines.length};${cursorColumn}H\x1b[?25h` : '';
+      const screenLines = [...body, statusLine, prompt, footer];
+      const cursorSeq = this.pending ? `\x1b[${screenLines.length - 1};${cursorColumn}H\x1b[?25h` : '';
       this.flushScreenLines(screenLines, columns, rows, cursorSeq);
       return;
     }
 
-    // Queued follow-ups (shown without a 'Queue' label)
+    // Queued follow-ups
     const queueLines =
       this.queuedPrompts.length > 0
-        ? [`${T.faint}\x1b[3m${clip(`  ↳ ${this.queuedPrompts.join(' · ')} (Alt+↑ edit)`)}${T.reset}`]
+        ? this.queuedPrompts.slice(-3).map(q => `${T.faint}${clip(`  queued  ${q.replace(/\s+/g, ' ')}   alt+↑ edit`)}${T.reset}`)
         : [];
 
     // Slash-command popup: live-filtered list with descriptions above the composer (↑↓ select, Tab/Enter accept)
-    const fixedRows = 1 + 1 + 1 + queueLines.length + 3; // header + gap + status + queue + composer box
+    const fixedRows = 1 + queueLines.length + 3; // status + queue + rule, prompt, footer
     const popupLines: string[] = [];
     const popup = this.slashPopup();
     if (popup.matches.length) {
       const { matches, index: selected } = popup;
-      const room = Math.max(0, Math.min(6, rows - fixedRows - 3));
+      const room = Math.max(0, Math.min(8, rows - fixedRows - 3));
       const shownCount = matches.length > room ? Math.max(0, room - 1) : matches.length;
       const start = Math.min(Math.max(0, selected - shownCount + 1), Math.max(0, matches.length - shownCount));
       const windowed = matches.slice(start, start + shownCount);
@@ -2430,16 +2759,16 @@ export class TerminalUI {
         const isSelected = start + offset === selected;
         const desc = SLASH_DESCRIPTIONS[cmd] ?? '';
         const marker = isSelected ? '› ' : '  ';
-        const plain = clip(`  ${marker}${cmd.padEnd(nameCols)}${desc}`);
-        const nameEnd = 4 + nameCols;
+        const plain = clip(`${marker}${cmd.padEnd(nameCols)}${desc}`);
+        const nameEnd = 2 + nameCols;
         popupLines.push(
           isSelected
-            ? `${T.brandBold}${plain.slice(0, nameEnd)}${T.reset}${T.muted}${plain.slice(nameEnd)}${T.reset}`
-            : `${T.text}${plain.slice(0, nameEnd)}${T.reset}${T.faint}${plain.slice(nameEnd)}${T.reset}`,
+            ? `${T.brandBold}${plain.slice(0, nameEnd)}${T.reset}${plain.slice(nameEnd)}`
+            : `${plain.slice(0, nameEnd)}${T.faint}${plain.slice(nameEnd)}${T.reset}`,
         );
       }
       if (matches.length > shownCount && room > 0) {
-        popupLines.push(`${T.faint}${clip(`    ${selected + 1}/${matches.length} · ↑↓ select · Tab/Enter accept`)}${T.reset}`);
+        popupLines.push(`${T.faint}${clip(`  ${selected + 1} of ${matches.length}   ↑↓ select   tab accept`)}${T.reset}`);
       }
     }
 
@@ -2451,60 +2780,43 @@ export class TerminalUI {
     const body = all.slice(Math.max(0, end - height), end);
     while (body.length < height) body.push('');
 
-    // Composer box ─ border color carries state: brand (idle), faint (working), amber (awaiting an answer)
-    const borderColor = asking && this.pending ? T.warn : busy ? T.faint : T.brand;
+    // Composer: a single rule, the prompt line, and one quiet footer line. The rule turns amber
+    // while vyen waits for an answer (approvals, questions); otherwise it stays dim.
+    const awaiting = asking && Boolean(this.pending);
+    const rule = `${awaiting ? T.warn : T.faint}${'─'.repeat(safeCols)}${T.reset}`;
     const promptLabel = asking ? clip(this.label) : '› ';
     const labelCols = visibleLength(promptLabel);
-    const boxInnerCols = Math.max(1, safeCols - 4 - labelCols);
-
-    const { visibleBeforeCursor, shownInput } = this.sliceInputWindow(boxInnerCols);
+    const inputCols = Math.max(1, safeCols - labelCols);
+    const { visibleBeforeCursor, shownInput } = this.sliceInputWindow(inputCols);
     const isEmptyInput = this.input.length === 0 && !asking;
     const placeholderText = busy
-      ? 'Type to queue a follow-up · /commands run immediately'
-      : 'Ask anything · / commands · @ files · $ skills · ! shell';
-    const placeholder = isEmptyInput ? wrapTerminal(placeholderText, boxInnerCols)[0] : '';
-    const innerContent = placeholder ? `${T.faint}${placeholder}${T.reset}` : formatInlineMarkdown(shownInput);
-    const innerPad = ' '.repeat(Math.max(0, boxInnerCols - visibleLength(placeholder || shownInput)));
+      ? 'Type to queue a follow-up; /commands run now'
+      : 'Ask anything   / commands   @ files   $ skills   ! shell';
+    const placeholder = isEmptyInput ? wrapTerminal(placeholderText, inputCols)[0] : '';
+    const labelStyled = asking ? `${T.warn}${T.strong}${promptLabel}${T.reset}` : `${T.brandBold}${promptLabel}${T.reset}`;
+    const content = placeholder ? `${T.faint}${placeholder}${T.reset}` : this.masked ? shownInput : formatInlineMarkdown(shownInput);
+    const promptLine = `${labelStyled}${content}`;
 
     const displayMode = this.modeLabel === 'auto' ? 'auto-approve' : this.modeLabel;
-    const modeTone =
-      displayMode === 'auto-approve' ? T.ok : displayMode === 'plan' ? T.warn : displayMode === 'readonly' ? T.muted : T.info;
-    const viewBadge = this.viewMode === 'transcript' ? ' · view:transcript' : '';
-    const metaPlain = sliceVisible(` ${displayMode} · ${modelName} · effort:${this.effortLabel}${viewBadge} `, Math.max(1, safeCols - 5));
-    const topDashes = '─'.repeat(Math.max(1, safeCols - 3 - visibleLength(metaPlain)));
-    let metaStyled = `${T.muted}${metaPlain}${T.reset}`;
-    if (metaPlain.startsWith(` ${displayMode}`)) {
-      const afterMode = metaPlain.slice(displayMode.length + 1);
-      const modelPart = afterMode.startsWith(` · ${modelName}`) ? ` · ${modelName}` : '';
-      metaStyled =
-        ` ${modeTone}\x1b[1m${displayMode}${T.reset}` +
-        (modelPart ? `${T.faint} · ${T.reset}${T.strong}${modelName}${T.reset}` : '') +
-        `${T.muted}${afterMode.slice(modelPart.length)}${T.reset}`;
-    }
-    const boxTop = `${borderColor}╭─${T.reset}${metaStyled}${borderColor}${topDashes}╮${T.reset}`;
+    // Auto-approve is the one risky state, so it is the one mode shown in a warning colour.
+    const modeTone = displayMode === 'auto-approve' ? T.warn : displayMode === 'plan' ? T.brand : T.faint;
+    const left: Seg[] = [
+      [displayMode, modeTone],
+      [`   ${modelName}`, T.faint],
+      [`   effort ${this.effortLabel}`, T.faint],
+      ...(this.viewMode === 'transcript' ? [['   transcript view', T.faint] as Seg] : []),
+    ];
+    const hint: Seg[] = awaiting ? [[`enter submit   esc ${this.escHint}`, T.faint]] : [];
+    const place: Seg[] = this.workspaceName
+      ? [[this.branch ? `${this.workspaceName} (${this.branch})` : this.workspaceName, T.faint]]
+      : [];
+    // Right-hand groups are dropped from the front when space runs out: hint and place go first.
+    const footer = this.band(left, [hint, place, goalGroup, todoGroup, this.contextGroup(), tokenGroup], safeCols, rich);
 
-    const labelStyled = asking ? `${T.warn}\x1b[1m${promptLabel}${T.reset}` : `${T.brandBold}${promptLabel}${T.reset}`;
-    const boxMid = `${borderColor}│${T.reset} ${labelStyled}${innerContent}${innerPad} ${borderColor}│${T.reset}`;
-
-    const tokenBadge = ` ${formatTokenCount(this.tokens)} tokens `;
-    const hintText = asking
-      ? ` enter submit · esc ${this.escHint} `
-      : busy
-        ? ' enter queues · esc interrupt '
-        : ' shift+tab mode · ctrl+o copy · ctrl+t transcript ';
-    let hint = hintText;
-    let badge = tokenBadge;
-    if (safeCols - 4 - visibleLength(hint) - visibleLength(badge) < 1) hint = '';
-    if (safeCols - 4 - visibleLength(hint) - visibleLength(badge) < 1) badge = '';
-    const botDashes = '─'.repeat(Math.max(1, safeCols - 4 - visibleLength(hint) - visibleLength(badge)));
-    const boxBot =
-      `${borderColor}╰─${T.reset}${T.faint}${hint}${T.reset}${borderColor}${botDashes}${T.reset}` +
-      `${T.muted}${badge}${T.reset}${borderColor}─╯${T.reset}`;
-
-    const screenLines = [header, ...body, '', statusLine, ...popupLines, ...queueLines, boxTop, boxMid, boxBot];
-    const boxMidRow = screenLines.length - 1;
-    const boxCursorCol = Math.min(safeCols - 1, 2 + labelCols + visibleLength(visibleBeforeCursor) + 1);
-    const cursorSeq = this.pending || this.input.length > 0 ? `\x1b[${boxMidRow};${boxCursorCol}H\x1b[?25h` : '';
+    const screenLines = [...body, statusLine, ...popupLines, ...queueLines, rule, promptLine, footer];
+    const promptRow = screenLines.length - 1;
+    const cursorCol = Math.min(safeCols, labelCols + visibleLength(visibleBeforeCursor) + 1);
+    const cursorSeq = this.pending || this.input.length > 0 ? `\x1b[${promptRow};${cursorCol}H\x1b[?25h` : '';
     this.flushScreenLines(screenLines, columns, rows, cursorSeq);
   }
 
@@ -2514,17 +2826,18 @@ export class TerminalUI {
    */
   private sliceInputWindow(availCols: number): { visibleBeforeCursor: string; shownInput: string } {
     const maxBeforeCols = Math.max(0, availCols - 1);
+    const chars = this.masked ? this.input.map(() => '•') : this.input;
     let startIdx = this.cursor;
     let usedBefore = 0;
     while (startIdx > 0) {
-      const ch = this.input[startIdx - 1];
+      const ch = chars[startIdx - 1];
       const w = width(ch);
       if (usedBefore + w > maxBeforeCols) break;
       usedBefore += w;
       startIdx--;
     }
-    const visibleBeforeCursor = this.input.slice(startIdx, this.cursor).join('');
-    const afterCursor = this.input.slice(this.cursor, this.cursor + availCols + 4).join('');
+    const visibleBeforeCursor = chars.slice(startIdx, this.cursor).join('');
+    const afterCursor = chars.slice(this.cursor, this.cursor + availCols + 4).join('');
     const shownInput = wrapTerminal(visibleBeforeCursor + afterCursor, availCols)[0];
     return { visibleBeforeCursor, shownInput };
   }
@@ -2540,6 +2853,7 @@ export class TerminalUI {
       this.spinTimer = undefined;
     }
     this.reject(new Error('Terminal closed.'));
+    this.picker?.resolve(undefined);
     this.source.removeListener('data', this.beforeRawData);
     this.source.removeListener('keypress', this.keypress);
     this.source.removeListener('data', this.afterRawData);

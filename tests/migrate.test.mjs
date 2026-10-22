@@ -10,8 +10,8 @@ import { resolveExecutable } from '../dist/process.js';
 const dirs = async t => {
   const root = await mkdtemp(join(tmpdir(), 'vyen-migrate-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const legacyConfigDir = join(root, 'goon-config');
-  const legacyDataDir = join(root, 'goon-data');
+  const legacyConfigDir = join(root, 'legacy-config');
+  const legacyDataDir = join(root, 'legacy-data');
   const configDir = join(root, 'vyen-config');
   const dataDir = join(root, 'vyen-data');
   await mkdir(legacyConfigDir, { recursive: true });

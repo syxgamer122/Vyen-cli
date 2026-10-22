@@ -6,12 +6,9 @@ import { spawn } from 'node:child_process';
 
 export async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'vyen-test-'));
-  // Cleanup must never abort the remaining after-hooks: a child process that
-  // still holds the directory as its cwd makes the removal fail with EBUSY,
-  // and a rejected hook would leave that child alive and hang the test file.
-  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }).catch(() => {}));
   const cwd = join(root, 'workspace');
   await mkdir(cwd);
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   return { root, cwd, config: join(root, 'config'), data: join(root, 'data') };
 }
 export async function provider(t, handler) {
@@ -47,7 +44,7 @@ export function sse(response, { text = '', calls = [], reasoning = '', textChunk
   response.end('data: [DONE]\n\n');
 }
 export function cli(f, url, args = [], options = {}) {
-  const child = spawn(process.execPath, [resolve(process.env.VYEN_TEST_BIN ?? process.env.GOON_TEST_BIN ?? 'bin/vyen.mjs'), '--cwd', f.cwd, '--base-url', url, '--model', 'test-model', ...args], {
+  const child = spawn(process.execPath, [resolve(process.env.VYEN_TEST_BIN ?? 'bin/vyen.mjs'), '--cwd', f.cwd, '--base-url', url, '--model', 'test-model', ...args], {
     env: { ...process.env, XDG_CONFIG_HOME: f.config, XDG_DATA_HOME: f.data, VYEN_API_KEY: 'test-secret-never-echo', ...options.env },
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
   });
@@ -66,10 +63,7 @@ export function cli(f, url, args = [], options = {}) {
   let stdout = '', stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });
   child.stderr.on('data', chunk => { stderr += chunk; });
-  // Backstop against a hung child, not a performance budget: several tests
-  // spawn the CLI twice with real HTTP round trips, and the suite runs its
-  // files in parallel, so 15s was marginal on a loaded machine.
-  const timeout = setTimeout(() => origKill('SIGKILL'), 30_000);
+  const timeout = setTimeout(() => origKill('SIGKILL'), 15_000);
   const done = new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('close', (code, signal) => { clearTimeout(timeout); resolve({ code, signal, stdout, stderr }); });

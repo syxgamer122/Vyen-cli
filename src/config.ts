@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { protectSecretEnv } from './process.js';
 
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
@@ -28,8 +29,6 @@ export const configDir = () => join(process.env.XDG_CONFIG_HOME || join(homedir(
 export const configPath = () => join(configDir(), 'config.json');
 export const credentialsPath = () => join(configDir(), 'credentials.json');
 export const dataDir = () => join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'vyen');
-export const legacyConfigDir = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'goon');
-export const legacyDataDir = () => join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'goon');
 
 const credentialsSchema = z.record(z.string(), z.string());
 
@@ -52,21 +51,12 @@ export async function saveCredential(keyEnv: string, apiKey: string): Promise<vo
 }
 
 export async function resolveApiKey(config: Config): Promise<string | undefined> {
-  // The new name always wins over the legacy one, whether it comes from the
-  // environment or from the credential store: a stale exported GOON_API_KEY
-  // must not shadow the VYEN_API_KEY that `vyen setup` stored. A custom
-  // keyEnv is an explicit choice and is consulted first.
-  const custom = config.keyEnv === 'VYEN_API_KEY' || config.keyEnv === 'GOON_API_KEY' ? undefined : config.keyEnv;
-  const fromEnv = (name: string | undefined) => (name ? process.env[name]?.trim() || undefined : undefined);
-  const fromEnvironment = fromEnv(custom) ?? fromEnv('VYEN_API_KEY');
-  if (fromEnvironment) return fromEnvironment;
+  protectSecretEnv(config.keyEnv);
+  const fromEnv = process.env[config.keyEnv]?.trim();
+  if (fromEnv) return fromEnv;
   const stored = await loadCredentials();
-  const fromStore = (name: string | undefined) => (name ? stored[name]?.trim() || undefined : undefined);
-  return fromStore(custom)
-    ?? fromStore('VYEN_API_KEY')
-    ?? fromEnv('GOON_API_KEY')
-    ?? fromStore('GOON_API_KEY')
-    ?? undefined;
+  const fromStore = stored[config.keyEnv]?.trim();
+  return fromStore || undefined;
 }
 
 export const DEFAULT_GATEWAY_URL = 'https://api.yuristore.xyz/v1';
@@ -94,27 +84,14 @@ export async function loadConfig(overrides: Record<string, unknown> = {}): Promi
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   const validated = configSchema.parse(stored);
   const env: Record<string, unknown> = {};
-  // VYEN_* wins; the older GOON_* names stay honoured so an existing shell
-  // profile keeps working after the rename.
-  const ENV_SOURCES: Record<string, string[]> = {
-    provider: ['VYEN_PROVIDER', 'GOON_PROVIDER'],
-    baseUrl: ['VYEN_BASE_URL', 'GOON_BASE_URL'],
-    model: ['VYEN_MODEL', 'GOON_MODEL'],
-    effort: ['VYEN_EFFORT', 'GOON_EFFORT'],
-    keyEnv: ['VYEN_KEY_ENV', 'GOON_KEY_ENV'],
-    contextWindow: ['VYEN_CONTEXT_WINDOW', 'GOON_CONTEXT_WINDOW'],
-    maxOutputTokens: ['VYEN_MAX_OUTPUT_TOKENS', 'GOON_MAX_OUTPUT_TOKENS'],
-    timeoutMs: ['VYEN_TIMEOUT_MS', 'GOON_TIMEOUT_MS'],
-    runTokenBudget: ['VYEN_RUN_TOKEN_BUDGET', 'GOON_RUN_TOKEN_BUDGET'],
-    inlineReasoning: ['VYEN_INLINE_REASONING', 'GOON_INLINE_REASONING'],
-  };
-  const NUMERIC_KEYS = ['contextWindow', 'maxOutputTokens', 'timeoutMs', 'runTokenBudget'];
-  for (const [key, names] of Object.entries(ENV_SOURCES)) {
-    for (const name of names) {
-      if (process.env[name] === undefined) continue;
-      env[key] = NUMERIC_KEYS.includes(key) ? Number(process.env[name]) : process.env[name];
-      break;
-    }
+  for (const [key, name] of Object.entries({
+    provider: 'VYEN_PROVIDER', baseUrl: 'VYEN_BASE_URL', model: 'VYEN_MODEL', effort: 'VYEN_EFFORT',
+    keyEnv: 'VYEN_KEY_ENV', contextWindow: 'VYEN_CONTEXT_WINDOW', maxOutputTokens: 'VYEN_MAX_OUTPUT_TOKENS',
+    timeoutMs: 'VYEN_TIMEOUT_MS', runTokenBudget: 'VYEN_RUN_TOKEN_BUDGET',
+    inlineReasoning: 'VYEN_INLINE_REASONING',
+  })) {
+    if (process.env[name] !== undefined) env[key] = ['contextWindow', 'maxOutputTokens', 'timeoutMs', 'runTokenBudget'].includes(key)
+      ? Number(process.env[name]) : process.env[name];
   }
   const merged = { ...validated, ...env, ...overrides };
   if (env.runTokenBudget === undefined && overrides.runTokenBudget === undefined) {
@@ -147,9 +124,12 @@ export async function resolveRuntime(config: Config, cwd: string): Promise<Runti
   return { ...config, model: config.model, baseUrl, apiKey, cwd: await realpath(resolve(cwd)), dataDir: dataDir() };
 }
 
-export async function atomicJson(file: string, value: unknown): Promise<void> {
+export async function atomicJson(file: string, value: unknown, options: { compact?: boolean } = {}): Promise<void> {
   const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+  // Session files are machine-written and rewritten on every tool step: compact JSON is ~30%
+  // smaller and faster to serialize. Human-edited config files stay pretty-printed.
+  const body = options.compact ? JSON.stringify(value) : JSON.stringify(value, null, 2);
+  await writeFile(temporary, `${body}\n`, { mode: 0o600, flag: 'wx' });
   try { await rename(temporary, file); }
   catch (error) { const { unlink } = await import('node:fs/promises'); await unlink(temporary).catch(() => {}); throw error; }
 }

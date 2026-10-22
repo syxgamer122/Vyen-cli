@@ -46,6 +46,10 @@ dependency.
   file mode", "edits preserve exact permissions under restrictive umasks; new
   files obey umask", "workspace containment rejects ../ and symlink escapes
   including missing leaves", "portable search is bounded and skips symlinks"
+- `tests/audit.test.mjs` — "model-initiated image reads outside the workspace
+  require approval; workspace images do not". It creates a symlink to an image
+  outside the workspace, which Windows refuses without administrator rights, so
+  the spawn fails with EPERM before the behaviour under test is reached.
 - `tests/publish.test.mjs` — "publishing creates the first tag, bumps on update
   and repairs a rerun without another bump". The test writes its **own** `gh`
   stub without a file extension and puts it on `PATH`; Windows cannot execute

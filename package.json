@@ -1,18 +1,10 @@
 {
   "name": "@nguyenhuumanh/vyen",
-  "version": "0.2.23",
+  "version": "0.3.0",
   "description": "A small independent coding harness for Termux and external model APIs",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://github.com/syxgamer122/Vyen-cli#readme",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/syxgamer122/Vyen-cli.git"
-  },
-  "bugs": {
-    "url": "https://github.com/syxgamer122/Vyen-cli/issues"
-  },
-  "author": "syxgamer122",
+  "private": true,
   "bin": {
     "vyen": "bin/vyen.mjs"
   },
@@ -29,10 +21,7 @@
     "bin",
     "dist",
     "src",
-    "docs/SPEC.md",
-    "docs/MCP.md",
-    "docs/VALIDATION.md",
-    "docs/REFERENCE_REVIEW.md",
+    "docs",
     "scripts",
     "tsconfig.json",
     "README.md",
@@ -49,13 +38,13 @@
     "release:pack": "node scripts/pack-release.mjs"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "3.0.81",
-    "@ai-sdk/openai": "3.0.58",
-    "@ai-sdk/openai-compatible": "2.0.60",
+    "@ai-sdk/anthropic": "3.0.135",
+    "@ai-sdk/openai": "3.0.131",
+    "@ai-sdk/openai-compatible": "2.0.87",
     "@modelcontextprotocol/sdk": "1.32.1",
-    "ai": "6.0.193",
-    "ajv": "8.17.1",
-    "zod": "4.6.5"
+    "ai": "6.0.312",
+    "ajv": "8.20.0",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

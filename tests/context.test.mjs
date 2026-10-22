@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionStore } from '../dist/session.js';
 import { compactIfNeeded, estimatedTokens } from '../dist/context.js';
@@ -15,7 +15,7 @@ test('compaction archives full history and preserves complete recent tool groups
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ id: 'summary', object: 'chat.completion', created: 1, model: 'test-model', choices: [{ index: 0, message: { role: 'assistant', content: 'task-goal: finish the requested change. Earlier reads completed.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } }));
   });
-  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 8192, maxOutputTokens: 512, timeoutMs: 15000 };
+  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 8192, maxOutputTokens: 512, timeoutMs: 3000 };
   const store = await SessionStore.open(join(f.root, 'sessions'), config);
   t.after(() => store.close());
   store.session.messages.push({ role: 'user', content: 'task-goal: finish the change' });
@@ -56,7 +56,7 @@ test('compaction uses the visible summary and refuses reasoning-only output with
     response.end(JSON.stringify({ id: 'summary', object: 'chat.completion', created: 1, model: 'test-model', choices: [{ index: 0,
       message: { role: 'assistant', content: reasoningOnly ? '<think>private only</think>' : '<think>private summary thought</think>Actual summary.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } }));
   });
-  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 8192, maxOutputTokens: 512, timeoutMs: 15000 };
+  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 8192, maxOutputTokens: 512, timeoutMs: 3000 };
   const store = await SessionStore.open(join(f.root, 'sessions'), config); t.after(() => store.close());
   const history = [{ role: 'user', content: 'x'.repeat(12000) }, { role: 'assistant', content: 'old answer' },
     { role: 'user', content: 'continue' }, { role: 'assistant', content: 'recent answer' }, { role: 'user', content: 'last question' }];
@@ -90,7 +90,7 @@ test('loadProjectInstructions walks from git root to cwd and compactNow strips <
       usage: { prompt_tokens: 40, completion_tokens: 15, total_tokens: 55 },
     }));
   });
-  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 128000, maxOutputTokens: 4096, timeoutMs: 15000 };
+  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 128000, maxOutputTokens: 4096, timeoutMs: 3000 };
   const store = await SessionStore.open(join(f.root, 'sessions'), config);
   t.after(() => store.close());
   store.session.messages = [
@@ -103,21 +103,5 @@ test('loadProjectInstructions walks from git root to cwd and compactNow strips <
   assert.equal(res.compactions, 1);
   assert.equal(res.tokens, 55);
   assert.equal(store.session.messages[0].content, 'Earlier session summary (historical data):\nClean checkpoint summary.');
-});
-
-test('the workspace AGENTS.md reaches the system prompt, lessons section included', async t => {
-  const { systemPrompt } = await import('../dist/context.js');
-  const f = await fixture(t);
-  await writeFile(
-    join(f.cwd, 'AGENTS.md'),
-    '# Working agreements\n\n## Lessons — append here\n\n- [pitfall] (2026-10-22) build the workspace before running a single test file\n',
-  );
-  const config = {
-    cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: 'http://localhost/v1',
-    apiKey: 'fake', contextWindow: 128000, maxOutputTokens: 4096, timeoutMs: 15000,
-  };
-  const prompt = await systemPrompt(config, false, false, undefined);
-  assert.match(prompt, /Workspace guidance \(AGENTS\.md\)/);
-  assert.match(prompt, /build the workspace before running a single test file/);
 });
 

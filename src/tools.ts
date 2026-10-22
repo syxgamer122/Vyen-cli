@@ -1,26 +1,33 @@
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { tool, jsonSchema, type FlexibleSchema, type ToolSet } from 'ai';
 import { Ajv } from 'ajv';
 import { z } from 'zod';
 import { WorkspaceFiles, limitText, unlinkSafe } from './files.js';
 import { runCommand } from './process.js';
-import { todoItemSchema, type TodoItem } from './session.js';
+import { todoItemSchema, type SessionGoal, type TodoItem } from './session.js';
 
 export function sanitizeBashCommand(command: string, platform = process.platform): string {
   if (platform !== 'win32') return command;
   return command.replace(/((?:^|[\s;&|()])(?:\d+|&)?>>?\s*)(?:nul|\/dev\/nul)(?=$|[\s;&|()><])/gi, '$1/dev/null');
 }
 
+export { bashApprovalPrefix, isApprovedBashPrefix } from './approval.js';
+
 export interface Approval { tool: string; input: unknown; signal: AbortSignal }
 export type Approve = (request: Approval) => Promise<boolean>;
 export interface ToolCall { toolCallId: string; toolName: string; input: unknown }
-export type PermissionMode = 'ask' | 'auto' | 'plan' | 'readonly';
 export interface ToolDefinition<Input = unknown> {
   description: string; schema: z.ZodType<Input>; readOnly: boolean;
   execute: (input: Input, signal: AbortSignal) => Promise<string>;
 }
 export interface RunBudget { spent: number; limit: number }
 export class PermissionDeniedError extends Error {}
+const COLLAB_TOOLS = new Set([
+  'spawn_agent', 'wait_agent', 'send_input', 'close_agent', 'resume_agent', 'list_agents',
+  'update_plan', 'get_goal', 'create_goal', 'update_goal', 'request_user_input', 'view_image',
+  'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource',
+]);
 interface RegisteredTool {
   description: string; schema: FlexibleSchema<unknown>; readOnly: boolean;
   parse: (input: unknown) => unknown;
@@ -274,6 +281,16 @@ export function normalizeToolInput(toolName: string, input: unknown): unknown {
       delete obj.header;
     }
   }
+  if (toolName === 'create_goal') {
+    if (obj.objective === undefined && typeof obj.goal === 'string') {
+      obj.objective = obj.goal;
+      delete obj.goal;
+    }
+    if (obj.token_budget === undefined && typeof obj.tokenBudget === 'number') {
+      obj.token_budget = obj.tokenBudget;
+      delete obj.tokenBudget;
+    }
+  }
   return obj;
 }
 
@@ -283,6 +300,8 @@ export class ToolRegistry {
   planMode = false;
   todos: TodoItem[] = [];
   onTodoUpdate?: (todos: TodoItem[]) => void;
+  getGoal?: () => SessionGoal | undefined;
+  onGoalUpdate?: (goal: SessionGoal | undefined) => Promise<void> | void;
   onPlanExit?: (plan: string) => void;
   askUser?: (questions: UserInputQuestion[], signal: AbortSignal) => Promise<Record<string, string[]>>;
   pendingImages: Array<{ path: string; mimeType: string; bytes: Uint8Array }> = [];
@@ -304,10 +323,16 @@ export class ToolRegistry {
       schema: z.object({ query: z.string().min(1), path: z.string().default('.') }), readOnly: true,
       execute: async (input, signal) => {
         const path = await this.files.path(input.path);
+        // Search relative to the workspace root so every hit is a short, directly usable path
+        // (absolute paths cost tokens on every match line).
+        const target = relative(this.files.root, path) || '.';
         try {
-          const result = await runCommand('rg', ['--fixed-strings', '--line-number', '--hidden', '--glob', '!.git', '--glob', '!node_modules', '--max-count', '50', '--max-columns', '1000', '--max-columns-preview', '--', input.query, path], { cwd, signal, timeoutMs: 30_000 });
-          if (result.code > 1) throw new Error(result.output || 'ripgrep failed.');
-          return limitText(result.output || 'No matches found.');
+          const result = await runCommand('rg', ['--fixed-strings', '--line-number', '--hidden', '--glob', '!.git', '--glob', '!node_modules', '--max-count', '50', '--max-columns', '1000', '--max-columns-preview', '--', input.query, target], { cwd: this.files.root, signal, timeoutMs: 30_000 });
+          // Exit 2 also covers partial failures (an unreadable file, a broken symlink) while other
+          // files still matched; keep those matches instead of discarding the whole search.
+          if (result.code > 1 && !/^[^\n]+:\d+:/m.test(result.output)) throw new Error(result.output || 'ripgrep failed.');
+          const note = result.code > 1 ? '\n[ripgrep reported errors for some paths; results may be incomplete.]' : '';
+          return limitText(result.output || 'No matches found.') + note;
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
           signal.throwIfAborted();
@@ -348,6 +373,123 @@ export class ToolRegistry {
         return `${header}\n${formatTodos(this.todos)}`;
       },
     });
+    this.register('get_goal', {
+      description:
+        'Get the current goal for this thread, including status, budgets, token and elapsed-time usage, and remaining token budget.',
+      schema: z.object({}),
+      readOnly: true,
+      execute: async () => {
+        const goal = this.getGoal?.();
+        const remainingTokens =
+          goal?.tokenBudget !== undefined
+            ? Math.max(0, goal.tokenBudget - (goal.tokensUsed ?? 0))
+            : null;
+        return JSON.stringify({
+          goal: goal ?? null,
+          remainingTokens,
+          completionBudgetReport: null,
+        });
+      },
+    });
+    this.register('create_goal', {
+      description:
+        'Create a goal only when explicitly requested by the user or system/developer instructions; do not infer goals from ordinary tasks. Set token_budget only when an explicit token budget is requested. Fails if an unfinished goal exists; use update_goal only for status.',
+      schema: z.object({
+        objective: z
+          .string()
+          .min(1)
+          .describe(
+            'Required. The concrete objective to start pursuing. This starts a new active goal when no goal exists or replaces the current goal when it is complete.',
+          ),
+        token_budget: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Positive token budget for the new goal. Omit unless explicitly requested.'),
+      }),
+      readOnly: true,
+      execute: async input => {
+        if (!this.getGoal || !this.onGoalUpdate) {
+          throw new Error('Goal tools require a persistent thread.');
+        }
+        const existing = this.getGoal();
+        if (existing && existing.status !== 'complete') {
+          throw new Error(
+            'cannot create a new goal because this thread has an unfinished goal; complete the existing goal first',
+          );
+        }
+        const objective = input.objective.trim();
+        if (!objective) {
+          throw new Error('Goal objective must not be empty.');
+        }
+        const now = new Date().toISOString();
+        const goal: SessionGoal = {
+          goalId: randomUUID(),
+          objective,
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+          tokensAtStart: 0,
+          tokensUsed: 0,
+          timeUsedSeconds: 0,
+          ...(input.token_budget !== undefined ? { tokenBudget: input.token_budget } : {}),
+        };
+        await this.onGoalUpdate(goal);
+        const updated = this.getGoal() ?? goal;
+        const remainingTokens =
+          updated.tokenBudget !== undefined
+            ? Math.max(0, updated.tokenBudget - (updated.tokensUsed ?? 0))
+            : null;
+        return JSON.stringify({
+          goal: updated,
+          remainingTokens,
+          completionBudgetReport: null,
+        });
+      },
+    });
+    this.register('update_goal', {
+      description:
+        'Update the existing goal. Set status to `paused` only at the user\'s explicit request to pause this goal, never on your own initiative. Set status to `complete` only when the objective has actually been achieved and no required work remains. Set status to `blocked` only when the same blocking condition has repeated for at least three consecutive goal turns and the agent cannot make meaningful progress without user input or an external-state change. Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work.',
+      schema: z.object({
+        status: z
+          .enum(['complete', 'blocked', 'paused'])
+          .describe(
+            'Required. `paused` requires an explicit user request. Set to `complete` only when the objective is achieved and no required work remains. Set to `blocked` only after the same blocking condition has recurred for at least three consecutive goal turns and the agent is at an impasse.',
+          ),
+      }),
+      readOnly: true,
+      execute: async input => {
+        if (!this.getGoal || !this.onGoalUpdate) {
+          throw new Error('Goal tools require a persistent thread.');
+        }
+        const existing = this.getGoal();
+        if (!existing) {
+          throw new Error('cannot update goal because this thread has no goal');
+        }
+        const now = new Date().toISOString();
+        const nextGoal: SessionGoal = {
+          ...existing,
+          status: input.status,
+          updatedAt: now,
+        };
+        await this.onGoalUpdate(nextGoal);
+        const updated = this.getGoal() ?? nextGoal;
+        const remainingTokens =
+          updated.tokenBudget !== undefined
+            ? Math.max(0, updated.tokenBudget - (updated.tokensUsed ?? 0))
+            : null;
+        const completionBudgetReport =
+          input.status === 'complete' && updated.tokenBudget !== undefined
+            ? `Consumed ${updated.tokensUsed ?? 0} of ${updated.tokenBudget} budgeted tokens in ${updated.timeUsedSeconds ?? 0}s.`
+            : null;
+        return JSON.stringify({
+          goal: updated,
+          remainingTokens,
+          completionBudgetReport,
+        });
+      },
+    });
     this.register('request_user_input', {
       description: 'Request user input for one to three short multiple-choice questions and wait for the response.',
       schema: z.object({
@@ -375,8 +517,14 @@ export class ToolRegistry {
         detail: z.enum(['high', 'original']).optional().describe('Optional detail override.'),
       }),
       readOnly: true,
-      execute: async input => {
-        const img = await this.files.readImage(input.path);
+      execute: async (input, signal) => {
+        // The model chooses this path. Inside the workspace it is an ordinary read; anything else
+        // on disk (photos, other projects, screenshots) needs the user's explicit approval.
+        const located = await this.files.locateImage(input.path);
+        if (!located.inside && !await this.approve({ tool: 'view_image', input: { path: located.resolvedPath, outsideWorkspace: true }, signal })) {
+          throw new PermissionDeniedError('Permission denied: reading an image outside the workspace. Stop this run.');
+        }
+        const img = await this.files.readImage(input.path, undefined, { allowOutside: !located.inside });
         this.pendingImages.push({ path: img.resolvedPath, mimeType: img.mediaType, bytes: img.buffer });
         return `Attached image ${img.resolvedPath} (${img.mediaType}, ${img.buffer.byteLength} bytes).`;
       },
@@ -438,8 +586,9 @@ export class ToolRegistry {
   }
   private ajv = new Ajv({ strict: false, validateFormats: false, allowUnionTypes: true });
   register<Input>(name: string, definition: ToolDefinition<Input>) {
+    // execute() always receives the output of parse(); validating twice only costs time.
     return this.add(name, { ...definition, parse: input => definition.schema.parse(input),
-      execute: (input, signal) => definition.execute(definition.schema.parse(input), signal) });
+      execute: (input, signal) => definition.execute(input as Input, signal) });
   }
   registerJson(name: string, definition: Omit<ToolDefinition, 'schema'> & { schema: Record<string, unknown> }) {
     const cleanSchema = { ...definition.schema };
@@ -470,17 +619,16 @@ export class ToolRegistry {
   resolveToolName(name: string): string {
     return normalizeToolName(name, n => this.definitions.has(n));
   }
+  /** Whether a tool is offered to the model in the current mode. execute() enforces the same rule. */
+  private isExposed(name: string, d: RegisteredTool): boolean {
+    if (name === 'exit_plan_mode' && !this.planMode) return false;
+    if ((name === 'get_goal' || name === 'create_goal' || name === 'update_goal') && (!this.getGoal || this.planMode)) return false;
+    if ((name === 'todo_write' || name === 'todo_read' || COLLAB_TOOLS.has(name)) && this.readOnly && !this.planMode) return false;
+    return !this.effectiveReadOnly || d.readOnly;
+  }
   schemas(): ToolSet {
-    const collabTools = new Set([
-      'spawn_agent', 'wait_agent', 'send_input', 'close_agent', 'resume_agent', 'list_agents',
-      'update_plan', 'request_user_input', 'view_image',
-      'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource',
-    ]);
-    return Object.fromEntries([...this.definitions].filter(([name, d]) => {
-      if (name === 'exit_plan_mode' && !this.planMode) return false;
-      if ((name === 'todo_write' || name === 'todo_read' || collabTools.has(name)) && this.readOnly && !this.planMode) return false;
-      return !this.effectiveReadOnly || d.readOnly;
-    }).map(([name, d]) => [name, tool({ description: d.description, inputSchema: d.schema })]));
+    return Object.fromEntries([...this.definitions].filter(([name, d]) => this.isExposed(name, d))
+      .map(([name, d]) => [name, tool({ description: d.description, inputSchema: d.schema })]));
   }
   isReadOnly(name: string) {
     const canonical = this.resolveToolName(name);
@@ -488,6 +636,8 @@ export class ToolRegistry {
       canonical === 'exit_plan_mode' ||
       canonical === 'todo_write' ||
       canonical === 'update_plan' ||
+      canonical === 'create_goal' ||
+      canonical === 'update_goal' ||
       canonical === 'request_user_input' ||
       canonical === 'wait_agent' ||
       canonical === 'send_input' ||
@@ -502,8 +652,11 @@ export class ToolRegistry {
     signal.throwIfAborted();
     const canonicalName = this.resolveToolName(call.toolName);
     const definition = this.definitions.get(canonicalName);
-    if (!definition || (this.effectiveReadOnly && !definition.readOnly)) {
-      throw new Error(`Tool is not available in ${this.planMode ? 'plan' : 'read-only'} mode: ${call.toolName}`);
+    if (!definition) throw new Error(`Unknown tool: ${call.toolName}`);
+    // A model can name a tool that is not in its current tool list (hallucinated or remembered from
+    // an earlier mode). Hidden tools are not callable; exit_plan_mode answers harmlessly by itself.
+    if (canonicalName !== 'exit_plan_mode' && !this.isExposed(canonicalName, definition)) {
+      throw new Error(`Tool is not available in ${this.planMode ? 'plan' : this.effectiveReadOnly ? 'read-only' : 'the current'} mode: ${call.toolName}`);
     }
     const normalizedInput = normalizeToolInput(canonicalName, call.input);
     const input = definition.parse(normalizedInput);
@@ -517,16 +670,6 @@ export class ToolRegistry {
       throw error;
     }
   }
-}
-
-/**
- * The single mapping from a permission mode onto a registry. Every place that
- * changes the mode must go through this, otherwise a mode change can leave the
- * registry offering tools the mode is supposed to forbid.
- */
-export function applyPermissionMode(registry: ToolRegistry, mode: PermissionMode): void {
-  registry.readOnly = mode === 'readonly';
-  registry.planMode = mode === 'plan';
 }
 
 

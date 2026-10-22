@@ -43,7 +43,7 @@ fs.writeFileSync(process.env.GH_TEST_STATE,JSON.stringify(state));
   const preload = join(root, 'mock-fetch.mjs');
   await writeFile(preload, `import {readFileSync} from 'node:fs';
 globalThis.fetch=async url=>{
- if(!String(url).startsWith('https://api.github.com/repos/test/vyen/releases/tags/'))throw Error('Unexpected request '+url);
+ if(!String(url).startsWith('https://api.github.com/repos/test/vyen-cli/releases/tags/'))throw Error('Unexpected request '+url);
  const tag=String(url).split('/').at(-1), state=JSON.parse(readFileSync(process.env.GH_TEST_STATE,'utf8'));
  return new Response(JSON.stringify(state[tag]??{}),{status:state[tag]?200:404,headers:{'content-type':'application/json'}});
 };\n`);
@@ -53,7 +53,7 @@ globalThis.fetch=async url=>{
   const first = await git('rev-parse', 'HEAD');
   const publish = async source => exec(process.execPath, ['scripts/publish-release.mjs'], {
     cwd: work, timeout: 20000, env: { ...process.env, PATH: bin + delimiter + process.env.PATH,
-      GH_TOKEN: 'fake-local-test-token', GITHUB_REPOSITORY: 'test/vyen', SOURCE_SHA: source,
+      GH_TOKEN: 'fake-local-test-token', GITHUB_REPOSITORY: 'test/vyen-cli', SOURCE_SHA: source,
       GH_TEST_STATE: state, GH_TEST_LOG: log, NODE_OPTIONS: '--import=' + pathToFileURL(preload).href },
   });
   await publish(first);

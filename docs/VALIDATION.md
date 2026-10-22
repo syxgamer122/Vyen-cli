@@ -1,4 +1,7 @@
-# Validation — 0.2.2
+# Validation — 0.2.2 (upstream record)
+
+> The section below is upstream's dated record, taken from `binxgtl/goon-cli` at
+> v0.2.25. The current run for this fork is at the end of the file.
 
 Executed on Linux x64, Node.js 24.19.0, 2026-10-16.
 
@@ -7,7 +10,7 @@ It missed a real bug: open(mode) and writeFile({mode}) both apply umask. Under
 007 the original file-mode test failed (28/29 overall), and an edit could change
 0755 to 0750. That earlier result did not establish restrictive-umask behavior.
 
-## Current checks (2026-10-16 Linux run — not repeated since)
+## Current checks
 
 | Command / environment | Result |
 |---|---|
@@ -61,42 +64,6 @@ The mutation test verifies completed writes/history survive the error and resume
 does not replay them. Usage and locks are also checked. Validation now requires a
 non-whitespace answer in each terminal model step regardless of reasoning flags.
 
-## 2026-10-22 — agent work agreements
-
-`AGENTS.md` now carries the working agreements and the accumulated lessons for
-this repository, and two new guard files turn the rules that must not rot into
-something the suite enforces.
-
-Measured on Windows, Node 26.12.0: `npm test` → 153 tests, 146 pass, 5 fail,
-2 skipped. The five failures are exactly the known platform failures listed
-above — four in `tests/files.test.mjs` (no POSIX mode bits, no unprivileged
-symlinks) and one in `tests/publish.test.mjs`. The publish test writes its own
-extensionless `gh` stub onto `PATH`; Windows cannot execute an extensionless
-shebang file, so the spawn fails with `spawn gh ENOENT` — the real GitHub CLI is
-neither needed nor involved. `npm run typecheck` and `npm run lint` pass. The
-rows in "Current checks" are from the 2026-10-16 Linux run and were not
-repeated here.
-
-New coverage:
-
-- `tests/repo-hygiene.test.mjs` — no byte-order mark in `src/`, `tests/`,
-  `scripts/`, `bin/`; no `@ts-ignore`; a reason on the same line for every
-  `@ts-expect-error`; the two guard files reference each other, so neither can
-  be deleted alone.
-- `tests/plan-traceability.test.mjs` — every plan states numbered
-  `## Review Focus` criteria; every plan written from 2026-10-22 on carries a
-  `## Scenarios & Tests` table with one row per criterion; every row names a
-  test file that exists; the guard refuses to pass vacuously.
-- `tests/context.test.mjs` — a workspace `AGENTS.md` reaches the system
-  prompt, `## Lessons` section included. This is the observable boundary for
-  "the rules the agent is given are the rules in the file".
-
-Each guard was proven **red** with a throwaway probe — a file carrying a BOM, a
-`@ts-ignore` line, a plan missing its table, a row naming a test file that does
-not exist — before it was trusted. The probes were removed and the guards went
-green. One probe exposed a defect in the guard itself: a test that contains the
-literal it searches for reports itself, so the directives are spelled in pieces.
-
 ## Integration coverage
 
 Tests use local mock model HTTP endpoints and real AI SDK adapters, filesystem,
@@ -131,9 +98,6 @@ subprocesses and session stores. No paid model request was made.
 - Release tests cover stable-version selection, patch increments, lockfile
   synchronization, installed version reporting, and a local bare-Git/mocked
   GitHub publishing simulation including retry without another version bump.
-- Repository hygiene tests cover the byte-order mark, the type-checker escape
-  hatches and the plan-to-test traceability; the workspace `AGENTS.md` is
-  checked at the system-prompt boundary.
 
 The GitHub workflow now runs the full suite at default, 027 and 007 umasks on
 Node 22.16 and 24. Consult the repository's Actions runs for remote results.
@@ -144,8 +108,7 @@ No Android/Termux device, ARM64, macOS or Windows was available for execution.
 Termux is an implementation target, not a device-tested claim. POSIX PTY coverage
 is skipped on Windows. Emoji grapheme rendering can vary between terminals;
 --no-tui retains plain readline. MCP integration covers tools over stdio and
-Streamable HTTP; resource listing and reads are implemented, and reading a
-resource requires approval. Prompts, OAuth and legacy SSE are not implemented.
+Streamable HTTP; resources, prompts, OAuth and legacy SSE are not implemented.
 Children have separate transcripts and tool policies, not OS isolation. They do
 not load MCP or spawn further agents. Shared budgets are checked between model
 requests, so concurrent in-flight requests may exceed the threshold.
@@ -160,3 +123,45 @@ The installable archive includes compiled dist/ and installs with development
 dependencies omitted and lifecycle scripts disabled. The inspected installed
 runtime tree contains zero `.node` native addons. Platform-specific lint binaries
 are development dependencies only. Runtime dependencies still download from npm.
+
+## 2026-10-22 — vyen fork on the upstream 0.3.0 tree
+
+This fork takes `binxgtl/goon-cli` at v0.3.0 plus its two unreleased commits
+(`feat(resume): tabbed session picker for this folder and all projects` and
+`fix(approval): narrow prefix approvals found by independent review`) as its
+source, renames the product to `vyen`, and keeps three fixes upstream still
+lacks. Upstream's own audit is in `docs/AUDIT.md`; the fork's deviations are
+recorded in `docs/superpowers/plans/2026-10-22-upstream-merge.md`.
+
+Measured on Windows, Node 26.12.0: `npm test` → 158 tests, 146 pass, 6 fail,
+2 skipped. The six failures are the platform failures listed in `AGENTS.md` §1 —
+four in `tests/files.test.mjs` (no POSIX mode bits, no unprivileged
+symlinks), one in `tests/audit.test.mjs` (a symlink to an image outside the
+workspace) and one in `tests/publish.test.mjs` (an extensionless `gh` stub
+cannot be executed on Windows). `npm run typecheck` and `npm run lint` pass.
+
+The fork's own suite adds: `tests/brand.test.mjs` (no live `goon` identifier
+survives the rename), `tests/migrate.test.mjs` (the goon → vyen data
+migration), `tests/plan-traceability.test.mjs` and
+`tests/repo-hygiene.test.mjs` (the two guards that protect each other).
+
+What the fork adds on top of upstream:
+
+- The `vyen` identity: the npm package is `@nguyenhuumanh/vyen` (npm's name
+  policy rejects every unscoped `vyen*` name) and the installed command is
+  still `vyen`.
+- `src/migrate.ts`: a goon installation's config, credentials, memories,
+  presets, skills and sessions are copied into the vyen directories on first
+  launch. The copy is resumable, never overwrites an existing file, never
+  moves or deletes the legacy data, and never throws.
+- `read_mcp_resource` requires approval and is absent in read-only mode.
+  Upstream still registers it read-only, so an MCP server can return any
+  content it holds without the user seeing a prompt.
+- `wait_agent` reports `timed_out: true` while any target still runs.
+  Upstream still derives the flag from whether *any* target finished, so a
+  parent can read "not timed out" while a child is still working.
+- A workspace change drops the turn checkpoints, so `/revert` in a second
+  project cannot restore the first project's files.
+
+Not established by this fork: Termux/Android device behaviour, macOS, ARM64,
+and the provenance of the upstream fixes on hardware other than Linux CI.

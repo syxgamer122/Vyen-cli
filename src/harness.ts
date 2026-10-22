@@ -1,10 +1,10 @@
 import { streamText, type LanguageModel, type ModelMessage, type ToolResultPart } from 'ai';
 import type { RuntimeConfig } from './config.js';
-import { SessionStore, repairInterrupted, type TodoItem, type TurnCheckpoint } from './session.js';
+import { SessionStore, repairInterrupted, type SessionGoal, type TodoItem, type TurnCheckpoint } from './session.js';
 import { ToolRegistry, normalizeToolInput, normalizeToolName, type ToolCall, type RunBudget } from './tools.js';
-import { buildProviderOptions, createModel, resolveModelCapabilities } from './provider.js';
+import { auxiliaryEffortHeaders, buildProviderOptions, createModel, resolveModelCapabilities } from './provider.js';
 import { safeError } from './errors.js';
-import { compactIfNeeded, compactNow, estimatedTokens, expandFileMentions, recapSession, systemPrompt } from './context.js';
+import { buildGoalBudgetLimitPrompt, compactIfNeeded, compactNow, estimatedTokens, expandFileMentions, recapSession, systemPrompt, type SystemPromptCache } from './context.js';
 import { AnswerProjection, visibleAnswer, withReasoningReplay, type AnswerPart } from './reasoning.js';
 
 export interface ToolEventMeta {
@@ -27,11 +27,28 @@ export type HarnessEvent =
   | { type: 'usage'; input: number; output: number; total: number }
   | { type: 'compaction'; count: number }
   | { type: 'todo'; todos: TodoItem[] }
+  | { type: 'goal'; goal?: SessionGoal }
   | { type: 'plan_exit'; plan: string }
   | { type: 'retry'; attempt: number; maxRetries: number; message: string }
   | { type: 'stopped'; reason: string };
 
 export const MAX_API_RETRIES = 3;
+/** Consecutive read-only tool calls from one model step that may run concurrently. */
+export const MAX_PARALLEL_READS = 6;
+/** Retry backoff: base * 2^attempt plus jitter, unless the provider sends Retry-After (capped). */
+export const RETRY_POLICY = { baseMs: 250, maxMs: 8_000, maxRetryAfterMs: 20_000 };
+
+function retryDelayMs(error: unknown, attempt: number): number {
+  const headers = error && typeof error === 'object' ? (error as { responseHeaders?: Record<string, string> }).responseHeaders : undefined;
+  const retryAfter = headers?.['retry-after'] ?? headers?.['Retry-After'];
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
+    if (Number.isFinite(ms) && ms > 0) return Math.min(RETRY_POLICY.maxRetryAfterMs, ms);
+  }
+  const exponential = Math.min(RETRY_POLICY.maxMs, RETRY_POLICY.baseMs * 2 ** attempt);
+  return Math.round(exponential + Math.random() * exponential * 0.25);
+}
 
 function isNonRetryableApiError(error: unknown, userSignal: AbortSignal): boolean {
   if (userSignal.aborted) return true;
@@ -78,6 +95,10 @@ export interface RevertResult {
   restoredFiles: string[];
   deletedFiles: string[];
   revertedPrompts: string[];
+  /** Files changed after the agent's turn; left untouched unless the revert was forced. */
+  conflictFiles: string[];
+  /** Files whose backup content was pruned to bound the session size. */
+  unrecoverableFiles: string[];
 }
 
 function extractStreamPreview(rawJson: string): string {
@@ -126,6 +147,17 @@ function buildToolMeta(toolName: string, rawInput: unknown): ToolEventMeta {
   if (canonical === 'update_plan') {
     const count = Array.isArray(rec.plan) ? rec.plan.length : 0;
     return { kind: 'other', summary: `${count} step(s)` };
+  }
+  if (canonical === 'get_goal') {
+    return { kind: 'other', summary: 'inspect active goal' };
+  }
+  if (canonical === 'create_goal') {
+    const obj = typeof rec.objective === 'string' ? rec.objective.trim().slice(0, 80) : 'new goal';
+    return { kind: 'other', summary: obj };
+  }
+  if (canonical === 'update_goal') {
+    const st = typeof rec.status === 'string' ? rec.status : 'status';
+    return { kind: 'other', summary: `status -> ${st}` };
   }
   if (canonical === 'request_user_input') {
     const count = Array.isArray(rec.questions) ? rec.questions.length : 1;
@@ -200,10 +232,20 @@ function callSignature(call: ToolCall): string {
 }
 
 export class Harness {
+  /**
+   * Set for prompts written by a model (subagent tasks). Such prompts may only attach images from
+   * the workspace; a user-typed prompt may attach any image the user points at.
+   */
+  untrustedPrompts = false;
   private running = false;
+  private pendingContext: ModelMessage[] = [];
   private readonly model: LanguageModel;
   private lastCallSig = '';
   private repeatCount = 0;
+  private consecutiveGoalExecFailureTurns = 0;
+  private turnHadSuccessfulTool = false;
+  private turnHadFailedExec = false;
+  private flushGoalProgressHook?: (allowStopped?: boolean) => void;
   constructor(readonly config: RuntimeConfig, readonly store: SessionStore, readonly tools: ToolRegistry,
     readonly emit: (event: HarnessEvent) => void = () => {}, model?: LanguageModel) {
     this.model = model ?? createModel(config, this.store.session.id);
@@ -214,10 +256,48 @@ export class Harness {
       this.store.session.todos = todos;
       this.emit({ type: 'todo', todos });
     };
+    if (!this.tools.readOnly) {
+      this.tools.getGoal = () => this.store.session.goal;
+      this.tools.onGoalUpdate = async nextGoal => {
+        this.flushGoalProgressHook?.(true);
+        if (nextGoal && nextGoal.tokensAtStart === 0 && nextGoal.tokensUsed === 0) {
+          nextGoal.tokensAtStart = this.store.session.tokens;
+        }
+        if (nextGoal && this.store.session.goal) {
+          nextGoal.tokensUsed = this.store.session.goal.tokensUsed ?? nextGoal.tokensUsed ?? 0;
+          nextGoal.timeUsedSeconds = this.store.session.goal.timeUsedSeconds ?? nextGoal.timeUsedSeconds ?? 0;
+        }
+        this.store.session.goal = nextGoal;
+        await this.store.save();
+        this.emit({ type: 'goal', goal: nextGoal });
+      };
+    }
     this.tools.onPlanExit = plan => {
       this.emit({ type: 'plan_exit', plan });
     };
   }
+  /** True while a run, compaction or other exclusive operation owns the session history. */
+  get busy(): boolean {
+    return this.running;
+  }
+
+  /**
+   * Adds a user-role context message (shell output from `!cmd`, goal updates, notices). While a run
+   * is active the message waits for the next safe point — after the current tool results and
+   * before the next model request — because inserting it between an assistant tool call and its
+   * results produces a history every provider rejects.
+   */
+  addContextMessage(message: ModelMessage) {
+    if (this.running) this.pendingContext.push(message);
+    else this.store.session.messages.push(message);
+  }
+
+  private drainPendingContext(): boolean {
+    if (!this.pendingContext.length) return false;
+    this.store.session.messages.push(...this.pendingContext.splice(0));
+    return true;
+  }
+
   async compact(signal: AbortSignal, focus?: string): Promise<{ tokens: number; compactions: number }> {
     if (this.running) throw new Error('Cannot compact while a run is active.');
     this.running = true;
@@ -228,6 +308,7 @@ export class Harness {
       return res;
     } finally {
       this.running = false;
+      if (this.drainPendingContext()) await this.store.save().catch(() => {});
     }
   }
   async recap(signal: AbortSignal): Promise<{ text: string; tokens: number }> {
@@ -255,6 +336,7 @@ export class Harness {
       maxOutputTokens: Math.min(8_192, this.config.maxOutputTokens),
       maxRetries: 2,
       ...(providerOptions ? { providerOptions } : {}),
+      headers: auxiliaryEffortHeaders(this.config.effort),
       abortSignal: AbortSignal.any([signal, AbortSignal.timeout(this.config.timeoutMs)]),
       onError: () => {},
     });
@@ -268,7 +350,7 @@ export class Harness {
     const tokens = usage.totalTokens ?? 0;
     return { text, tokens };
   }
-  async revert(options?: { steps?: number; scope?: 'both' | 'code' | 'messages' }): Promise<RevertResult> {
+  async revert(options?: { steps?: number; scope?: 'both' | 'code' | 'messages'; force?: boolean }): Promise<RevertResult> {
     if (this.running) throw new Error('Cannot revert while a run is active.');
     const session = this.store.session;
     const checkpoints = session.checkpoints ?? [];
@@ -278,10 +360,14 @@ export class Harness {
     const target = checkpoints.slice(-count);
     const restoredSet = new Set<string>();
     const deletedSet = new Set<string>();
+    const conflictSet = new Set<string>();
+    const prunedSet = new Set<string>();
 
     if (scope === 'both' || scope === 'code') {
       for (const cp of [...target].reverse()) {
-        const res = await this.tools.files.restoreBackups(cp.files);
+        // Once a file conflicts, older backups of it must not be applied either.
+        const files = cp.files.filter(f => !conflictSet.has(f.path));
+        const res = await this.tools.files.restoreBackups(files, { force: options?.force });
         for (const r of res.restored) {
           deletedSet.delete(r);
           restoredSet.add(r);
@@ -290,6 +376,8 @@ export class Harness {
           restoredSet.delete(d);
           deletedSet.add(d);
         }
+        for (const c of res.conflicts) conflictSet.add(c);
+        for (const p of res.pruned) prunedSet.add(p);
       }
     }
 
@@ -322,6 +410,8 @@ export class Harness {
       restoredFiles: [...restoredSet],
       deletedFiles: [...deletedSet],
       revertedPrompts: target.map(c => c.prompt),
+      conflictFiles: [...conflictSet],
+      unrecoverableFiles: [...prunedSet],
     };
   }
   async run(prompt: string, signal: AbortSignal, sharedBudget?: RunBudget): Promise<string> {
@@ -338,10 +428,38 @@ export class Harness {
     const messageIndexBeforeTurn = session.messages.length;
     const tokensBeforeTurn = session.tokens;
     const turnStartedAt = new Date().toISOString();
+    let lastGoalAccountMs = Date.now();
+    let lastGoalAccountTokens = session.tokens;
+    let budgetLimitSteered = false;
+    this.turnHadSuccessfulTool = false;
+    this.turnHadFailedExec = false;
+    const flushGoalTurnProgress = (allowStopped = false) => {
+      const goal = session.goal;
+      if (!goal || this.tools.planMode) return;
+      if (goal.status !== 'active' && !allowStopped) return;
+      const nowMs = Date.now();
+      const deltaSec = Math.max(0, Math.floor((nowMs - lastGoalAccountMs) / 1000));
+      const deltaTokens = Math.max(0, session.tokens - lastGoalAccountTokens);
+      lastGoalAccountMs = nowMs;
+      lastGoalAccountTokens = session.tokens;
+      if (deltaSec === 0 && deltaTokens === 0) return;
+      goal.timeUsedSeconds = (goal.timeUsedSeconds ?? 0) + deltaSec;
+      goal.tokensUsed = (goal.tokensUsed ?? 0) + deltaTokens;
+      goal.updatedAt = new Date(nowMs).toISOString();
+      if (goal.status === 'active' && goal.tokenBudget !== undefined && goal.tokensUsed >= goal.tokenBudget) {
+        goal.status = 'budget_limited';
+      }
+      this.emit({ type: 'goal', goal });
+    };
+    this.flushGoalProgressHook = flushGoalTurnProgress;
     this.tools.files.beginTurn();
     try {
       signal.throwIfAborted();
-      const { expandedPrompt, imageParts } = await expandFileMentions(prompt, this.tools.files, { model: this.config.model });
+      this.drainPendingContext();
+      const { expandedPrompt, imageParts } = await expandFileMentions(prompt, this.tools.files, {
+        model: this.config.model,
+        allowOutsideWorkspace: !this.untrustedPrompts,
+      });
       if (imageParts.length > 0) {
         session.messages.push({
           role: 'user',
@@ -352,10 +470,13 @@ export class Harness {
       }
       await this.store.save();
       const providerOptions = buildProviderOptions(this.config);
+      const promptCache: SystemPromptCache = {};
       for (;;) {
         signal.throwIfAborted();
+        // Safe point: the previous step's tool results are recorded, the next request not yet sent.
+        if (this.drainPendingContext()) await this.store.save();
         if (exhausted()) throw new Error('Run token budget reached. Resume with a new prompt or increase --run-token-budget.');
-        const system = await systemPrompt(this.config, this.tools.readOnly, this.tools.planMode, session.goal);
+        const system = await systemPrompt(this.config, this.tools.readOnly, this.tools.planMode, session.goal, promptCache);
         const oldCount = session.compactions;
         account(await compactIfNeeded(this.store, this.config, this.model, system, signal, measuredInput));
         if (session.compactions !== oldCount) { measuredInput = 0; this.emit({ type: 'compaction', count: session.compactions }); }
@@ -434,6 +555,7 @@ export class Harness {
             const output = usage.outputTokens ?? Math.ceil(JSON.stringify(assistantMessages).length / 2);
             const tokens = usage.totalTokens ?? input + output;
             account(tokens); session.tokens += tokens; measuredInput = input;
+            flushGoalTurnProgress();
             this.emit({ type: 'usage', input, output, total: tokens });
             session.messages.push(...assistantMessages);
             text += stepText;
@@ -456,7 +578,7 @@ export class Harness {
               maxRetries: MAX_API_RETRIES,
               message: safeError(stepErr, this.config.apiKey),
             });
-            await sleepWithAbort(Math.min(1500, 150 * 2 ** attempt), signal);
+            await sleepWithAbort(retryDelayMs(stepErr, attempt), signal);
           }
         }
         // A successful terminal step needs its own answer. Reasoning may be
@@ -465,26 +587,59 @@ export class Harness {
         if (!calls.length) return text;
         const outcome = await this.executeBatch(calls, signal);
         if (outcome.denied) { this.emit({ type: 'stopped', reason: 'Permission denied.' }); return text; }
+        flushGoalTurnProgress();
+        if (session.goal?.status === 'budget_limited' && !budgetLimitSteered) {
+          budgetLimitSteered = true;
+          session.messages.push({
+            role: 'user',
+            content: buildGoalBudgetLimitPrompt(session.goal),
+          });
+          await this.store.save();
+        }
       }
     } catch (error) {
+      flushGoalTurnProgress();
+      if (!signal.aborted && session.goal && (session.goal.status === 'active' || session.goal.status === 'budget_limited')) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        const isUsageLimit = /\b(?:429|rate[_\s-]?limit|usage[_\s-]?limit|insufficient_quota|quota|token budget reached)\b/i.test(errMsg);
+        if (session.goal.status === 'active' || isUsageLimit) {
+          session.goal.status = isUsageLimit ? 'usage_limited' : 'blocked';
+          session.goal.updatedAt = new Date().toISOString();
+          this.emit({ type: 'goal', goal: session.goal });
+        }
+      }
       // Failed streams execute no tools. If cancellation happens after a tool
       // declaration, pair every uncompleted call before the next resume.
       repairInterrupted(session.messages);
+      this.drainPendingContext();
       await this.store.save();
       throw error;
     } finally {
+      this.flushGoalProgressHook = undefined;
+      flushGoalTurnProgress();
+      if (session.goal?.status === 'active' && !signal.aborted) {
+        if (this.turnHadFailedExec && !this.turnHadSuccessfulTool) {
+          this.consecutiveGoalExecFailureTurns++;
+          if (this.consecutiveGoalExecFailureTurns >= 3) {
+            session.goal.status = 'blocked';
+            session.goal.updatedAt = new Date().toISOString();
+            this.emit({ type: 'goal', goal: session.goal });
+          }
+        }
+      }
       const files = this.tools.files.takeTurnBackups();
       session.checkpoints ??= [];
       const nextId = (session.checkpoints.at(-1)?.id ?? 0) + 1;
       const cp: TurnCheckpoint = {
         id: nextId,
         createdAt: turnStartedAt,
-        prompt,
+        prompt: prompt.startsWith('<codex_internal_context source="goal">') ? (session.goal ? `[goal] ${session.goal.objective}` : '[goal continuation]') : prompt,
         messageIndex: messageIndexBeforeTurn,
         tokensBefore: tokensBeforeTurn,
         files,
       };
       session.checkpoints.push(cp);
+      this.drainPendingContext();
       await this.store.save().catch(() => {});
       this.running = false;
       this.tools.budget = undefined;
@@ -517,6 +672,15 @@ export class Harness {
         const result = await this.tools.execute(call, signal);
         denied ||= result.denied === true;
         meta.durationMs = Date.now() - startedMs;
+        if (!result.denied) {
+          const isFailedBash = meta.kind === 'exec' && /^Exit code:\s*(?!0\b)\d+/m.test(result.text);
+          if (isFailedBash) {
+            this.turnHadFailedExec = true;
+          } else {
+            this.turnHadSuccessfulTool = true;
+            this.consecutiveGoalExecFailureTurns = 0;
+          }
+        }
         if (meta.kind === 'exec' && result.text) {
           const allLines = result.text.split(/\r?\n/).map(l => l.trimEnd()).filter(Boolean);
           meta.outputPreview = allLines.slice(0, 80);
@@ -538,7 +702,9 @@ export class Harness {
     while (index < calls.length) {
       // Consecutive reads form small parallel groups. Writes/shell are barriers.
       const group = [calls[index++]];
-      if (this.tools.isReadOnly(group[0].toolName) && index < calls.length && this.tools.isReadOnly(calls[index].toolName)) group.push(calls[index++]);
+      if (this.tools.isReadOnly(group[0].toolName)) {
+        while (group.length < MAX_PARALLEL_READS && index < calls.length && this.tools.isReadOnly(calls[index].toolName)) group.push(calls[index++]);
+      }
       content.push(...await Promise.all(group.map(execute)));
       // Keep one tool result message per batch in model order, checkpointed at
       // each barrier so a crash never blindly repeats a completed write.
@@ -555,9 +721,10 @@ export class Harness {
           role: 'user',
           content: [
             { type: 'text', text: `[Attached image(s) from view_image: ${pendingImgs.map(i => i.path).join(', ')}]` },
+            // Base64 keeps the session file small, valid JSON and resumable.
             ...pendingImgs.map(img => ({
               type: 'image' as const,
-              image: img.bytes,
+              image: Buffer.from(img.bytes).toString('base64'),
               mediaType: img.mimeType,
             })),
           ],

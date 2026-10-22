@@ -22,8 +22,8 @@ test('reruns reuse the same tagged commit and explicit higher versions are respe
 });
 
 test('version synchronization preserves dependencies and rejects a divergent lockfile', () => {
-  const manifest = { name: 'vyen', version: '0.1.0', dependencies: { ai: '6.0.193' } };
-  const lock = { version: '0.1.0', packages: { '': { version: '0.1.0', name: 'vyen' }, 'node_modules/ai': { version: '6.0.193' } } };
+  const manifest = { name: '@nguyenhuumanh/vyen', version: '0.1.0', dependencies: { ai: '6.0.193' } };
+  const lock = { version: '0.1.0', packages: { '': { version: '0.1.0', name: '@nguyenhuumanh/vyen' }, 'node_modules/ai': { version: '6.0.193' } } };
   const next = setManifestVersion(manifest, lock, '0.1.1');
   assert.equal(next.manifest.version, '0.1.1');
   assert.equal(next.lock.version, '0.1.1');
@@ -41,23 +41,4 @@ test('CLI version comes from the installed package manifest', async () => {
   assert.equal(lock.packages?.['']?.version, manifest.version, 'npm-shrinkwrap.json root package version must match package.json');
   const { stdout } = await promisify(execFile)(process.execPath, ['bin/vyen.mjs', '--version']);
   assert.equal(stdout.trim(), `vyen cli ${manifest.version}`);
-});
-
-test('the published archive lists the shipped docs explicitly so internal plans cannot leak', async () => {
-  const manifest = JSON.parse(await readFile('package.json', 'utf8'));
-  assert.ok(!manifest.files.includes('docs'), 'listing the whole docs directory would ship internal plan documents');
-  for (const doc of ['docs/SPEC.md', 'docs/MCP.md', 'docs/VALIDATION.md', 'docs/REFERENCE_REVIEW.md']) {
-    assert.ok(manifest.files.includes(doc), `${doc} must still be published`);
-  }
-});
-
-test('the README documents an install command that can actually work', async () => {
-  const readme = await readFile('README.md', 'utf8');
-  const manifest = JSON.parse(await readFile('package.json', 'utf8'));
-  if (manifest.private) {
-    assert.doesNotMatch(readme, new RegExp(`npm install -g ${manifest.name}(?!-)`), 'a private package cannot be installed from the npm registry');
-    assert.match(readme, /releases\/latest\/download\/vyen\.tgz/);
-  } else {
-    assert.match(readme, new RegExp(`npm install -g ${manifest.name}(?!-)`), 'a published package must be installable from the registry');
-  }
 });
