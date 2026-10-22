@@ -105,7 +105,8 @@ No Android/Termux device, ARM64, macOS or Windows was available for execution.
 Termux is an implementation target, not a device-tested claim. POSIX PTY coverage
 is skipped on Windows. Emoji grapheme rendering can vary between terminals;
 --no-tui retains plain readline. MCP integration covers tools over stdio and
-Streamable HTTP; resources, prompts, OAuth and legacy SSE are not implemented.
+Streamable HTTP; resource listing and reads are implemented, and reading a
+resource requires approval. Prompts, OAuth and legacy SSE are not implemented.
 Children have separate transcripts and tool policies, not OS isolation. They do
 not load MCP or spawn further agents. Shared budgets are checked between model
 requests, so concurrent in-flight requests may exceed the threshold.

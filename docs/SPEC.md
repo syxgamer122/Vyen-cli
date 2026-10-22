@@ -35,7 +35,9 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   are namespaced, schema-validated and bounded. Only user readOnlyTools entries
   bypass approvals; remote annotations do not grant privileges. Stdio inherits
   the SDK default environment plus explicit envFrom mappings. HTTP bearer keys
-  come from env variables. No sampling, OAuth, resources, prompts or legacy SSE.
+  come from env variables. No sampling, OAuth, prompts or legacy SSE. Resources
+are listed and read through dedicated tools; reading a resource requires
+approval, because the server can return any content it holds.
 - Subagents own separate transcripts under subagents/PARENT_UUID. Research uses
   at most two concurrent children globally per manager; editing tasks are serial
   mutation barriers. Children share the parent's approval callback and run budget,

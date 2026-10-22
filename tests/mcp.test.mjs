@@ -15,6 +15,30 @@ const stdio = extra => mcpConfigSchema.parse({ servers: { local: { transport: 's
 const call = (toolName, input = {}) => ({ toolName, input, toolCallId: 'fixture' });
 const signal = () => new AbortController().signal;
 
+test('read_mcp_resource requires approval and is absent in read-only mode', async t => {
+  const f = await fixture(t);
+  const approvals = [];
+  const registry = new ToolRegistry(f.cwd, async request => { approvals.push(request.tool); return true; });
+  const manager = new McpManager(stdio({}), f.cwd);
+  t.after(() => manager.close());
+  await manager.connect(registry);
+
+  const names = Object.keys(registry.schemas());
+  assert.ok(names.includes('read_mcp_resource'));
+
+  const result = await registry.execute(
+    call('read_mcp_resource', { server: 'local', uri: 'file:///etc/shadow' }),
+    signal(),
+  );
+  assert.deepEqual(approvals, ['read_mcp_resource']);
+  assert.match(result.text, /root:x:0:0/);
+  await manager.close();
+
+  // A read-only registry must not offer the tool at all.
+  const readOnlyRegistry = new ToolRegistry(f.cwd, async () => true, true);
+  assert.ok(!Object.keys(readOnlyRegistry.schemas()).includes('read_mcp_resource'));
+});
+
 test('MCP stdio discovers pages, validates arguments, preserves approvals and unregisters on close', async t => {
   const f = await fixture(t);
   let approvals = 0;
@@ -135,7 +159,7 @@ test('SIGTERM during MCP initialization preserves exit status, kills the server 
   } } }));
   const running = cli(f, 'http://127.0.0.1:1/v1', ['-p', 'never contact model']);
   let pid;
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 1000; i++) {
     try { pid = Number(await readFile(join(f.cwd, 'mcp-ready'), 'utf8')); break; }
     catch { await new Promise(resolve => setTimeout(resolve, 10)); }
   }

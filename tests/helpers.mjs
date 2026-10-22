@@ -6,9 +6,12 @@ import { spawn } from 'node:child_process';
 
 export async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'vyen-test-'));
+  // Cleanup must never abort the remaining after-hooks: a child process that
+  // still holds the directory as its cwd makes the removal fail with EBUSY,
+  // and a rejected hook would leave that child alive and hang the test file.
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }).catch(() => {}));
   const cwd = join(root, 'workspace');
   await mkdir(cwd);
-  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   return { root, cwd, config: join(root, 'config'), data: join(root, 'data') };
 }
 export async function provider(t, handler) {

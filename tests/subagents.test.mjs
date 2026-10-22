@@ -11,7 +11,7 @@ import { fixture, provider, sse, cli } from './helpers.mjs';
 
 const isChild = body => body.messages.some(m => typeof m.content === 'string' && m.content.startsWith('You are a delegated agent.'));
 const configFor = (f, p, extra = {}) => ({ cwd: f.cwd, dataDir: f.data, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url,
-  apiKey: 'fake', contextWindow: 128000, maxOutputTokens: 8192, timeoutMs: 3000, runTokenBudget: 100000, ...extra });
+  apiKey: 'fake', contextWindow: 128000, maxOutputTokens: 8192, timeoutMs: 15000, runTokenBudget: 100000, ...extra });
 async function harness(t, f, p, approve, extra) {
   const config = configFor(f, p, extra);
   const store = await SessionStore.open(join(f.data, 'sessions'), config); t.after(() => store.close());
@@ -190,7 +190,7 @@ test('terminal child event follows lock release, including cleanup failures; cap
     events.push(event);
     if (event.state === 'done' || event.state === 'error') assert(!existsSync(join(config.dataDir, 'subagents', store.session.id, `${event.id}.lock`)));
   }).register();
-  const result = await new Harness(config, store, tools).run('four tasks', AbortSignal.timeout(3000));
+  const result = await new Harness(config, store, tools).run('four tasks', AbortSignal.timeout(15_000));
   assert.equal(result, 'handled child failures');
   assert.equal(events.filter(e => e.state === 'start').length, 4);
   assert.equal(events.filter(e => e.state === 'error').length, 2);

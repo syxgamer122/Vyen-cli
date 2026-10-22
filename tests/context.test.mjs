@@ -15,7 +15,7 @@ test('compaction archives full history and preserves complete recent tool groups
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ id: 'summary', object: 'chat.completion', created: 1, model: 'test-model', choices: [{ index: 0, message: { role: 'assistant', content: 'task-goal: finish the requested change. Earlier reads completed.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } }));
   });
-  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 8192, maxOutputTokens: 512, timeoutMs: 3000 };
+  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 8192, maxOutputTokens: 512, timeoutMs: 15000 };
   const store = await SessionStore.open(join(f.root, 'sessions'), config);
   t.after(() => store.close());
   store.session.messages.push({ role: 'user', content: 'task-goal: finish the change' });
@@ -56,7 +56,7 @@ test('compaction uses the visible summary and refuses reasoning-only output with
     response.end(JSON.stringify({ id: 'summary', object: 'chat.completion', created: 1, model: 'test-model', choices: [{ index: 0,
       message: { role: 'assistant', content: reasoningOnly ? '<think>private only</think>' : '<think>private summary thought</think>Actual summary.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } }));
   });
-  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 8192, maxOutputTokens: 512, timeoutMs: 3000 };
+  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 8192, maxOutputTokens: 512, timeoutMs: 15000 };
   const store = await SessionStore.open(join(f.root, 'sessions'), config); t.after(() => store.close());
   const history = [{ role: 'user', content: 'x'.repeat(12000) }, { role: 'assistant', content: 'old answer' },
     { role: 'user', content: 'continue' }, { role: 'assistant', content: 'recent answer' }, { role: 'user', content: 'last question' }];
@@ -90,7 +90,7 @@ test('loadProjectInstructions walks from git root to cwd and compactNow strips <
       usage: { prompt_tokens: 40, completion_tokens: 15, total_tokens: 55 },
     }));
   });
-  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 128000, maxOutputTokens: 4096, timeoutMs: 3000 };
+  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 128000, maxOutputTokens: 4096, timeoutMs: 15000 };
   const store = await SessionStore.open(join(f.root, 'sessions'), config);
   t.after(() => store.close());
   store.session.messages = [

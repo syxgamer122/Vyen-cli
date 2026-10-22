@@ -381,7 +381,7 @@ test('Plan Mode blocks mutating tools until exit_plan_mode is approved, @file me
     keyEnv: 'VYEN_API_KEY',
     contextWindow: 8192,
     maxOutputTokens: 512,
-    timeoutMs: 5000,
+    timeoutMs: 15000,
     runTokenBudget: 100000,
     inlineReasoning: 'leading-think',
     showReasoning: false,

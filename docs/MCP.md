@@ -77,6 +77,8 @@ input schema, 2 MiB stdio message buffer, 100–600000 ms configurable request
 timeout (default 30000). Startup fails on duplicates or invalid/excessive schemas
 rather than silently dropping tools. In interactive TUI sessions, `/mcp` reloads
 server connections in place; MCP resources (`list_mcp_resources`,
-`list_mcp_resource_templates`, `read_mcp_resource`) are also supported. Prompt
+`list_mcp_resource_templates`, `read_mcp_resource`) are also supported.
+Reading a resource requires approval, because the server can return any
+content it holds; it is therefore absent in read-only mode. Prompt
 templates, sampling, elicitation, OAuth, legacy SSE and experimental MCP tasks
 are not implemented.

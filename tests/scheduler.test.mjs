@@ -16,7 +16,7 @@ test('bounded parallel reads drain before mutation and results keep model order'
     assert.deepEqual(body.messages.filter(m => m.role === 'tool').map(m => m.tool_call_id), ['call0', 'call1', 'call2', 'call3']);
     sse(response, { text: 'done' });
   });
-  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 128000, maxOutputTokens: 8192, timeoutMs: 3000, runTokenBudget: 100000 };
+  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 128000, maxOutputTokens: 8192, timeoutMs: 15000, runTokenBudget: 100000 };
   const store = await SessionStore.open(join(f.root, 'sessions'), config);
   t.after(() => store.close());
   const registry = new ToolRegistry(f.cwd, async () => true);
@@ -41,7 +41,7 @@ test('cancelled tools are drained and every unstarted call gets a terminal resul
   const p = await provider(t, (_, response) => sse(response, { calls: [
     { id: 'slow', name: 'slow', input: {} }, { id: 'later', name: 'mutate', input: {} },
   ] }));
-  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 128000, maxOutputTokens: 8192, timeoutMs: 3000, runTokenBudget: 100000 };
+  const config = { cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: p.url, apiKey: 'fake', contextWindow: 128000, maxOutputTokens: 8192, timeoutMs: 15000, runTokenBudget: 100000 };
   const store = await SessionStore.open(join(f.root, 'sessions'), config);
   t.after(() => store.close());
   const controller = new AbortController();

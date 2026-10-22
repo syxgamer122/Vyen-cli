@@ -863,12 +863,12 @@ export class McpManager {
             },
           }),
           registry.register('read_mcp_resource', {
-            description: 'Read a specific resource from an MCP server by server name and resource URI.',
+            description: 'Read a specific resource from an MCP server by server name and resource URI. Requires approval: the server can return any content it holds.',
             schema: z.object({
               server: z.string().min(1).describe('MCP server name.'),
               uri: z.string().min(1).describe('Resource URI to read.'),
             }),
-            readOnly: true,
+            readOnly: false,
             execute: async (input, callSignal) => {
               const conn = this.connections.find(c => c.server === input.server);
               if (!conn) throw new Error(`Unknown or disconnected MCP server: ${input.server}`);
