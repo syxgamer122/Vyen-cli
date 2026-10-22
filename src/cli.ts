@@ -458,6 +458,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     let manager: McpManager | undefined;
     let subagents: import('./subagents.js').Subagents | undefined;
     let controller: AbortController | undefined;
+    // The MCP phase has its own abort scope. Sharing one controller let a
+    // harness rebuild during a run replace the run's signal, so Ctrl+C could
+    // no longer cancel the request that was actually in flight.
+    let mcpController: AbortController | undefined;
     let denied = false, exiting = false, terminating = false, starting = true;
     let mode: PermissionMode = values['read-only']
       ? 'readonly'
@@ -471,12 +475,17 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const sessionAllowedTools = new Set<string>();
     const stop = () => {
       if (starting) process.exitCode = 130;
-      if (controller && !controller.signal.aborted) controller.abort(new Error('Cancelled by user.'));
-      else { exiting = true; rl?.close(); tui?.close(); }
+      const live = [controller, mcpController].filter(c => c && !c.signal.aborted);
+      if (live.length) {
+        for (const c of live) c!.abort(new Error('Cancelled by user.'));
+      } else {
+        exiting = true; rl?.close(); tui?.close();
+      }
     };
     const terminate = () => {
       terminating = true; exiting = true;
       controller?.abort(new Error('Terminated.'));
+      mcpController?.abort(new Error('Terminated.'));
       rl?.close(); tui?.close(); process.exitCode = 143;
     };
     const onIpcSignal = (msg: unknown) => {
@@ -614,10 +623,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         }
         if (!values['no-mcp']) {
           const { loadMcpConfig, McpManager } = await import('./mcp.js');
-          controller = new AbortController();
+          mcpController = new AbortController();
           try {
             manager = new McpManager(await loadMcpConfig(), runtime.cwd);
-            const connecting = manager.connect(reg, controller.signal);
+            const connecting = manager.connect(reg, mcpController.signal);
             // Restores the previous status afterwards so rebuilds (/setup, /model, /cd…) never stick on Working.
             await (tui ? tui.withStatus('Connecting MCP', () => connecting) : connecting);
             for (const st of manager.statuses) {
@@ -626,13 +635,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               }
             }
           } catch (error) {
-            if (!interactive || controller.signal.aborted) {
-              controller = undefined;
+            if (!interactive || mcpController.signal.aborted) {
               throw error;
             }
             display(`[MCP warning: ${safeError(error, apiKey)}]\n`);
           } finally {
-            controller = undefined;
+            mcpController = undefined;
           }
         }
         if (subagents) {

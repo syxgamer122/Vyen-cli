@@ -46,6 +46,40 @@ test('leaving plan mode into the normal mode does unlock mutations', async () =>
   }
 });
 
+test('the MCP phase uses its own abort scope and never the run controller', async () => {
+  // The defect this guards against: a harness rebuild during a run replaced the
+  // run's abort controller, so Ctrl+C could not cancel the request in flight.
+  // The observable case needs a TTY (the effort-cycle key), so the invariant
+  // is pinned here and the real case is driven by the pseudo-terminal test.
+  const source = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8');
+  const start = source.indexOf('const buildHarness =');
+  const end = source.indexOf('const setPermissionMode');
+  assert.ok(start > 0 && end > start, 'the buildHarness block must be locatable');
+  const block = source.slice(start, end);
+  assert.doesNotMatch(block, /(^|[^.\w])controller\s*=/m, 'the MCP phase must not assign the run controller');
+  assert.match(block, /mcpController\s*=\s*new AbortController\(\)/);
+  assert.match(source, /const live = \[controller, mcpController\]/);
+});
+
+test('SIGINT during MCP startup aborts the connect, exits 130 and releases the session lock', async t => {
+  const f = await fixture(t);
+  const { readdir, writeFile, mkdir } = await import('node:fs/promises');
+  const { cli } = await import('./helpers.mjs');
+  const slow = join(f.root, 'slow-server.mjs');
+  await writeFile(slow, 'await new Promise(() => {});', 'utf8');
+  await mkdir(join(f.config, 'vyen'), { recursive: true });
+  await writeFile(join(f.config, 'vyen', 'mcp.json'), JSON.stringify({
+    servers: { slow: { transport: 'stdio', command: process.execPath, args: [slow] } },
+  }), 'utf8');
+
+  const run = cli(f, 'http://127.0.0.1:1', ['--json', '-p', 'hello']);
+  setTimeout(() => run.child.send({ type: 'vyen:signal', signal: 'SIGINT' }), 700);
+  const result = await run.done;
+  assert.equal(result.code, 130, result.stdout + result.stderr);
+  const sessions = await readdir(join(f.data, 'vyen', 'sessions'));
+  assert.ok(!sessions.some(n => n.endsWith('.lock')), 'the session lock must be released');
+});
+
 test('the CLI identifies itself as vyen in help, version and error output', async t => {
   const f = await fixture(t);
   const version = await cli(f, 'http://127.0.0.1:1', ['--version']).done;

@@ -77,6 +77,31 @@ test('real TUI pseudo-terminal handles status, resize, approval and clean exit',
   assert(!(await readdir(join(f.data, 'vyen/sessions'))).some(n => n.endsWith('.lock')));
 });
 
+test('real TUI pseudo-terminal: rebuilding the harness mid-run keeps the run cancellable', async t => {
+  if (process.platform === 'win32') { t.skip('POSIX pseudo-terminal test'); return; }
+  const { spawn } = await import('node:child_process');
+  const { resolve, join } = await import('node:path');
+  const { readdir } = await import('node:fs/promises');
+  const { fixture, provider } = await import('./helpers.mjs');
+  const { setTimeout: delay } = await import('node:timers/promises');
+  const f = await fixture(t);
+  // The provider never answers, so the run stays in flight while the harness
+  // is rebuilt. If Ctrl+C could not cancel it, the CLI would hang here.
+  const p = await provider(t, async () => { await delay(60000); });
+  const child = spawn('python3', [resolve('tests/fixtures/terminal.py'), '--cancel', process.execPath, resolve(process.env.VYEN_TEST_BIN ?? process.env.GOON_TEST_BIN ?? 'bin/vyen.mjs'),
+    '--cwd', f.cwd, '--model', 'test-model', '--base-url', p.url], {
+    env: { ...process.env, VYEN_API_KEY: 'tui-test-key', XDG_CONFIG_HOME: f.config, XDG_DATA_HOME: f.data },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(() => child.kill('SIGKILL'));
+  let stdout = '', stderr = '';
+  child.stdout.on('data', c => { stdout += c; }); child.stderr.on('data', c => { stderr += c; });
+  const result = await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', code => resolve(code)); });
+  assert.equal(result, 0, stderr + stdout);
+  assert.deepEqual(JSON.parse(stdout), { code: 0, cancelled: true });
+  assert(!(await readdir(join(f.data, 'vyen/sessions'))).some(n => n.endsWith('.lock')));
+});
+
 test('TUI separates opt-in reasoning from answers and consumes compact child progress', async t => {
   const tty = terminal(t); tty.output.columns = 100; tty.output.rows = 24;
   tty.ui.event({ type: 'reasoning', source: 'provider', text: 'native detail' });
