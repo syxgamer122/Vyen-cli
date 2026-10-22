@@ -14,6 +14,7 @@ export function sanitizeBashCommand(command: string, platform = process.platform
 export interface Approval { tool: string; input: unknown; signal: AbortSignal }
 export type Approve = (request: Approval) => Promise<boolean>;
 export interface ToolCall { toolCallId: string; toolName: string; input: unknown }
+export type PermissionMode = 'ask' | 'auto' | 'plan' | 'readonly';
 export interface ToolDefinition<Input = unknown> {
   description: string; schema: z.ZodType<Input>; readOnly: boolean;
   execute: (input: Input, signal: AbortSignal) => Promise<string>;
@@ -516,6 +517,16 @@ export class ToolRegistry {
       throw error;
     }
   }
+}
+
+/**
+ * The single mapping from a permission mode onto a registry. Every place that
+ * changes the mode must go through this, otherwise a mode change can leave the
+ * registry offering tools the mode is supposed to forbid.
+ */
+export function applyPermissionMode(registry: ToolRegistry, mode: PermissionMode): void {
+  registry.readOnly = mode === 'readonly';
+  registry.planMode = mode === 'plan';
 }
 
 

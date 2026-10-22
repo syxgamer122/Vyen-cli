@@ -21,6 +21,7 @@ import {
 } from './config.js';
 import { safeError } from './errors.js';
 import { VERSION } from './version.js';
+import type { PermissionMode } from './tools.js';
 import type { HarnessEvent } from './harness.js';
 import type { SubagentEvent } from './subagents.js';
 import { InputCancelledError, padEndVisible, sliceVisible, terminalText as cleanTerminal, TerminalUI, visibleLength } from './tui.js';
@@ -70,8 +71,6 @@ Shortcuts: Shift+Tab mode, Ctrl+T transcript, Ctrl+O copy, Alt+. / Alt+, effort,
 API keys are read from environment variables or ~/.config/vyen/credentials.json.
 Shell commands run as your OS user; approvals are not an OS sandbox.
 `;
-
-type PermissionMode = 'ask' | 'plan' | 'auto' | 'readonly';
 
 export function welcomeBanner(
   model: string,
@@ -516,6 +515,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         if (event.type === 'stopped') denied = true;
         if (event.type === 'plan_exit') {
           mode = prePlanMode;
+          applyPermissionMode(tools, mode);
           tui?.setMode(mode);
         }
         if (event.type === 'retry') {
@@ -543,7 +543,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         else if (event.type === 'compaction') stderr.write('\n[Context compacted; original history archived.]\n');
         else if (event.type === 'stopped') stderr.write(`\n${event.reason}\n`);
       };
-      const { ToolRegistry, formatTodos } = await import('./tools.js');
+      const { ToolRegistry, formatTodos, applyPermissionMode } = await import('./tools.js');
       const { Subagents } = await import('./subagents.js');
       const { Harness } = await import('./harness.js');
 
@@ -646,11 +646,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         return { tools: reg, harness: new Harness(runtime, store, reg, emit) };
       };
 
-      const applyPermissionMode = (nextMode: PermissionMode) => {
+      const setPermissionMode = (nextMode: PermissionMode) => {
         if (nextMode === 'plan' && mode !== 'plan') prePlanMode = mode;
         mode = nextMode;
-        tools.readOnly = mode === 'readonly';
-        tools.planMode = mode === 'plan';
+        applyPermissionMode(tools, nextMode);
         tui?.setMode(mode);
         config.approvalMode = mode;
         void saveConfig(config).catch(() => {});
@@ -679,7 +678,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         tui.onToggleMode = () => {
           const order: PermissionMode[] = ['ask', 'auto', 'plan', 'readonly'];
           const next = order[(order.indexOf(mode) + 1) % order.length];
-          applyPermissionMode(next);
+          setPermissionMode(next);
         };
         tui.onCycleEffort = direction => {
           const ring: (EffortLevel | undefined)[] = [undefined, ...EFFORT_LEVELS];
@@ -1127,7 +1126,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             display('Usage: /auto [on | off] (or /yolo)\n');
             return true;
           }
-          applyPermissionMode(next);
+          setPermissionMode(next);
           return true;
         }
         if (cmdInput === '/mode' || cmdInput.startsWith('/mode ')) {
@@ -1155,7 +1154,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             display('Usage: /mode [ask | auto | plan | readonly]\n');
             return true;
           }
-          applyPermissionMode(next);
+          setPermissionMode(next);
           return true;
         }
         if (cmdInput === '/transcript' || cmdInput.startsWith('/transcript ')) {
@@ -1589,15 +1588,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             if (!arg) {
               if (mode === 'plan') {
                 mode = prePlanMode;
-                tools.planMode = false;
-                tools.readOnly = mode === 'readonly';
+                applyPermissionMode(tools, mode);
                 tui?.setMode(mode);
                 display(`Exited plan mode -> restored mode: ${mode}\n`);
               } else {
                 prePlanMode = mode;
                 mode = 'plan';
-                tools.planMode = true;
-                tools.readOnly = false;
+                applyPermissionMode(tools, 'plan');
                 tui?.setMode(mode);
                 display('Plan mode active (read-only exploration + structured planning; call /plan off or /plan execute when ready).\n');
               }
@@ -1605,16 +1602,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             }
             if (lower === 'off' || lower === 'exit') {
               mode = prePlanMode;
-              tools.planMode = false;
-              tools.readOnly = mode === 'readonly';
+              applyPermissionMode(tools, mode);
               tui?.setMode(mode);
               display(`Plan mode off -> restored mode: ${mode}\n`);
               continue;
             }
             if (lower === 'execute' || lower === 'approve' || lower === 'run') {
               mode = prePlanMode;
-              tools.planMode = false;
-              tools.readOnly = mode === 'readonly';
+              applyPermissionMode(tools, mode);
               tui?.setMode(mode);
               display(`Plan mode exited (${mode}) — executing plan...\n`);
               await run('Proceed to implement the proposed plan step by step. Use todo_write to track tasks and run verification checks.');
@@ -1623,8 +1618,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             if (mode !== 'plan') {
               prePlanMode = mode;
               mode = 'plan';
-              tools.planMode = true;
-              tools.readOnly = false;
+              applyPermissionMode(tools, 'plan');
               tui?.setMode(mode);
               display('Plan mode active.\n');
             }

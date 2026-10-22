@@ -28,7 +28,12 @@ test('real CLI delegates isolated research contexts, caps concurrency at two and
       children++; active++; maximum = Math.max(maximum, active);
       assert(!JSON.stringify(body.messages).includes('parent-private-context'));
       assert.deepEqual(body.tools.map(t => t.function.name).sort(), ['list_files', 'read_file', 'search']);
-      await setTimeout(60); active--; return sse(response, { text: `Report ${children}` });
+      // Hold the first child until a second one arrives. A fixed sleep made
+      // the overlap depend on scheduler luck, so the cap was only asserted
+      // when the machine happened to be idle.
+      const deadline = Date.now() + 5_000;
+      while (active < 2 && Date.now() < deadline) await setTimeout(20);
+      active--; return sse(response, { text: `Report ${children}` });
     }
     if (!body.messages.some(m => m.role === 'tool')) return sse(response, { calls: [{ id: 'delegate1', name: 'delegate_task', input: { tasks: ['Inspect alpha', 'Inspect beta', 'Inspect gamma'] } }] });
     assert.match(body.messages.at(-1).content, /Session .*\nTask: Inspect alpha/);

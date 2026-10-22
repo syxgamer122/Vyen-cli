@@ -1,7 +1,7 @@
 export { Harness, MAX_API_RETRIES } from './harness.js';
 export type { HarnessEvent, RevertResult, ToolEventMeta } from './harness.js';
-export { ToolRegistry, formatTodos, normalizeToolName, normalizeToolInput, sanitizeBashCommand, TOOL_NAME_ALIASES } from './tools.js';
-export type { ToolDefinition, ToolCall, Approve, Approval, RunBudget } from './tools.js';
+export { ToolRegistry, formatTodos, normalizeToolName, normalizeToolInput, sanitizeBashCommand, TOOL_NAME_ALIASES, applyPermissionMode } from './tools.js';
+export type { ToolDefinition, ToolCall, Approve, Approval, RunBudget, PermissionMode } from './tools.js';
 export { SessionStore, sameWorkspace, repairInterrupted, fileBackupSchema, turnCheckpointSchema, todoItemSchema } from './session.js';
 export type { Session, SessionSummary, FileBackup, TurnCheckpoint, TodoItem } from './session.js';
 export { migrateLegacyData, MIGRATION_MARKER } from './migrate.js';

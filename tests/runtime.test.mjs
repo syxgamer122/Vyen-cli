@@ -4,6 +4,48 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fixture, provider, sse, cli } from './helpers.mjs';
 
+test('every permission mode change in the CLI goes through the shared helper', async () => {
+  // The defect this guards against was a mode-change site that forgot to
+  // restore tools.readOnly / tools.planMode. The helper is unit-tested; this
+  // check makes sure no site bypasses it.
+  const source = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /tools\.readOnly\s*=/, 'tools.readOnly must only be set by applyPermissionMode');
+  assert.doesNotMatch(source, /tools\.planMode\s*=/, 'tools.planMode must only be set by applyPermissionMode');
+});
+
+test('leaving plan mode restores read-only enforcement instead of unlocking mutations', async () => {
+  const { applyPermissionMode, ToolRegistry } = await import('../dist/index.js');
+  const registry = new ToolRegistry(process.cwd(), async () => true, true);
+  assert.equal(registry.effectiveReadOnly, true);
+
+  // Entering plan mode, as cli.ts does when the user types /plan.
+  applyPermissionMode(registry, 'plan');
+  assert.equal(registry.effectiveReadOnly, true);
+  assert.ok(Object.keys(registry.schemas()).includes('exit_plan_mode'));
+
+  // Leaving plan mode back into the read-only mode it came from.
+  applyPermissionMode(registry, 'readonly');
+  assert.equal(registry.readOnly, true);
+  assert.equal(registry.planMode, false);
+  assert.equal(registry.effectiveReadOnly, true);
+  const names = Object.keys(registry.schemas());
+  for (const forbidden of ['write_file', 'edit_file', 'apply_patch', 'bash']) {
+    assert.ok(!names.includes(forbidden), `${forbidden} must not be offered in read-only mode`);
+  }
+});
+
+test('leaving plan mode into the normal mode does unlock mutations', async () => {
+  const { applyPermissionMode, ToolRegistry } = await import('../dist/index.js');
+  const registry = new ToolRegistry(process.cwd(), async () => true, false);
+  applyPermissionMode(registry, 'plan');
+  applyPermissionMode(registry, 'ask');
+  assert.equal(registry.effectiveReadOnly, false);
+  const names = Object.keys(registry.schemas());
+  for (const wanted of ['write_file', 'edit_file', 'apply_patch', 'bash']) {
+    assert.ok(names.includes(wanted), `${wanted} must be offered outside read-only mode`);
+  }
+});
+
 test('the CLI identifies itself as vyen in help, version and error output', async t => {
   const f = await fixture(t);
   const version = await cli(f, 'http://127.0.0.1:1', ['--version']).done;
