@@ -444,12 +444,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const sessionsRootDir = join(runtime.dataDir, 'sessions');
     if (launchResumePicker && !resumeTarget) {
       const existingList = await SessionStore.list(sessionsRootDir);
-      const wsNonEmpty = existingList.filter(s => sameWorkspace(s.cwd, runtime.cwd) && (s.messagesCount ?? 0) > 0);
-      const anyNonEmpty = existingList.filter(s => (s.messagesCount ?? 0) > 0);
-      const best = wsNonEmpty[0] ?? anyNonEmpty[0] ?? existingList.find(s => sameWorkspace(s.cwd, runtime.cwd));
+      const inWorkspace = existingList.filter(s => sameWorkspace(s.cwd, runtime.cwd));
+      const nonEmpty = inWorkspace.filter(s => (s.messagesCount ?? 0) > 0);
+      // Never auto-select a session from another workspace: SessionStore.open
+      // rejects it, which would turn "vyen resume" into a hard failure.
+      const best = nonEmpty[0] ?? inWorkspace[0];
       if (best) {
         resumeTarget = best.id;
-        if ((wsNonEmpty.length || anyNonEmpty.length) <= 1) launchResumePicker = false;
+        if (inWorkspace.length <= 1) launchResumePicker = false;
       }
     }
     let store = await SessionStore.open(sessionsRootDir, runtime, resumeTarget);

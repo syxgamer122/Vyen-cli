@@ -80,6 +80,25 @@ test('SIGINT during MCP startup aborts the connect, exits 130 and releases the s
   assert.ok(!sessions.some(n => n.endsWith('.lock')), 'the session lock must be released');
 });
 
+test('vyen resume in an unrelated workspace starts a fresh session instead of failing', async t => {
+  const f = await fixture(t);
+  const { mkdir } = await import('node:fs/promises');
+  const other = join(f.root, 'other-project');
+  await mkdir(other, { recursive: true });
+  const p = await provider(t, (body, response) => sse(response, { text: 'ok' }));
+
+  // One session with history in the first workspace.
+  const first = await cli(f, p.url, ['--json', '-p', 'hello']).done;
+  assert.equal(first.code, 0, first.stdout + first.stderr);
+
+  // A second workspace with no sessions at all.
+  const second = await cli({ ...f, cwd: other }, p.url, ['--json', 'resume', '-p', 'hi']).done;
+  assert.doesNotMatch(second.stdout + second.stderr, /different workspace/);
+  assert.equal(second.code, 0, second.stdout + second.stderr);
+  const session = JSON.parse(second.stdout.split('\n')[0]);
+  assert.equal(session.cwd, other, 'the new session must belong to the current workspace');
+});
+
 test('the CLI identifies itself as vyen in help, version and error output', async t => {
   const f = await fixture(t);
   const version = await cli(f, 'http://127.0.0.1:1', ['--version']).done;
