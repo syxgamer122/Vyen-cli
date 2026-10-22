@@ -1,11 +1,11 @@
 {
-  "name": "vyen",
+  "name": "@nguyenhuumanh/vyen",
   "version": "0.2.23",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
-      "name": "vyen",
+      "name": "@nguyenhuumanh/vyen",
       "version": "0.2.23",
       "license": "MIT",
       "dependencies": {

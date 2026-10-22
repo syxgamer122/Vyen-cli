@@ -37,13 +37,16 @@ export async function packRelease(root = resolve(dirname(fileURLToPath(import.me
   await mkdir(output, { recursive: true });
   await command('npm', ['run', 'build'], root);
   const packed = JSON.parse(await command('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', output], root));
-  const filename = `vyen-${version}.tgz`;
+  // A scoped package packs to <scope>-<name>-<version>.tgz and installs under
+  // node_modules/<scope>/<name>.
+  const scope = 'nguyenhuumanh';
+  const filename = `${scope}-vyen-${version}.tgz`;
   if (packed.length !== 1 || packed[0].filename !== filename) throw new Error('Unexpected npm pack output.');
   const archive = join(output, filename);
   const prefix = await mkdtemp(join(tmpdir(), 'vyen-release-'));
   try {
     await command('npm', ['install', '--prefix', prefix, archive, '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], root);
-    const bin = join(prefix, 'node_modules', 'vyen', 'bin', 'vyen.mjs');
+    const bin = join(prefix, 'node_modules', `@${scope}`, 'vyen', 'bin', 'vyen.mjs');
     const reported = await command(process.execPath, [bin, '--version'], root);
     if (reported !== `vyen cli ${version}`) throw new Error(`Installed archive reports the wrong version: ${reported}`);
     await command(process.execPath, [bin, '--help'], root);

@@ -21,9 +21,9 @@ test('publishing creates the first tag, bumps on update and repairs a rerun with
   await git('config', 'user.name', 'Release Test');
   await git('config', 'user.email', 'test@example.invalid');
   await git('remote', 'add', 'origin', remote);
-  const manifest = { name: 'vyen', version: '0.1.0', private: true, type: 'module', bin: { vyen: 'bin/vyen.mjs' }, files: ['bin'], scripts: { build: 'node --version' } };
+  const manifest = { name: '@nguyenhuumanh/vyen', version: '0.1.0', private: true, type: 'module', bin: { vyen: 'bin/vyen.mjs' }, files: ['bin'], scripts: { build: 'node --version' } };
   await writeFile(join(work, 'package.json'), JSON.stringify(manifest));
-  await writeFile(join(work, 'npm-shrinkwrap.json'), JSON.stringify({ name: 'vyen', version: '0.1.0', lockfileVersion: 3, requires: true, packages: { '': { name: 'vyen', version: '0.1.0' } } }));
+  await writeFile(join(work, 'npm-shrinkwrap.json'), JSON.stringify({ name: '@nguyenhuumanh/vyen', version: '0.1.0', lockfileVersion: 3, requires: true, packages: { '': { name: '@nguyenhuumanh/vyen', version: '0.1.0' } } }));
   await writeFile(join(work, '.gitignore'), 'node_modules/\nrelease-out/\n');
   await writeFile(join(work, 'bin/vyen.mjs'), "#!/usr/bin/env node\nimport {readFileSync} from 'node:fs'; const p=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')); console.log('vyen cli '+p.version);\n");
   for (const file of ['pack-release.mjs', 'publish-release.mjs', 'release-version.mjs']) await copyFile(join('scripts', file), join(work, 'scripts', file));
