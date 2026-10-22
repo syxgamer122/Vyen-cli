@@ -8,8 +8,25 @@ import { createHash } from 'node:crypto';
 import { parseVersion } from './release-version.mjs';
 
 const exec = promisify(execFile);
+
+/**
+ * Runs npm through its JavaScript entry point. `npm` is a batch file on
+ * Windows, which spawn can only launch through a shell — and a shell means
+ * unescaped arguments. Running npm-cli.js with the current node binary works
+ * the same on every platform and keeps the arguments separate.
+ */
+function npmCommand() {
+  const cli = process.env.npm_execpath
+    ?? join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  return { program: process.execPath, prefix: [cli] };
+}
+
 export async function command(program, args, cwd) {
-  const { stdout } = await exec(program, args, { cwd, maxBuffer: 4 * 1024 * 1024 });
+  const npm = program === 'npm' ? npmCommand() : null;
+  const { stdout } = await exec(npm ? npm.program : program, npm ? [...npm.prefix, ...args] : args, {
+    cwd,
+    maxBuffer: 4 * 1024 * 1024,
+  });
   return stdout.trim();
 }
 

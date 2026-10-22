@@ -63,7 +63,10 @@ export function cli(f, url, args = [], options = {}) {
   let stdout = '', stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });
   child.stderr.on('data', chunk => { stderr += chunk; });
-  const timeout = setTimeout(() => origKill('SIGKILL'), 15_000);
+  // Backstop against a hung child, not a performance budget: several tests
+  // spawn the CLI twice with real HTTP round trips, and the suite runs its
+  // files in parallel, so 15s was marginal on a loaded machine.
+  const timeout = setTimeout(() => origKill('SIGKILL'), 30_000);
   const done = new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('close', (code, signal) => { clearTimeout(timeout); resolve({ code, signal, stdout, stderr }); });

@@ -57,5 +57,7 @@ test('the README documents an install command that can actually work', async () 
   if (manifest.private) {
     assert.doesNotMatch(readme, /npm install -g vyen-cli/, 'a private package cannot be installed from the npm registry');
     assert.match(readme, /releases\/latest\/download\/vyen-cli\.tgz/);
+  } else {
+    assert.match(readme, new RegExp(`npm install -g ${manifest.name}`), 'a published package must be installable from the registry');
   }
 });

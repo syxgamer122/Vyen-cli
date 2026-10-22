@@ -8,14 +8,14 @@ subagents.
 ## Install
 
 ```bash
-npm install -g https://github.com/binxgtl/vyen-cli/releases/latest/download/vyen-cli.tgz --omit=dev
+npm install -g vyen-cli
 ```
 
 Requires Node.js >= 22.16.0. Verified on Linux; the primary target is Termux on
 Android.
 
-The package is not published to the npm registry, so install it from the
-release tarball above rather than from the registry.
+A release tarball with the same contents is also attached to every GitHub
+release, for machines that cannot reach the npm registry.
 
 ## Configure
 

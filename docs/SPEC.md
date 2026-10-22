@@ -90,5 +90,7 @@ same tagged commit repairs the same release instead of bumping again. Superseded
 source commits are skipped. Release jobs are serialized, use contents:write only
 in their publishing job, upload npm archives plus SHA-256 checksums to a draft,
 and publish the release only after uploads complete. The repository GITHUB_TOKEN
-does not trigger recursive push workflows. No npm registry publishing or
-automatic updating of installed clients is enabled by this workflow.
+does not trigger recursive push workflows. The npm registry publishes the
+package on a version tag, with provenance; the GitHub release carries the same
+tarball plus SHA-256 checksums for machines that cannot reach the registry.
+Automatic updating of installed clients is not enabled by this workflow.

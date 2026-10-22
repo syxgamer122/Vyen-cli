@@ -4,7 +4,15 @@
   "description": "A small independent coding harness for Termux and external model APIs",
   "type": "module",
   "license": "MIT",
-  "private": true,
+  "homepage": "https://github.com/syxgamer122/Vyen-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/syxgamer122/Vyen-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/syxgamer122/Vyen-cli/issues"
+  },
+  "author": "syxgamer122",
   "bin": {
     "vyen": "bin/vyen.mjs"
   },
