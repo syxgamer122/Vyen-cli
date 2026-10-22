@@ -125,3 +125,9 @@ test('staying in the same workspace keeps the checkpoints', async t => {
   assert.equal(changed, false);
   assert.equal(store.session.checkpoints.length, 1);
 });
+
+test('the /cd handler drops the checkpoints via the shared helper', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
+  assert.match(source, /retargetSessionWorkspace\(store,/);
+});

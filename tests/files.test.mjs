@@ -78,7 +78,8 @@ test('a workspace change makes the old backups unreachable instead of restoring 
   const projectA = join(f.root, 'A'), projectB = join(f.root, 'B');
   await mkdir(projectA); await mkdir(projectB);
   await writeFile(join(projectA, 'app.ts'), 'ORIGINAL A\n');
-  await writeFile(join(projectB, 'app.ts'), 'IMPORTANT B CONTENT\n');
+  // B has no app.ts: if the old checkpoints survive a /cd, a revert would
+  // recreate A's pre-turn file inside B (the data-loss bug).
 
   const filesA = new WorkspaceFiles(projectA);
   filesA.beginTurn();
@@ -96,12 +97,15 @@ test('a workspace change makes the old backups unreachable instead of restoring 
   }];
   retargetSessionWorkspace(store, projectB);
 
-  // A revert in the new workspace has nothing of A's left to replay.
+  // The checkpoints are gone, so nothing of A's can be replayed into B.
+  assert.deepEqual(store.session.checkpoints, []);
   const filesB = new WorkspaceFiles(projectB);
-  const replayed = await filesB.restoreBackups(store.session.checkpoints.flatMap(c => c.files));
+  const replayed = await filesB.restoreBackups((store.session.checkpoints ?? []).flatMap(c => c.files));
   assert.deepEqual(replayed.restored, []);
   assert.deepEqual(replayed.deleted, []);
-  assert.equal(await readFile(join(projectB, 'app.ts'), 'utf8'), 'IMPORTANT B CONTENT\n');
+  let exists = true;
+  try { await readFile(join(projectB, 'app.ts'), 'utf8'); } catch { exists = false; }
+  assert.equal(exists, false, "A's file must not be created in B");
 });
 
 test('subprocess output fits or truncates without duplicate middle bytes', async t => {

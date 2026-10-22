@@ -22,7 +22,7 @@ test('MCP stdio discovers pages, validates arguments, preserves approvals and un
   const manager = new McpManager(stdio({ readOnlyTools: ['echo', 'wait', 'fail'] }), f.cwd);
   t.after(() => manager.close());
   await manager.connect(registry);
-  assert.equal(manager.tools.length, 4);
+  assert.equal(manager.tools.length, 5);
   const echo = mcpToolName('local', 'echo'), danger = mcpToolName('local', 'danger-tool');
   assert.equal((await registry.execute(call(echo, { text: 'hello' }), signal())).text, 'hello');
   await assert.rejects(registry.execute(call(echo, { text: 4 }), signal()), /Invalid arguments/);
@@ -253,5 +253,37 @@ test('read_mcp_resource requires approval and is absent in read-only mode', asyn
 
   // A read-only registry must not offer the tool at all.
   const readOnlyRegistry = new ToolRegistry(f.cwd, async () => true, true);
+  const readOnlyManager = new McpManager(stdio({}), f.cwd);
+  t.after(() => readOnlyManager.close());
+  await readOnlyManager.connect(readOnlyRegistry);
   assert.ok(!Object.keys(readOnlyRegistry.schemas()).includes('read_mcp_resource'));
+  await readOnlyManager.close();
+});
+
+test('an MCP server error never leaks a resolved credential', async t => {
+  const f = await fixture(t);
+  const secret = 'sk-live-mcp-secret-value';
+  process.env.VYEN_MCP_SHORT_SECRET = 'abc';
+  t.after(() => { delete process.env.VYEN_MCP_SHORT_SECRET; });
+  const registry = new ToolRegistry(f.cwd, async () => true);
+  const manager = new McpManager(stdio({
+    env: {
+      LEAKED_TOKEN: secret,
+      SHORT_TOKEN: '${VYEN_MCP_SHORT_SECRET}',
+      FALLBACK_TOKEN: '${VYEN_MCP_MISSING_VAR:-fallback-secret}',
+    },
+  }), f.cwd);
+  t.after(() => manager.close());
+  await manager.connect(registry);
+
+  for (const [name, value] of [['literal', secret], ['short-env', 'abc'], ['fallback', 'fallback-secret']]) {
+    await assert.rejects(
+      registry.execute(call(mcpToolName('local', 'leak')), signal()),
+      err => {
+        assert.ok(!String(err.message).includes(value), `the ${name} secret must not appear in the error`);
+        return true;
+      },
+    );
+  }
+  await manager.close();
 });

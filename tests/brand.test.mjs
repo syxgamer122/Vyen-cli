@@ -14,20 +14,15 @@ const GUARD = fileURLToPath(new URL('./brand.test.mjs', import.meta.url));
 
 // The legacy names that must survive. They are the OLD brand, and they are
 // allowed only where they still mean "the goon installation we migrate from":
-// the quoted directory value, the environment variable names, and the marker.
-// The legacy names that must survive. They are the OLD brand, and they are
-// allowed only where they still mean "the goon installation we migrate from":
 // the environment variable names (GOON_*), the quoted directory value, the
-// migration marker, and the upstream repository URL.
+// migration marker, the upstream repository URL, and the phrase "legacy goon"
+// in comments. Prose mentions in markdown files are allowed separately.
 const legacyEnv = new RegExp(['G', 'O', 'O', 'N', '_'].join('') + '[A-Z_*]+');
 const legacyDir = new RegExp("['\"`]" + ['g', 'o', 'o', 'n'].join('') + "['\"`]");
 const legacyMarker = new RegExp(['migrated-from-', 'g', 'o', 'o', 'n'].join(''));
 const legacyRepo = /binxgtl\/goon-cli/;
-// Prose that mentions the legacy brand as a word, never as an identifier:
-// `goon` not followed by a word character or a hyphen (which would make it
-// a slug like `goon-cli` or a symbol like `goonTest`).
-const legacyProse = /goon(?![\w-])/i;
-const allowed = [legacyEnv, legacyDir, legacyMarker, legacyRepo, legacyProse];
+const legacyPhrase = /legacy goon/i;
+const allowed = [legacyEnv, legacyDir, legacyMarker, legacyRepo, legacyPhrase];
 
 // The migration's own code and test are about the legacy brand by definition.
 const migrationFiles = new Set([
@@ -58,9 +53,12 @@ test('no live goon identifier survives the rename in shipped source', () => {
     scanned.push(file);
     const text = readFileSync(file, 'utf8');
     if (migrationFiles.has(file)) continue;
+    const isMarkdown = file.endsWith('.md');
     text.split(/\r?\n/).forEach((line, index) => {
       if (!BRAND.test(line)) return;
       if (allowed.some(pattern => pattern.test(line))) return;
+      // In markdown, prose mentions of the legacy brand are allowed.
+      if (isMarkdown && /goon(?![\w-])/i.test(line)) return;
       offenders.push(`${relative(ROOT, file)}:${index + 1} ${line.trim().slice(0, 90)}`);
     });
   }

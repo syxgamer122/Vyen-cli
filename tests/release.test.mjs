@@ -34,6 +34,25 @@ test('version synchronization preserves dependencies and rejects a divergent loc
   assert.throws(() => setManifestVersion(manifest, { ...lock, version: '0.2.0' }, '0.1.1'), /disagree/);
 });
 
+test('the documented install command names the package that is actually published', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
+  const documented = [...readme.matchAll(/npm install -g\s+([^\s`]+)/g)]
+    .map(match => match[1])
+    .filter(name => name.startsWith('@') || /^[a-z][a-z0-9._-]*(\/|$)/i.test(name))
+    .filter(name => name !== '.');
+  assert.ok(documented.length > 0, 'the README must document an install command');
+  for (const name of documented) {
+    assert.equal(name, manifest.name, `the README installs ${name}, but package.json publishes ${manifest.name}`);
+  }
+  const notes = await readFile(new URL('../scripts/publish-release.mjs', import.meta.url), 'utf8');
+  const fromNotes = [...notes.matchAll(/npm install -g\s+([^\s`\\]+)/g)]
+    .map(match => match[1])
+    .filter(name => name.startsWith('@'));
+  assert.ok(fromNotes.length > 0, 'the release notes must document an install command');
+  for (const name of fromNotes) assert.equal(name, manifest.name);
+});
+
 test('CLI version comes from the installed package manifest', async () => {
   const manifest = JSON.parse(await readFile('package.json', 'utf8'));
   const lock = JSON.parse(await readFile('npm-shrinkwrap.json', 'utf8'));

@@ -29,9 +29,7 @@ import type { McpManager } from './mcp.js';
 import { EFFORT_DESCRIPTIONS, parseEffortInput, runSetupWizard } from './setup.js';
 import { discoverModels, formatModelBadge, resolveModelCapabilities, type DiscoveredModel } from './provider.js';
 import { bashApprovalPrefix, isApprovedBashPrefix } from './approval.js';
-
-
-type PermissionMode = 'ask' | 'plan' | 'auto' | 'readonly';
+import type { PermissionMode } from './tools.js';
 
 /**
  * Welcome lines shown when a session opens. Plain text (it is also printed in readline mode); the
@@ -709,8 +707,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             return true;
           }
           return reply === 'y' || reply === 'yes';
-        }, currentMode === 'readonly');
-        reg.planMode = currentMode === 'plan';
+        });
+        applyPermissionMode(reg, currentMode);
         if (rl || tui) {
           reg.askUser = async (questions, callSignal) => {
             const out: Record<string, string[]> = {};
@@ -2356,7 +2354,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                 syncTuiHeader();
                 tui.setNotice(`Changed directory to: ${real}`);
               }
-              display(`Changed workspace directory to: ${real}\n`);
             } catch (error) {
               display(`Failed to change directory: ${safeError(error, apiKey)}\n`);
             }

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the fork's source with upstream `binxgtl/goon-cli` (0.3.0 + 2 commits, +4452/−3016 lines, 9 security + 15 correctness + 5 performance fixes) and re-apply on top of it the vyen identity, the goon→vyen data migration, and the eight fixes upstream still lacks.
+**Goal:** Replace the fork's source with upstream `binxgtl/goon-cli` (0.3.0 + 2 commits, +4452/−3016 lines, 9 security + 15 correctness + 5 performance fixes) and re-apply on top of it the vyen identity, the goon→vyen data migration, and the six fixes upstream still lacks.
 
-**Architecture:** The fork is upstream 0.2.23 plus a brand rename plus eight fixes. Upstream rewrote the same files, so a textual merge would conflict in 22 files. Instead the new tree is **upstream's tree, renamed** — a scripted, verifiable string transformation — and the fork's own work is re-applied on top as small, test-first patches. The rename is a case-only substitution (`goon`→`vyen`, `Goon`→`Vyen`, `GOON`→`VYEN`) with two exceptions: the npm package name and the GitHub repository URL.
+**Architecture:** The fork is upstream 0.2.23 plus a brand rename plus eight fixes (six of which upstream still lacks). Upstream rewrote the same files, so a textual merge would conflict in 22 files. Instead the new tree is **upstream's tree, renamed** — a scripted, verifiable string transformation — and the fork's own work is re-applied on top as small, test-first patches. The rename is a case-only substitution (`goon`→`vyen`, `Goon`→`Vyen`, `GOON`→`VYEN`) with two exceptions: the npm package name and the GitHub repository URL.
 
 **Tech Stack:** TypeScript 5.9 (strict, NodeNext), Node ≥ 22.16, AI SDK 6, `@modelcontextprotocol/sdk` 1.32.1, `node:test`.
 
@@ -15,7 +15,7 @@
 - The npm package stays `@nguyenhuumanh/vyen`; the installed command stays `vyen`. npm's name policy rejects every unscoped `vyen*` name, so the scope is not optional.
 - No `goon` identifier may survive in shipped source, except the legacy `GOON_*` environment names, the legacy `~/.config/goon` and `~/.local/share/goon` directories, the migration marker, and the historical plan documents.
 - Upstream's `docs/AUDIT.md` findings S1–S9 and B1–B15 are the acceptance list. A finding is closed only when a test goes red without the fix.
-- The three fixes upstream still lacks must survive the merge: `read_mcp_resource` requires approval, `wait_agent` reports a real `timed_out`, and a workspace change drops the turn checkpoints.
+- The six fixes upstream still lacks must survive the merge: `read_mcp_resource` requires approval, `wait_agent` reports a real `timed_out`, a workspace change drops the turn checkpoints, leaving plan mode restores the registry's enforcement, the MCP phase uses its own abort scope, and a subagent cannot outlive a cancelled parent.
 - `src/migrate.ts` and its wiring survive: a goon installation's config, credentials and sessions move to the vyen directories on first run.
 - Every task ends with `npm run typecheck` (exit 0), `npm run lint` (no new errors) and `npm test` green except the five known platform failures listed in `AGENTS.md` §1.
 - Source files carry no BOM (`AGENTS.md` §8). Bulk edits go through a Node script, never PowerShell `Set-Content`.
@@ -28,12 +28,12 @@
 2. **No `goon` identifier survives the rename in shipped source.** A guard test scans `src/`, `tests/`, `scripts/`, `bin/`, `docs/`, `package.json` and `npm-shrinkwrap.json` and fails on any live occurrence outside the permitted legacy names.
 3. **Upstream's security findings are closed in the fork.** S1 (a stale captured mode auto-approves writes), S2 (Shift+Tab answers "always" on a pending approval), S3 (the API key reaches the `bash` child environment), S4 (`view_image` reads outside the workspace), S5 (a tool hidden from the model still executes) and S9 (npm audit advisories in the AI SDK, ajv and zod).
 4. **Upstream's correctness findings are closed.** B1 (`edit_file` interprets `$&` and `$$` in the new text), B2 (images stored as a Buffer blow up the token estimate and break resume), B7 (`apply_patch` ignores `*** Move to:`, lets a second `Update` block overwrite the first and drops the trailing newline), B8 (`/revert` overwrites the user's later edits), B9 (slash commands typed while busy report "Queued" but are dropped).
-5. **The fixes upstream still lacks stay in the fork.** Upstream's tree still has six of them: `read_mcp_resource` is registered read-only, so an MCP server can return any content it holds without a prompt; `wait_agent` derives `timed_out` from whether *any* target finished, so a parent can read "not timed out" while a child still runs; a `/cd` to another project keeps the turn checkpoints, so `/revert` can restore the first project's files; leaving plan mode restores the label but not the registry's enforcement; the MCP phase and the model run share one abort controller, so a harness rebuild during a run detaches the run's cancellation; and a subagent spawned while its parent is being cancelled outlives the parent. The other two fixes of the fork — the redaction of resolved credential placeholders, and resuming a session from another project — upstream implemented in its own shape and they are **not** re-applied: a second mechanism for the same job is a patch.
+5. **The fixes upstream still lacks stay in the fork.** Upstream's tree still has six of them: `read_mcp_resource` is registered read-only, so an MCP server can return any content it holds without a prompt; `wait_agent` derives `timed_out` from whether *any* target finished, so a parent can read "not timed out" while a child still runs; a `/cd` to another project keeps the turn checkpoints, so `/revert` can restore the first project's files; leaving plan mode restores the label but not the registry's enforcement; the MCP phase and the model run share one abort controller, so a harness rebuild during a run detaches the run's cancellation; and a subagent spawned while its parent is being cancelled outlives the parent. Of the fork's other two fixes, the resume workspace selection is **not** re-applied — upstream switches the runtime to the session's folder instead, a documented product choice. The redaction of resolved credential placeholders **is** re-applied on top of upstream's shape: upstream redacts only values of six characters or more and never a `${VAR:-fallback}` fallback, so a short environment secret and a fallback value still reached error messages.
 6. **A goon installation's data migrates into the vyen directories on first run**, and the migration is resumable, never overwrites an existing file, and never throws.
 
 ## Scenarios & Tests
 
-**What the user sees:** after the merge, `npm install -g @nguyenhuamanh/vyen` still gives a working `vyen`; the same permissions, secret handling and bug fixes upstream shipped are present; and an existing goon user's `~/.config/goon` and `~/.local/share/goon` are copied into the vyen locations on first launch, with a line naming what moved.
+**What the user sees:** after the merge, `npm install -g @nguyenhuumanh/vyen` still gives a working `vyen`; the same permissions, secret handling and bug fixes upstream shipped are present; and an existing goon user's `~/.config/goon` and `~/.local/share/goon` are copied into the vyen locations on first launch, with a line naming what moved.
 
 | # | Criterion | Test |
 |---|---|---|
@@ -41,7 +41,7 @@
 | 2 | no goon identifier survives the rename | `tests/brand.test.mjs` |
 | 3 | upstream security findings closed | `tests/audit.test.mjs` |
 | 4 | upstream correctness findings closed | `tests/audit.test.mjs` |
-| 5 | the three fixes upstream lacks survive | `tests/mcp.test.mjs` |
+| 5 | the six fixes upstream lacks survive | `tests/mcp.test.mjs`, `tests/subagents.test.mjs`, `tests/session.test.mjs`, `tests/files.test.mjs`, `tests/runtime.test.mjs`, `tests/tui.test.mjs` |
 | 6 | goon data migrates into the vyen directories | `tests/migrate.test.mjs` |
 
 ---
@@ -158,7 +158,7 @@ git commit -m "refactor: take the upstream goon-cli tree and re-apply the vyen i
 
 ---
 
-### Task 2: Re-apply the eight fixes upstream still lacks
+### Task 2: Re-apply the six fixes upstream still lacks
 
 **Files:**
 - Modify: `src/tools.ts`, `src/cli.ts`, `src/mcp.ts`, `src/session.ts`, `src/subagents.ts`
@@ -170,11 +170,11 @@ git commit -m "refactor: take the upstream goon-cli tree and re-apply the vyen i
 
 - [ ] **Step 1: Re-apply each fix test-first, one fix at a time**
 
-For each fix, write the test from `docs/superpowers/plans/2026-10-21-vyen-critical-fixes.md` (it holds the exact test bodies and the exact fix for each), run it to see it fail, apply the fix, run it to see it pass. Upstream's tree still lacks six of the eight: the workspace-change checkpoint guard, the permission-mode helper and the plan-exit restore, `read_mcp_resource` approval, the separate abort scope, the subagent abort race, and the `wait_agent` timeout flag. The redaction of resolved credential placeholders and the resume workspace selection are **not** re-applied — upstream implemented both in its own shape.
+For each fix, write the test from `docs/superpowers/plans/2026-10-21-vyen-critical-fixes.md` (it holds the exact test bodies and the exact fix for each), run it to see it fail, apply the fix, run it to see it pass. Upstream's tree still lacks six of the eight: the workspace-change checkpoint guard, the permission-mode helper and the plan-exit restore, `read_mcp_resource` approval, the separate abort scope, the subagent abort race, and the `wait_agent` timeout flag. The redaction of resolved credential placeholders and the resume workspace selection are **not** re-applied — upstream implemented both in its own shape, and the redaction guarantee is re-tested separately (see the MCP test).
 
 - [ ] **Step 2: Verify with a mutation check**
 
-Break each of the eight fixes in turn, rebuild, and confirm the matching test fails. Every mutation must be caught.
+Break each of the six fixes in turn, rebuild, and confirm the matching test fails. Every mutation must be caught.
 
 - [ ] **Step 3: Run the full gate**
 
@@ -185,7 +185,7 @@ Expected: green except the five known platform failures.
 
 ```bash
 git add -A
-git commit -m "fix: re-apply the eight fixes upstream still lacks"
+git commit -m "fix: re-apply the six fixes upstream still lacks"
 ```
 
 ---
@@ -197,7 +197,7 @@ git commit -m "fix: re-apply the eight fixes upstream still lacks"
 - Test: `tests/migrate.test.mjs`, `tests/release.test.mjs`
 
 **Interfaces:**
-- Consumes: the renamed tree with the eight fixes.
+- Consumes: the renamed tree with the six fixes.
 - Produces: `migrateLegacyData(options)` in `src/migrate.ts`, exported from `src/index.ts` and called from the CLI entry point; a `release:pack` that packs the scoped name and smoke-tests the installed binary.
 
 - [ ] **Step 1: Re-apply the migration wiring**

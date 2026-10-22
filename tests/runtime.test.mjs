@@ -635,8 +635,8 @@ test('leaving plan mode into the normal mode does unlock mutations', async () =>
 
 test('the CLI restores the permission mode everywhere it changes it', async () => {
   const source = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /tools\.readOnly\s*=/, 'the permission fields must only be set by applyPermissionMode');
-  assert.doesNotMatch(source, /tools\.planMode\s*=/, 'the permission fields must only be set by applyPermissionMode');
+  assert.doesNotMatch(source, /\w+\.readOnly\s*=/, 'the permission fields must only be set by applyPermissionMode');
+  assert.doesNotMatch(source, /\w+\.planMode\s*=/, 'the permission fields must only be set by applyPermissionMode');
   const lines = source.split(/\r?\n/);
   const assignments = lines
     .map((line, index) => ({ line, index }))

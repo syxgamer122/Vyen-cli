@@ -644,9 +644,18 @@ export class McpManager {
 
   private error(error: unknown): Error {
     let message = error instanceof Error ? error.message : String(error);
-    const redact = (value: string | undefined) => {
-      // Very short values ("1", "true") would garble every message; real secrets are longer.
-      if (value && value.length >= 6) message = message.split(value).join('[REDACTED]');
+    // Two redaction rules: an environment variable's value is a secret no matter
+    // how short it is (the user chose to store a secret there), while a literal
+    // value written into the config is only treated as a secret when it is
+    // long enough to be one — short literals like "true" would garble every
+    // message. The fork's earlier fix kept these two rules separate; merging
+    // them back into one length floor left short secrets and ${VAR:-fallback}
+    // values leaking into error messages.
+    const redactSecret = (value: string | undefined) => {
+      if (value) message = message.split(value).join('[REDACTED]');
+    };
+    const redactLiteral = (value: string | undefined) => {
+      if (value && value.length >= 8) message = message.split(value).join('[REDACTED]');
     };
     for (const server of Object.values(this.config.servers)) {
       const names =
@@ -656,16 +665,26 @@ export class McpManager {
               ...(server.bearerEnv ? [server.bearerEnv] : []),
               ...Object.values(server.envHeaders),
             ];
-      for (const name of names) redact(process.env[name]);
+      for (const name of names) redactSecret(process.env[name]);
       if (server.transport === 'stdio') {
         for (const value of Object.values(server.env)) {
           const placeholder = parseEnvPlaceholder(value);
-          redact(placeholder ? process.env[placeholder.name] : value.length >= 8 ? value : undefined);
+          if (placeholder) {
+            redactSecret(process.env[placeholder.name]);
+            redactSecret(placeholder.fallback);
+          } else {
+            redactLiteral(value);
+          }
         }
       } else {
         for (const val of Object.values(server.headers)) {
           const placeholder = parseEnvPlaceholder(val);
-          redact(placeholder ? process.env[placeholder.name] : val.length >= 8 ? val : undefined);
+          if (placeholder) {
+            redactSecret(process.env[placeholder.name]);
+            redactSecret(placeholder.fallback);
+          } else {
+            redactLiteral(val);
+          }
         }
       }
     }
