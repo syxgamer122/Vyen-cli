@@ -39,6 +39,25 @@ test('read_mcp_resource requires approval and is absent in read-only mode', asyn
   assert.ok(!Object.keys(readOnlyRegistry.schemas()).includes('read_mcp_resource'));
 });
 
+test('an MCP server error never leaks a resolved credential', async t => {
+  const f = await fixture(t);
+  const secret = 'sk-live-mcp-secret-value';
+  const registry = new ToolRegistry(f.cwd, async () => true);
+  const manager = new McpManager(stdio({ env: { LEAKED_TOKEN: secret } }), f.cwd);
+  t.after(() => manager.close());
+  await manager.connect(registry);
+
+  await assert.rejects(
+    registry.execute(call(mcpToolName('local', 'leak')), signal()),
+    err => {
+      assert.ok(!String(err.message).includes(secret), 'the secret must not appear in the error');
+      assert.match(String(err.message), /\[REDACTED\]/);
+      return true;
+    },
+  );
+  await manager.close();
+});
+
 test('MCP stdio discovers pages, validates arguments, preserves approvals and unregisters on close', async t => {
   const f = await fixture(t);
   let approvals = 0;
@@ -46,7 +65,7 @@ test('MCP stdio discovers pages, validates arguments, preserves approvals and un
   const manager = new McpManager(stdio({ readOnlyTools: ['echo', 'wait', 'fail'] }), f.cwd);
   t.after(() => manager.close());
   await manager.connect(registry);
-  assert.equal(manager.tools.length, 4);
+  assert.equal(manager.tools.length, 5);
   const echo = mcpToolName('local', 'echo'), danger = mcpToolName('local', 'danger-tool');
   assert.equal((await registry.execute(call(echo, { text: 'hello' }), signal())).text, 'hello');
   await assert.rejects(registry.execute(call(echo, { text: 4 }), signal()), /Invalid arguments/);

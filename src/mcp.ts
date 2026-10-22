@@ -612,21 +612,32 @@ export class McpManager {
 
   private error(error: unknown): Error {
     let message = error instanceof Error ? error.message : String(error);
+    const redact = (value: string | undefined) => {
+      if (value && value.length >= 8) message = message.split(value).join('[REDACTED]');
+    };
     for (const server of Object.values(this.config.servers)) {
       const names =
         server.transport === 'stdio'
-          ? [...Object.values(server.envFrom), ...server.envVars]
+          ? [...Object.values(server.envFrom ?? {}), ...(server.envVars ?? [])]
           : [
               ...(server.bearerEnv ? [server.bearerEnv] : []),
-              ...Object.values(server.envHeaders),
+              ...Object.values(server.envHeaders ?? {}),
             ];
-      for (const name of names) {
-        const value = process.env[name];
-        if (value) message = message.split(value).join('[REDACTED]');
-      }
-      if (server.transport === 'http') {
-        for (const val of Object.values(server.headers)) {
-          if (val && val.length >= 8) message = message.split(val).join('[REDACTED]');
+      for (const name of names) redact(process.env[name]);
+      // A placeholder resolves to an environment value that never appears in
+      // the config file, so redacting the literal config string does not
+      // protect the secret it stands for.
+      const configured = server.transport === 'stdio'
+        ? Object.values(server.env ?? {})
+        : Object.values(server.headers ?? {});
+      for (const raw of configured) {
+        if (!raw) continue;
+        const placeholder = parseEnvPlaceholder(raw);
+        if (placeholder) {
+          redact(process.env[placeholder.name]);
+          redact(placeholder.fallback);
+        } else {
+          redact(raw);
         }
       }
     }

@@ -9,6 +9,7 @@ export function mockMcpServer() {
     { name: 'danger-tool', description: 'Claims read-only but must require approval', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } },
   ] : [
     { name: 'echo', description: 'Echo input', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } },
+    { name: 'leak', description: 'Return an error containing a configured secret', inputSchema: { type: 'object', properties: {} } },
     { name: 'wait', description: 'Wait until cancelled', inputSchema: { type: 'object', properties: {} } },
     { name: 'fail', description: 'Return an error', inputSchema: { type: 'object', properties: {} } },
   ], ...(request.params?.cursor ? {} : { nextCursor: 'page2' }) }));
@@ -21,6 +22,7 @@ export function mockMcpServer() {
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request, { signal }) => {
     if (request.params.name === 'wait') await setTimeout(30_000, undefined, { signal });
+    if (request.params.name === 'leak') return { isError: true, content: [{ type: 'text', text: `token=${process.env.LEAKED_TOKEN ?? 'none'}` }] };
     if (request.params.name === 'fail') return { content: [{ type: 'text', text: 'Tool failed as requested' }], isError: true };
     if (request.params.name === 'echo' && request.params.arguments?.text === 'env') return { content: [{ type: 'text', text: JSON.stringify({
       forwarded: process.env.FORWARDED, apiKey: process.env.VYEN_API_KEY ?? null,
