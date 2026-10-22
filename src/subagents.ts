@@ -559,17 +559,19 @@ export class Subagents {
     }
 
     const statusMap: Record<string, CodexAgentStatusPayload> = {};
-    let anyCompletedOrFinal = false;
+    // The wait only ends early when every target is done, so a target that is
+    // still running means the wait ended on the timer.
+    let allFinal = true;
     for (const { key, agent } of resolved) {
       const payload = formatStatusPayload(agent);
       const outKey = agent ? agent.id : key;
       statusMap[outKey] = payload;
-      if (payload !== 'running') anyCompletedOrFinal = true;
+      if (payload === 'running') allFinal = false;
     }
 
     return JSON.stringify({
       status: statusMap,
-      timed_out: !anyCompletedOrFinal,
+      timed_out: !allFinal,
     });
   }
 

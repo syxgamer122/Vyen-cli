@@ -200,6 +200,45 @@ test('a child whose parent was cancelled during setup never reaches the provider
   assert.equal(childRequests, 0, 'the child must not reach the provider');
 });
 
+test('wait_agent reports timed_out while a target is still running', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, async (body, response, n, request) => {
+    if (isChild(body)) {
+      const task = String(body.messages.at(-1)?.content ?? '');
+      if (task.includes('Fast task')) return sse(response, { text: 'fast report' });
+      // The slow child never answers; it waits until its client goes away.
+      await new Promise(resolve => { request.on('close', resolve); request.on('aborted', resolve); });
+      return sse(response, { text: 'slow report' });
+    }
+    return sse(response, { text: 'done' });
+  });
+  const config = configFor(f, p);
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  t.after(() => store.close());
+  const tools = new ToolRegistry(f.cwd, async () => true);
+  const subagents = new Subagents(config, store, tools);
+  subagents.register();
+
+  const fast = JSON.parse((await tools.execute(
+    { toolCallId: 's1', toolName: 'spawn_agent', input: { message: 'Fast task', agent_type: 'explorer' } },
+    new AbortController().signal,
+  )).text);
+  const slow = JSON.parse((await tools.execute(
+    { toolCallId: 's2', toolName: 'spawn_agent', input: { message: 'Slow task', agent_type: 'explorer' } },
+    new AbortController().signal,
+  )).text);
+  await setTimeout(300);
+
+  const waited = JSON.parse((await tools.execute(
+    { toolCallId: 'w1', toolName: 'wait_agent', input: { targets: [fast.agent_id, slow.agent_id], timeout_ms: 500 } },
+    new AbortController().signal,
+  )).text);
+  const statuses = Object.values(waited.status).map(s => typeof s === 'string' ? s : Object.keys(s)[0]);
+  assert.ok(statuses.includes('running'), 'the slow child must still be running');
+  assert.equal(waited.timed_out, true, 'a target that is still running means the wait timed out');
+  await subagents.closeAll();
+});
+
 test('terminal child event follows lock release, including cleanup failures; capacity is reclaimed', async t => {
   const { existsSync } = await import('node:fs');
   const f = await fixture(t), events = [];
