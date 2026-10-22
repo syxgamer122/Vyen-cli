@@ -37,3 +37,7 @@ Categories:
 - [pitfall] (2026-10-22) The test files import from `dist/`, not `src/` — run `npm run build` before `node --test tests/<file>.test.mjs`, otherwise you are testing the previous build.
 - [pitfall] (2026-10-22) On Windows the `bash` tool is Git Bash/MSYS, never cmd.exe — use POSIX syntax and `/dev/null`; `>nul` creates a literal file named `nul`.
 - [approach] (2026-10-22) `npm run lint` (oxlint) is much faster than `npm run typecheck` — use it to catch syntax errors before paying for the full strict TypeScript pass.
+- [pitfall] (2026-10-22) PowerShell `Set-Content -Encoding UTF8` writes a BOM and re-encodes UTF-8 as Windows-1252, corrupting any file with non-ASCII (src/cli.ts, tests/tui.test.mjs) - use a Node script for bulk replacements.
+- [pitfall] (2026-10-22) `execFile` and `spawn` cannot run `npm.cmd` on Windows without a shell (EINVAL) - run `node node_modules/typescript/bin/tsc` directly instead of `npm run build`.
+- [pitfall] (2026-10-22) A source mutation is invisible to the tests until `dist/` is rebuilt - a mutation check that skips the build reports false negatives.
+- [mistake] (2026-10-22) `git add -A` swept in an untracked AGENT_LEARNINGS.md without reading it first - run `git status` and read any new file before committing it.
