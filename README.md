@@ -1,4 +1,4 @@
-# vyen-cli
+# vyen
 
 An independent terminal coding agent. It talks to OpenAI-compatible, OpenAI
 Responses and Anthropic endpoints, reads and edits files in your workspace,
@@ -8,7 +8,7 @@ subagents.
 ## Install
 
 ```bash
-npm install -g vyen-cli
+npm install -g vyen
 ```
 
 Requires Node.js >= 22.16.0. Verified on Linux; the primary target is Termux on

@@ -22,8 +22,8 @@ test('reruns reuse the same tagged commit and explicit higher versions are respe
 });
 
 test('version synchronization preserves dependencies and rejects a divergent lockfile', () => {
-  const manifest = { name: 'vyen-cli', version: '0.1.0', dependencies: { ai: '6.0.193' } };
-  const lock = { version: '0.1.0', packages: { '': { version: '0.1.0', name: 'vyen-cli' }, 'node_modules/ai': { version: '6.0.193' } } };
+  const manifest = { name: 'vyen', version: '0.1.0', dependencies: { ai: '6.0.193' } };
+  const lock = { version: '0.1.0', packages: { '': { version: '0.1.0', name: 'vyen' }, 'node_modules/ai': { version: '6.0.193' } } };
   const next = setManifestVersion(manifest, lock, '0.1.1');
   assert.equal(next.manifest.version, '0.1.1');
   assert.equal(next.lock.version, '0.1.1');
@@ -55,9 +55,9 @@ test('the README documents an install command that can actually work', async () 
   const readme = await readFile('README.md', 'utf8');
   const manifest = JSON.parse(await readFile('package.json', 'utf8'));
   if (manifest.private) {
-    assert.doesNotMatch(readme, /npm install -g vyen-cli/, 'a private package cannot be installed from the npm registry');
-    assert.match(readme, /releases\/latest\/download\/vyen-cli\.tgz/);
+    assert.doesNotMatch(readme, new RegExp(`npm install -g ${manifest.name}(?!-)`), 'a private package cannot be installed from the npm registry');
+    assert.match(readme, /releases\/latest\/download\/vyen\.tgz/);
   } else {
-    assert.match(readme, new RegExp(`npm install -g ${manifest.name}`), 'a published package must be installable from the registry');
+    assert.match(readme, new RegExp(`npm install -g ${manifest.name}(?!-)`), 'a published package must be installable from the registry');
   }
 });

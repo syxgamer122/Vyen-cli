@@ -734,7 +734,7 @@ export class McpManager {
             });
           }
 
-          const client = new Client({ name: 'vyen-cli', version: VERSION }, { capabilities: {} });
+          const client = new Client({ name: 'vyen', version: VERSION }, { capabilities: {} });
           // Never send raw SDK/server errors to stderr; CLI controls presentation.
           client.onerror = () => {};
           connection = { server, timeoutMs: config.timeoutMs, client, transport, remove: [] };

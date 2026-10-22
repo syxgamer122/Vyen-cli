@@ -1,5 +1,5 @@
 {
-  "name": "vyen-cli",
+  "name": "vyen",
   "version": "0.2.23",
   "description": "A small independent coding harness for Termux and external model APIs",
   "type": "module",
