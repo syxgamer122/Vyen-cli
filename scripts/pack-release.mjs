@@ -20,7 +20,8 @@ export async function packRelease(root = resolve(dirname(fileURLToPath(import.me
   await mkdir(output, { recursive: true });
   await command('npm', ['run', 'build'], root);
   const packed = JSON.parse(await command('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', output], root));
-  const filename = `vyen-cli-${version}.tgz`;
+  // A scoped package packs to <scope>-<name>-<version>.tgz.
+  const filename = `nguyenhuumanh-vyen-${version}.tgz`;
   if (packed.length !== 1 || packed[0].filename !== filename) throw new Error('Unexpected npm pack output.');
   const archive = join(output, filename);
   const prefix = await mkdtemp(join(tmpdir(), 'vyen-release-'));

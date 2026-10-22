@@ -65,7 +65,7 @@ const releaseResponse = await fetch(`https://api.github.com/repos/${repository}/
 if (releaseResponse.status !== 404 && !releaseResponse.ok) throw new Error(`Cannot inspect existing release: HTTP ${releaseResponse.status}`);
 const release = releaseResponse.ok ? await releaseResponse.json() : null;
 const notes = join(packed.output, 'release-notes.md');
-await writeFile(notes, `Vyen CLI ${tag}\n\nIndependent coding harness for Termux and external APIs.\n\nChecks: Node 22.16 and 24 tests, TypeScript and lint; packed install/version smoke test.\n\nInstall or update:\n\n\`\`\`bash\nnpm install -g https://github.com/${repository}/releases/latest/download/vyen.tgz --omit=dev\n\`\`\`\n\nAssets include the versioned npm package, a stable vyen.tgz alias and SHA-256 checksums. Requires Node >=22.16.0. No paid API or Android-device verification is performed by CI.\n\nSource commit: ${head}\n`);
+await writeFile(notes, `Vyen CLI ${tag}\n\nIndependent coding harness for Termux and external APIs.\n\nChecks: Node 22.16 and 24 tests, TypeScript and lint; packed install/version smoke test.\n\nInstall or update:\n\n\`\`\`bash\nnpm install -g @nguyenhuamanh/vyen\n\`\`\`\n\nAssets include the versioned npm package, a stable vyen.tgz alias and SHA-256 checksums. Requires Node >=22.16.0. No paid API or Android-device verification is performed by CI.\n\nSource commit: ${head}\n`);
 if (!release) await command('gh', ['release', 'create', tag, '--repo', repository, '--verify-tag', '--draft', '--title', `Vyen CLI ${tag}`, '--notes-file', notes], root);
 await command('gh', ['release', 'upload', tag, ...packed.files, '--repo', repository, '--clobber'], root);
 await command('gh', ['release', 'edit', tag, '--repo', repository, '--draft=false', '--latest'], root);

@@ -601,7 +601,60 @@ test('Harness retries transient HTTP 500 API errors up to 3 times and SessionSto
   }
 });
 
+test('leaving plan mode restores read-only enforcement instead of unlocking mutations', async () => {
+  const { applyPermissionMode, ToolRegistry } = await import('../dist/index.js');
+  const registry = new ToolRegistry(process.cwd(), async () => true, true);
+  assert.equal(registry.effectiveReadOnly, true);
 
+  // Entering plan mode, as cli.ts does when the user types /plan.
+  applyPermissionMode(registry, 'plan');
+  assert.equal(registry.effectiveReadOnly, true);
 
+  // Leaving plan mode back into the read-only mode it came from.
+  applyPermissionMode(registry, 'readonly');
+  assert.equal(registry.readOnly, true);
+  assert.equal(registry.planMode, false);
+  assert.equal(registry.effectiveReadOnly, true);
+  const names = Object.keys(registry.schemas());
+  for (const forbidden of ['write_file', 'edit_file', 'apply_patch', 'bash']) {
+    assert.ok(!names.includes(forbidden), forbidden + ' must not be offered in read-only mode');
+  }
+});
 
+test('leaving plan mode into the normal mode does unlock mutations', async () => {
+  const { applyPermissionMode, ToolRegistry } = await import('../dist/index.js');
+  const registry = new ToolRegistry(process.cwd(), async () => true, false);
+  applyPermissionMode(registry, 'plan');
+  applyPermissionMode(registry, 'ask');
+  assert.equal(registry.effectiveReadOnly, false);
+  const names = Object.keys(registry.schemas());
+  for (const wanted of ['write_file', 'edit_file', 'apply_patch', 'bash']) {
+    assert.ok(names.includes(wanted), wanted + ' must be offered outside read-only mode');
+  }
+});
 
+test('the CLI restores the permission mode everywhere it changes it', async () => {
+  const source = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /tools\.readOnly\s*=/, 'the permission fields must only be set by applyPermissionMode');
+  assert.doesNotMatch(source, /tools\.planMode\s*=/, 'the permission fields must only be set by applyPermissionMode');
+  const lines = source.split(/\r?\n/);
+  const assignments = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => /^\s*mode\s*=[^=]/.test(line));
+  assert.ok(assignments.length >= 7, 'expected the mode to be assigned in several places, found ' + assignments.length);
+  for (const { index } of assignments) {
+    const next = lines.slice(index + 1, index + 3).join('\n');
+    assert.match(next, /applyPermissionMode\(/, 'the mode assignment at line ' + (index + 1) + ' must be followed by applyPermissionMode');
+  }
+});
+
+test('the MCP phase uses its own abort scope and never the run controller', async () => {
+  const source = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8');
+  const start = source.indexOf('const buildHarness =');
+  const end = source.indexOf('const setPermissionMode =');
+  assert.ok(start > 0 && end > start, 'the buildHarness block must be locatable');
+  const block = source.slice(start, end);
+  assert.doesNotMatch(block, /(^|[^.\w])controller\s*=/m, 'the MCP phase must not assign the run controller');
+  assert.match(block, /mcpController\s*=\s*new AbortController\(\)/);
+  assert.match(source, /const live = \[controller, mcpController\]/);
+});

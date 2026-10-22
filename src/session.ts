@@ -302,6 +302,19 @@ export function repairInterrupted(messages: ModelMessage[]): boolean {
   return true;
 }
 
+/**
+ * Point the session at a new workspace. Turn checkpoints store file paths
+ * relative to the workspace they were taken in, so they stop meaning anything
+ * once the workspace changes and must be dropped rather than replayed against
+ * the new root.
+ */
+export function retargetSessionWorkspace(store: SessionStore, nextCwd: string): boolean {
+  const changed = !sameWorkspace(store.session.cwd, nextCwd);
+  if (changed) store.session.checkpoints = [];
+  store.session.cwd = nextCwd;
+  return changed;
+}
+
 export function sameWorkspace(a: string, b: string): boolean {
   const na = a.normalize('NFC').replace(/[\\/]+$/, '');
   const nb = b.normalize('NFC').replace(/[\\/]+$/, '');

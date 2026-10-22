@@ -28,7 +28,12 @@ test('real CLI delegates isolated research contexts, caps concurrency at two and
       children++; active++; maximum = Math.max(maximum, active);
       assert(!JSON.stringify(body.messages).includes('parent-private-context'));
       assert.deepEqual(body.tools.map(t => t.function.name).sort(), ['list_files', 'read_file', 'search']);
-      await setTimeout(60); active--; return sse(response, { text: `Report ${children}` });
+      // Hold the first child until a second one arrives. A fixed sleep made
+      // the overlap depend on scheduler luck, so the cap was only asserted
+      // when the machine happened to be idle.
+      const deadline = Date.now() + 5_000;
+      while (active < 2 && Date.now() < deadline) await setTimeout(20);
+      active--; return sse(response, { text: `Report ${children}` });
     }
     if (!body.messages.some(m => m.role === 'tool')) return sse(response, { calls: [{ id: 'delegate1', name: 'delegate_task', input: { tasks: ['Inspect alpha', 'Inspect beta', 'Inspect gamma'] } }] });
     assert.match(body.messages.at(-1).content, /Session .*\nTask: Inspect alpha/);
@@ -355,4 +360,72 @@ test('Codex tools (update_plan, request_user_input, view_image), $skill-name exp
   assert.equal(copiedCode?.text, 'const ok = true;');
 });
 
+test('a child whose parent was cancelled during setup never reaches the provider', async t => {
+  const f = await fixture(t);
+  let childRequests = 0;
+  const p = await provider(t, (body, response) => {
+    if (isChild(body)) { childRequests++; return sse(response, { text: 'child report' }); }
+    return sse(response, { calls: [{ id: 'spawn1', name: 'spawn_agent', input: { message: 'Look around', agent_type: 'explorer' } }] });
+  });
+  const config = configFor(f, p);
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  t.after(() => store.close());
+  const tools = new ToolRegistry(f.cwd, async () => true);
+  new Subagents(config, store, tools).register();
 
+  const controller = new AbortController();
+  // The parent is cancelled while the child session is still being set up,
+  // which is before the abort listener is registered.
+  const originalClose = SessionStore.prototype.close;
+  SessionStore.prototype.close = async function () {
+    await originalClose.call(this);
+    controller.abort(new Error('parent cancelled'));
+  };
+  t.after(() => { SessionStore.prototype.close = originalClose; });
+
+  await tools.execute(
+    { toolCallId: 's1', toolName: 'spawn_agent', input: { message: 'Look around', agent_type: 'explorer' } },
+    controller.signal,
+  );
+  await setTimeout(500);
+  assert.equal(childRequests, 0, 'the child must not reach the provider');
+});
+
+test('wait_agent reports timed_out while a target is still running', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, async (body, response, n, request) => {
+    if (isChild(body)) {
+      const task = String(body.messages.at(-1)?.content ?? '');
+      if (task.includes('Fast task')) return sse(response, { text: 'fast report' });
+      // The slow child never answers; it waits until its client disconnects.
+      await new Promise(resolve => { request.on('close', resolve); request.on('aborted', resolve); });
+      return sse(response, { text: 'slow report' });
+    }
+    return sse(response, { text: 'done' });
+  });
+  const config = configFor(f, p);
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  t.after(() => store.close());
+  const tools = new ToolRegistry(f.cwd, async () => true);
+  const subagents = new Subagents(config, store, tools);
+  subagents.register();
+
+  const fast = JSON.parse((await tools.execute(
+    { toolCallId: 's1', toolName: 'spawn_agent', input: { message: 'Fast task', agent_type: 'explorer' } },
+    new AbortController().signal,
+  )).text);
+  const slow = JSON.parse((await tools.execute(
+    { toolCallId: 's2', toolName: 'spawn_agent', input: { message: 'Slow task', agent_type: 'explorer' } },
+    new AbortController().signal,
+  )).text);
+  await setTimeout(300);
+
+  const waited = JSON.parse((await tools.execute(
+    { toolCallId: 'w1', toolName: 'wait_agent', input: { targets: [fast.agent_id, slow.agent_id], timeout_ms: 500 } },
+    new AbortController().signal,
+  )).text);
+  const statuses = Object.values(waited.status).map(s => typeof s === 'string' ? s : Object.keys(s)[0]);
+  assert.ok(statuses.includes('running'), 'the slow child must still be running');
+  assert.equal(waited.timed_out, true, 'a target that is still running means the wait timed out');
+  await subagents.closeAll();
+});

@@ -12,7 +12,7 @@ Cài bản GitHub Release mới nhất:
 pkg install nodejs-lts git bash ripgrep
 
 node --version
-npm install -g https://github.com/syxgamer122/Vyen-cli/releases/latest/download/vyen.tgz --omit=dev
+npm install -g @nguyenhuamanh/vyen
 vyen --version
 ```
 

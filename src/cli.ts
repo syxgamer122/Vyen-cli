@@ -9,7 +9,10 @@ import {
   type Config,
   type EffortLevel,
   configPath,
+  configDir,
   dataDir,
+  legacyConfigDir,
+  legacyDataDir,
   loadConfig,
   normalizeGatewayUrl,
   resolveApiKey,
@@ -340,6 +343,20 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       if (typeof value === 'string') overrides[key] = ['contextWindow', 'maxOutputTokens', 'runTokenBudget', 'timeoutMs'].includes(key) ? Number(value) : value;
     }
     if (values['show-reasoning'] !== undefined) overrides.showReasoning = values['show-reasoning'];
+    // A legacy goon installation is migrated once, here, so that reading the
+    // configuration stays a pure read for everyone else.
+    const { migrateLegacyData } = await import('./migrate.js');
+    const migration = await migrateLegacyData({
+      legacyConfigDir: legacyConfigDir(),
+      legacyDataDir: legacyDataDir(),
+      configDir: configDir(),
+      dataDir: dataDir(),
+    });
+    if (migration.error) {
+      stderr.write(`vyen: could not migrate the legacy goon data (${migration.error}). Copy ${legacyConfigDir()} to ${configDir()} manually.\\n`);
+    } else if (migration.copied.length) {
+      stderr.write(`vyen: migrated ${migration.copied.length} entries from ${legacyConfigDir()} to ${configDir()}: ${migration.copied.join(', ')}\\n`);
+    }
     let config: Config = await loadConfig(overrides);
     if (positionals[0] === 'mcp') {
       const { loadMcpConfig, saveMcpConfig, mcpConfigPath, McpManager, importCodexMcpServers } = await import('./mcp.js');
@@ -432,6 +449,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       formatGoalStatusIndicator,
       formatGoalSummaryLines,
       parseGoalDraftArgs,
+      retargetSessionWorkspace,
     } = await import('./session.js');
     if (positionals[0] === 'sessions') {
       const list = await SessionStore.list(join(dataDir(), 'sessions'));
@@ -521,6 +539,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     let manager: McpManager | undefined;
     let subagents: import('./subagents.js').Subagents | undefined;
     let controller: AbortController | undefined;
+    // The MCP phase has its own abort scope. Sharing one controller let a harness
+    // rebuild during a run replace the run's signal, so Ctrl+C could no longer
+    // cancel the request that was actually in flight.
+    let mcpController: AbortController | undefined;
     let denied = false, exiting = false, terminating = false, starting = true;
     let mode: PermissionMode = values['read-only']
       ? 'readonly'
@@ -541,12 +563,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     };
     const stop = () => {
       if (starting) process.exitCode = 130;
-      if (controller && !controller.signal.aborted) controller.abort(new Error('Cancelled by user.'));
-      else { exiting = true; rl?.close(); tui?.close(); }
+      const live = [controller, mcpController].filter(c => c && !c.signal.aborted);
+      if (live.length) {
+        for (const c of live) c!.abort(new Error('Cancelled by user.'));
+      } else { exiting = true; rl?.close(); tui?.close(); }
     };
     const terminate = () => {
       terminating = true; exiting = true;
       controller?.abort(new Error('Terminated.'));
+      mcpController?.abort(new Error('Terminated.'));
       rl?.close(); tui?.close(); process.exitCode = 143;
     };
     const onIpcSignal = (msg: unknown) => {
@@ -601,6 +626,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         if (event.type === 'stopped') denied = true;
         if (event.type === 'plan_exit') {
           mode = prePlanMode;
+          applyPermissionMode(tools, mode);
           tui?.setMode(mode);
         }
         if (event.type === 'retry') {
@@ -629,7 +655,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         else if (event.type === 'compaction') stderr.write('\n[Context compacted; original history archived.]\n');
         else if (event.type === 'stopped') stderr.write(`\n${event.reason}\n`);
       };
-      const { ToolRegistry, formatTodos } = await import('./tools.js');
+      const { ToolRegistry, formatTodos, applyPermissionMode } = await import('./tools.js');
       const { Subagents } = await import('./subagents.js');
       const { Harness } = await import('./harness.js');
 
@@ -720,10 +746,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         }
         if (!values['no-mcp'] && !reuseMcp) {
           const { loadMcpConfig, McpManager } = await import('./mcp.js');
-          controller = new AbortController();
+          mcpController = new AbortController();
           try {
             manager = new McpManager(await loadMcpConfig(), runtime.cwd);
-            const connecting = manager.connect(reg, controller.signal);
+            const connecting = manager.connect(reg, mcpController.signal);
             // Restores the previous status afterwards so rebuilds (/setup, /model, /cd…) never stick on Working.
             await (tui ? tui.withStatus('Connecting MCP', () => connecting) : connecting);
             for (const st of manager.statuses) {
@@ -732,13 +758,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               }
             }
           } catch (error) {
-            if (!interactive || controller.signal.aborted) {
-              controller = undefined;
+            if (!interactive || mcpController.signal.aborted) {
               throw error;
             }
             display(`[MCP warning: ${safeError(error, apiKey)}]\n`);
           } finally {
-            controller = undefined;
+            mcpController = undefined;
           }
         }
         if (subagents) {
@@ -752,11 +777,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         return { tools: reg, harness: new Harness(runtime, store, reg, emit) };
       };
 
-      const applyPermissionMode = (nextMode: PermissionMode) => {
+      const setPermissionMode = (nextMode: PermissionMode) => {
         if (nextMode === 'plan' && mode !== 'plan') prePlanMode = mode;
         mode = nextMode;
-        tools.readOnly = mode === 'readonly';
-        tools.planMode = mode === 'plan';
+        applyPermissionMode(tools, mode);
         tui?.setMode(mode);
         config.approvalMode = mode;
         void saveConfig(config).catch(() => {});
@@ -819,7 +843,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         tui.onToggleMode = () => {
           const order: PermissionMode[] = ['ask', 'auto', 'plan', 'readonly'];
           const next = order[(order.indexOf(mode) + 1) % order.length];
-          applyPermissionMode(next);
+          setPermissionMode(next);
         };
         tui.onCycleEffort = direction => {
           const ring: (EffortLevel | undefined)[] = [undefined, ...EFFORT_LEVELS];
@@ -1486,7 +1510,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             display('Usage: /auto [on | off] (or /yolo)\n');
             return true;
           }
-          applyPermissionMode(next);
+          setPermissionMode(next);
           return true;
         }
         if (cmdInput === '/mode' || cmdInput.startsWith('/mode ')) {
@@ -1514,7 +1538,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             display('Usage: /mode [ask | auto | plan | readonly]\n');
             return true;
           }
-          applyPermissionMode(next);
+          setPermissionMode(next);
           return true;
         }
         if (cmdInput === '/transcript' || cmdInput.startsWith('/transcript ')) {
@@ -1998,15 +2022,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             if (!arg) {
               if (mode === 'plan') {
                 mode = prePlanMode;
-                tools.planMode = false;
-                tools.readOnly = mode === 'readonly';
+                applyPermissionMode(tools, mode);
                 tui?.setMode(mode);
                 display(`Exited plan mode -> restored mode: ${mode}\n`);
               } else {
                 prePlanMode = mode;
                 mode = 'plan';
-                tools.planMode = true;
-                tools.readOnly = false;
+                applyPermissionMode(tools, 'plan');
                 tui?.setMode(mode);
                 display('Plan mode active (read-only exploration + structured planning; call /plan off or /plan execute when ready).\n');
               }
@@ -2014,16 +2036,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             }
             if (lower === 'off' || lower === 'exit') {
               mode = prePlanMode;
-              tools.planMode = false;
-              tools.readOnly = mode === 'readonly';
+              applyPermissionMode(tools, mode);
               tui?.setMode(mode);
               display(`Plan mode off -> restored mode: ${mode}\n`);
               continue;
             }
             if (lower === 'execute' || lower === 'approve' || lower === 'run') {
               mode = prePlanMode;
-              tools.planMode = false;
-              tools.readOnly = mode === 'readonly';
+              applyPermissionMode(tools, mode);
               tui?.setMode(mode);
               display(`Plan mode exited (${mode}) — executing plan...\n`);
               await run('Proceed to implement the proposed plan step by step. Use todo_write to track tasks and run verification checks.');
@@ -2032,8 +2052,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             if (mode !== 'plan') {
               prePlanMode = mode;
               mode = 'plan';
-              tools.planMode = true;
-              tools.readOnly = false;
+              applyPermissionMode(tools, 'plan');
               tui?.setMode(mode);
               display('Plan mode active.\n');
             }
@@ -2324,9 +2343,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               }
               const real = await realpath(candidate).catch(() => candidate);
               runtime = { ...runtime, cwd: real };
-              store.session.cwd = real;
+              const workspaceChanged = retargetSessionWorkspace(store, real);
               await store.save();
               await rebuildHarness({ reconnectMcp: true });
+              if (workspaceChanged) {
+                display(`Changed workspace directory to: ${real}. Turn checkpoints were cleared; /revert can no longer undo the previous workspace.\n`);
+              } else {
+                display(`Changed workspace directory to: ${real}\n`);
+              }
               if (tui) {
                 void tools.files.listWorkspaceFiles().then(files => tui?.setWorkspaceFiles(files)).catch(() => {});
                 syncTuiHeader();

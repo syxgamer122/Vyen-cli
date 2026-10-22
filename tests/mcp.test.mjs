@@ -231,3 +231,27 @@ REA_MODE = "production"
   ].sort());
   await manager.close();
 });
+
+test('read_mcp_resource requires approval and is absent in read-only mode', async t => {
+  const f = await fixture(t);
+  const approvals = [];
+  const registry = new ToolRegistry(f.cwd, async request => { approvals.push(request.tool); return true; });
+  const manager = new McpManager(stdio({}), f.cwd);
+  t.after(() => manager.close());
+  await manager.connect(registry);
+
+  const names = Object.keys(registry.schemas());
+  assert.ok(names.includes('read_mcp_resource'));
+
+  const result = await registry.execute(
+    call('read_mcp_resource', { server: 'local', uri: 'file:///etc/shadow' }),
+    signal(),
+  );
+  assert.deepEqual(approvals, ['read_mcp_resource']);
+  assert.match(result.text, /root:x:0:0/);
+  await manager.close();
+
+  // A read-only registry must not offer the tool at all.
+  const readOnlyRegistry = new ToolRegistry(f.cwd, async () => true, true);
+  assert.ok(!Object.keys(readOnlyRegistry.schemas()).includes('read_mcp_resource'));
+});

@@ -15,10 +15,19 @@ const GUARD = fileURLToPath(new URL('./brand.test.mjs', import.meta.url));
 // The legacy names that must survive. They are the OLD brand, and they are
 // allowed only where they still mean "the goon installation we migrate from":
 // the quoted directory value, the environment variable names, and the marker.
+// The legacy names that must survive. They are the OLD brand, and they are
+// allowed only where they still mean "the goon installation we migrate from":
+// the environment variable names (GOON_*), the quoted directory value, the
+// migration marker, and the upstream repository URL.
 const legacyEnv = new RegExp(['G', 'O', 'O', 'N', '_'].join('') + '[A-Z_*]+');
-const legacyDir = new RegExp('[' + '"' + '`]' + ['g', 'o', 'o', 'n'].join('') + '[' + '"' + '`]');
+const legacyDir = new RegExp("['\"`]" + ['g', 'o', 'o', 'n'].join('') + "['\"`]");
 const legacyMarker = new RegExp(['migrated-from-', 'g', 'o', 'o', 'n'].join(''));
-const allowed = [legacyEnv, legacyDir, legacyMarker];
+const legacyRepo = /binxgtl\/goon-cli/;
+// Prose that mentions the legacy brand as a word, never as an identifier:
+// `goon` not followed by a word character or a hyphen (which would make it
+// a slug like `goon-cli` or a symbol like `goonTest`).
+const legacyProse = /goon(?![\w-])/i;
+const allowed = [legacyEnv, legacyDir, legacyMarker, legacyRepo, legacyProse];
 
 // The migration's own code and test are about the legacy brand by definition.
 const migrationFiles = new Set([

@@ -1,10 +1,10 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ListResourceTemplatesRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { setTimeout } from 'node:timers/promises';
 
 export function mockMcpServer() {
-  const server = new Server({ name: 'vyen-test-server', version: '1.0.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'vyen-test-server', version: '1.0.0' }, { capabilities: { tools: {}, resources: {} } });
   server.setRequestHandler(ListToolsRequestSchema, request => ({ tools: request.params?.cursor ? [
     { name: 'danger-tool', description: 'Claims read-only but must require approval', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } },
   ] : [
@@ -12,6 +12,13 @@ export function mockMcpServer() {
     { name: 'wait', description: 'Wait until cancelled', inputSchema: { type: 'object', properties: {} } },
     { name: 'fail', description: 'Return an error', inputSchema: { type: 'object', properties: {} } },
   ], ...(request.params?.cursor ? {} : { nextCursor: 'page2' }) }));
+  server.setRequestHandler(ListResourcesRequestSchema, () => ({
+    resources: [{ uri: 'file:///etc/shadow', name: 'secret-file', mimeType: 'text/plain' }],
+  }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({ resourceTemplates: [] }));
+  server.setRequestHandler(ReadResourceRequestSchema, request => ({
+    contents: [{ uri: request.params.uri, mimeType: 'text/plain', text: 'root:x:0:0::/root:/bin/sh' }],
+  }));
   server.setRequestHandler(CallToolRequestSchema, async (request, { signal }) => {
     if (request.params.name === 'wait') await setTimeout(30_000, undefined, { signal });
     if (request.params.name === 'fail') return { content: [{ type: 'text', text: 'Tool failed as requested' }], isError: true };
