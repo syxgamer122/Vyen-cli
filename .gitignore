@@ -4,6 +4,7 @@ release-out/
 *.tgz
 !release/*.tgz
 .env
+.npmrc
 .vyen/
 .refs/
 
