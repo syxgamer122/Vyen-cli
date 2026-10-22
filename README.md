@@ -8,7 +8,7 @@ subagents.
 ## Install
 
 ```bash
-npm install -g vyen
+npm install -g @nguyenhuumanh/vyen
 ```
 
 Requires Node.js >= 22.16.0. Verified on Linux; the primary target is Termux on

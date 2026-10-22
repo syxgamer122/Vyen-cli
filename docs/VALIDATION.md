@@ -7,7 +7,7 @@ It missed a real bug: open(mode) and writeFile({mode}) both apply umask. Under
 007 the original file-mode test failed (28/29 overall), and an edit could change
 0755 to 0750. That earlier result did not establish restrictive-umask behavior.
 
-## Current checks
+## Current checks (2026-10-16 Linux run — not repeated since)
 
 | Command / environment | Result |
 |---|---|
@@ -61,6 +61,42 @@ The mutation test verifies completed writes/history survive the error and resume
 does not replay them. Usage and locks are also checked. Validation now requires a
 non-whitespace answer in each terminal model step regardless of reasoning flags.
 
+## 2026-10-22 — agent work agreements
+
+`AGENTS.md` now carries the working agreements and the accumulated lessons for
+this repository, and two new guard files turn the rules that must not rot into
+something the suite enforces.
+
+Measured on Windows, Node 26.12.0: `npm test` → 153 tests, 146 pass, 5 fail,
+2 skipped. The five failures are exactly the known platform failures listed
+above — four in `tests/files.test.mjs` (no POSIX mode bits, no unprivileged
+symlinks) and one in `tests/publish.test.mjs`. The publish test writes its own
+extensionless `gh` stub onto `PATH`; Windows cannot execute an extensionless
+shebang file, so the spawn fails with `spawn gh ENOENT` — the real GitHub CLI is
+neither needed nor involved. `npm run typecheck` and `npm run lint` pass. The
+rows in "Current checks" are from the 2026-10-16 Linux run and were not
+repeated here.
+
+New coverage:
+
+- `tests/repo-hygiene.test.mjs` — no byte-order mark in `src/`, `tests/`,
+  `scripts/`, `bin/`; no `@ts-ignore`; a reason on the same line for every
+  `@ts-expect-error`; the two guard files reference each other, so neither can
+  be deleted alone.
+- `tests/plan-traceability.test.mjs` — every plan states numbered
+  `## Review Focus` criteria; every plan written from 2026-10-22 on carries a
+  `## Scenarios & Tests` table with one row per criterion; every row names a
+  test file that exists; the guard refuses to pass vacuously.
+- `tests/context.test.mjs` — a workspace `AGENTS.md` reaches the system
+  prompt, `## Lessons` section included. This is the observable boundary for
+  "the rules the agent is given are the rules in the file".
+
+Each guard was proven **red** with a throwaway probe — a file carrying a BOM, a
+`@ts-ignore` line, a plan missing its table, a row naming a test file that does
+not exist — before it was trusted. The probes were removed and the guards went
+green. One probe exposed a defect in the guard itself: a test that contains the
+literal it searches for reports itself, so the directives are spelled in pieces.
+
 ## Integration coverage
 
 Tests use local mock model HTTP endpoints and real AI SDK adapters, filesystem,
@@ -95,6 +131,9 @@ subprocesses and session stores. No paid model request was made.
 - Release tests cover stable-version selection, patch increments, lockfile
   synchronization, installed version reporting, and a local bare-Git/mocked
   GitHub publishing simulation including retry without another version bump.
+- Repository hygiene tests cover the byte-order mark, the type-checker escape
+  hatches and the plan-to-test traceability; the workspace `AGENTS.md` is
+  checked at the system-prompt boundary.
 
 The GitHub workflow now runs the full suite at default, 027 and 007 umasks on
 Node 22.16 and 24. Consult the repository's Actions runs for remote results.
