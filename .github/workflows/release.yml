@@ -50,7 +50,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      # Provenance: the registry needs the build to be attested by this workflow.
+      # Trusted publishing (OIDC): the registry authenticates this workflow, so
+      # no long-lived npm token is needed. Provenance needs the same permission.
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -73,5 +74,7 @@ jobs:
           fi
       - name: Publish
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # No NODE_AUTH_TOKEN: npm trusted publishing exchanges the workflow's
+        # OIDC identity for a short-lived credential.
+        # The package must list this workflow as a trusted publisher:
+        # npmjs.com -> vyen -> Settings -> Trusted Publisher -> GitHub Actions.
