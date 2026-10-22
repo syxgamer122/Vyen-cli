@@ -388,6 +388,10 @@ export class Subagents {
     const controller = new AbortController();
     const onParentAbort = () => controller.abort(parentSignal.reason ?? new Error('Parent turn cancelled'));
     parentSignal.addEventListener('abort', onParentAbort, { once: true });
+    // The signal may already have fired during the awaits above; a listener
+    // registered after the event never runs, so the child would outlive the
+    // parent and keep spending tokens and writing files.
+    if (parentSignal.aborted) onParentAbort();
 
     const managed: ManagedSubagent = {
       id,
@@ -594,6 +598,8 @@ export class Subagents {
     agent.task = input.message;
     const onParentAbort = () => agent.controller.abort(parentSignal.reason ?? new Error('Parent turn cancelled'));
     parentSignal.addEventListener('abort', onParentAbort, { once: true });
+    // Same race as in spawnAgentTool: the signal may already have fired.
+    if (parentSignal.aborted) onParentAbort();
 
     const childConfig: RuntimeConfig = {
       ...this.config,

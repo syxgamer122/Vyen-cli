@@ -168,6 +168,38 @@ test('JSON child progress is independent of text token count and carries task on
   }
 });
 
+test('a child whose parent was cancelled during setup never reaches the provider', async t => {
+  const f = await fixture(t);
+  let childRequests = 0;
+  const p = await provider(t, (body, response) => {
+    if (isChild(body)) { childRequests++; return sse(response, { text: 'child report' }); }
+    return sse(response, { calls: [{ id: 'spawn1', name: 'spawn_agent', input: { message: 'Look around', agent_type: 'explorer' } }] });
+  });
+  const config = configFor(f, p);
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  t.after(() => store.close());
+  const tools = new ToolRegistry(f.cwd, async () => true);
+  new Subagents(config, store, tools).register();
+
+  const controller = new AbortController();
+  // The parent is cancelled while the child session is still being set up,
+  // which is before the abort listener is registered. A listener registered
+  // after the event has fired never runs, so the child would outlive the parent.
+  const originalClose = SessionStore.prototype.close;
+  SessionStore.prototype.close = async function () {
+    await originalClose.call(this);
+    controller.abort(new Error('parent cancelled'));
+  };
+  t.after(() => { SessionStore.prototype.close = originalClose; });
+
+  await tools.execute(
+    { toolCallId: 's1', toolName: 'spawn_agent', input: { message: 'Look around', agent_type: 'explorer' } },
+    controller.signal,
+  );
+  await setTimeout(500);
+  assert.equal(childRequests, 0, 'the child must not reach the provider');
+});
+
 test('terminal child event follows lock release, including cleanup failures; capacity is reclaimed', async t => {
   const { existsSync } = await import('node:fs');
   const f = await fixture(t), events = [];
