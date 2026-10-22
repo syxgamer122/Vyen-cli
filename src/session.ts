@@ -95,6 +95,19 @@ export function sameWorkspace(a: string, b: string): boolean {
   return process.platform === 'win32' ? na.toLowerCase() === nb.toLowerCase() : na === nb;
 }
 
+/**
+ * Point the session at a new workspace. Turn checkpoints store file paths
+ * relative to the workspace they were taken in, so they stop meaning anything
+ * once the workspace changes and must be dropped rather than replayed against
+ * the new root.
+ */
+export function retargetSessionWorkspace(store: SessionStore, nextCwd: string): boolean {
+  const changed = !sameWorkspace(store.session.cwd, nextCwd);
+  if (changed) store.session.checkpoints = [];
+  store.session.cwd = nextCwd;
+  return changed;
+}
+
 export class SessionStore {
   private closed = false;
   private constructor(readonly root: string, readonly session: Session, private readonly lock: string) {}

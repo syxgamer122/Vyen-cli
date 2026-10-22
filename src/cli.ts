@@ -399,7 +399,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       if (!bash || !config.model || !resolvedKey) process.exitCode = 1;
       return;
     }
-    const { SessionStore, sameWorkspace } = await import('./session.js');
+    const { SessionStore, sameWorkspace, retargetSessionWorkspace } = await import('./session.js');
     if (positionals[0] === 'sessions') {
       const list = await SessionStore.list(join(dataDir(), 'sessions'));
       stdout.write(values.json ? JSON.stringify(list) + '\n' : list.map(s => `${s.id}  ${s.updatedAt}  ${s.model}${s.title ? `  [${s.title}]` : ''}  ${s.cwd}`).join('\n') + '\n');
@@ -1943,7 +1943,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               }
               const real = await realpath(candidate).catch(() => candidate);
               runtime = { ...runtime, cwd: real };
-              store.session.cwd = real;
+              // Checkpoints hold paths relative to the workspace they were taken
+              // in; after a workspace change they would restore another
+              // project's files, so they are dropped.
+              const workspaceChanged = retargetSessionWorkspace(store, real);
               await store.save();
               const built = await buildHarness(mode);
               tools = built.tools;
@@ -1953,7 +1956,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                 syncTuiHeader();
                 tui.setNotice(`Changed directory to: ${real}`);
               }
-              display(`Changed workspace directory to: ${real}\n`);
+              display(workspaceChanged
+                ? `Changed workspace directory to: ${real}. Turn checkpoints were cleared; /revert can no longer undo the previous workspace.\n`
+                : `Changed workspace directory to: ${real}\n`);
             } catch (error) {
               display(`Failed to change directory: ${safeError(error, apiKey)}\n`);
             }

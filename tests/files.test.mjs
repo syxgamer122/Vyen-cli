@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile, readFile, symlink, stat, chmod } from 'node:fs/promises';
+import { writeFile, readFile, symlink, stat, chmod, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WorkspaceFiles } from '../dist/files.js';
+import { SessionStore, retargetSessionWorkspace } from '../dist/session.js';
 import { runCommand } from '../dist/process.js';
 import { fixture } from './helpers.mjs';
 
@@ -70,6 +71,37 @@ test('portable search is bounded and skips symlinks', async t => {
   await files.write('a.txt', 'hello needle\nworld');
   await symlink(join(f.root, 'missing'), join(f.cwd, 'link'));
   assert.match(await files.fallbackSearch('needle'), /a.txt:1:hello needle/);
+});
+
+test('a workspace change makes the old backups unreachable instead of restoring them elsewhere', async t => {
+  const f = await fixture(t);
+  const projectA = join(f.root, 'A'), projectB = join(f.root, 'B');
+  await mkdir(projectA); await mkdir(projectB);
+  await writeFile(join(projectA, 'app.ts'), 'ORIGINAL A\n');
+  await writeFile(join(projectB, 'app.ts'), 'IMPORTANT B CONTENT\n');
+
+  const filesA = new WorkspaceFiles(projectA);
+  filesA.beginTurn();
+  await filesA.read('app.ts');
+  await filesA.write('app.ts', 'A CHANGED\n');
+  const backups = filesA.takeTurnBackups();
+
+  // The session moves to project B, so the checkpoints that belonged to A go.
+  const store = await SessionStore.open(join(f.root, 'sessions'), {
+    cwd: projectA, provider: 'openai-compatible', model: 'test-model', baseUrl: 'http://127.0.0.1:1',
+  });
+  t.after(() => store.close());
+  store.session.checkpoints = [{
+    id: 1, createdAt: new Date().toISOString(), prompt: 'p', messageIndex: 0, tokensBefore: 0, files: backups,
+  }];
+  retargetSessionWorkspace(store, projectB);
+
+  // A revert in the new workspace has nothing of A's left to replay.
+  const filesB = new WorkspaceFiles(projectB);
+  const replayed = await filesB.restoreBackups(store.session.checkpoints.flatMap(c => c.files));
+  assert.deepEqual(replayed.restored, []);
+  assert.deepEqual(replayed.deleted, []);
+  assert.equal(await readFile(join(projectB, 'app.ts'), 'utf8'), 'IMPORTANT B CONTENT\n');
 });
 
 test('subprocess output fits or truncates without duplicate middle bytes', async t => {

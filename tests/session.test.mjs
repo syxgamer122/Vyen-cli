@@ -2,8 +2,39 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { SessionStore, repairInterrupted } from '../dist/session.js';
+import { SessionStore, repairInterrupted, retargetSessionWorkspace } from '../dist/session.js';
 import { fixture } from './helpers.mjs';
+
+test('changing the workspace drops checkpoints whose backup paths belong to the old workspace', async t => {
+  const f = await fixture(t);
+  const store = await SessionStore.open(join(f.root, 'sessions'), {
+    cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: 'http://127.0.0.1:1',
+  });
+  t.after(() => store.close());
+  store.session.checkpoints = [{
+    id: 1, createdAt: new Date().toISOString(), prompt: 'p', messageIndex: 0, tokensBefore: 0,
+    files: [{ path: 'notes.md', existed: false }],
+  }];
+  const changed = retargetSessionWorkspace(store, join(f.root, 'other-project'));
+  assert.equal(changed, true);
+  assert.deepEqual(store.session.checkpoints, []);
+  assert.equal(store.session.cwd, join(f.root, 'other-project'));
+});
+
+test('staying in the same workspace keeps the checkpoints', async t => {
+  const f = await fixture(t);
+  const store = await SessionStore.open(join(f.root, 'sessions'), {
+    cwd: f.cwd, provider: 'openai-compatible', model: 'test-model', baseUrl: 'http://127.0.0.1:1',
+  });
+  t.after(() => store.close());
+  store.session.checkpoints = [{
+    id: 1, createdAt: new Date().toISOString(), prompt: 'p', messageIndex: 0, tokensBefore: 0,
+    files: [{ path: 'notes.md', existed: false }],
+  }];
+  const changed = retargetSessionWorkspace(store, f.cwd);
+  assert.equal(changed, false);
+  assert.equal(store.session.checkpoints.length, 1);
+});
 
 test('an all-digit 8-char session ID prefix resumes by prefix instead of being treated as a list index', async t => {
   const f = await fixture(t), root = join(f.root, 'sessions');
