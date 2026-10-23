@@ -34,6 +34,13 @@ test('version synchronization preserves dependencies and rejects a divergent loc
   assert.throws(() => setManifestVersion(manifest, { ...lock, version: '0.2.0' }, '0.1.1'), /disagree/);
 });
 
+test('the manifest is publishable: not private and exposing the vyen command', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.notEqual(manifest.private, true, 'npm refuses to publish a package marked private');
+  assert.equal(manifest.name, '@nguyenhuumanh/vyen');
+  assert.equal(manifest.bin?.vyen, 'bin/vyen.mjs');
+});
+
 test('the documented install command names the package that is actually published', async () => {
   const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');

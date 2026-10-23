@@ -4,7 +4,6 @@
   "description": "A small independent coding harness for Termux and external model APIs",
   "type": "module",
   "license": "MIT",
-  "private": true,
   "bin": {
     "vyen": "bin/vyen.mjs"
   },
