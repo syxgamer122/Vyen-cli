@@ -43,7 +43,9 @@ try:
     if cancel_mode:
         wait_for('/help commands')
         os.write(master, b'work please\r')
-        wait_for('Running')
+        # The status line reads 'Working' in current releases and 'Running' in
+        # older ones; either means the request is in flight.
+        wait_for('Working', 'Running')
         # Alt+. cycles the reasoning effort, which rebuilds the harness while the
         # run is in flight. Ctrl+C must still cancel that run.
         os.write(master, b'\x1b.')
