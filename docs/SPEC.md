@@ -54,12 +54,16 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   tool only for that session. The tunnel link is a credential: anyone holding it
   can control the session. Cloudflared comes from PATH or is downloaded from
   Cloudflare's GitHub release on first use; an ordinary install or start fetches
-  nothing, and only the explicit pair command can trigger the download.
+  nothing, and only the explicit pair command can trigger the download, then
+  only after the user confirms it.
 - Workflows are data, not code: built-ins plus `.vyen/workflows/*.json|*.md` and
   the user config directory. Steps run prompts, subagents, network sessions,
   shell commands or approval gates. Shell steps use the same approval callback as
   `bash`, are refused in read-only/plan modes, and have a 120-second deadline.
-  Workflow child sessions share the parent's budget and approval callback.
+  A prompt step's `readOnly`/`mode` narrows the tool registry for that step and
+  `effort` selects its reasoning level. The slash command and the `run_workflow`
+  tool each share one run budget across every step. Workflow child sessions
+  share the parent's budget and approval callback.
 - Agent Network convenes read-only persona subagents for at most four rounds and
   exposes a P2P message bus to child agents. It shares the parent run budget;
   when the parent is unbounded it caps a session at 120,000 tokens. Peer tools

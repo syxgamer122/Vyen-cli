@@ -29,7 +29,7 @@ import type { McpManager } from './mcp.js';
 import { EFFORT_DESCRIPTIONS, parseEffortInput, runSetupWizard } from './setup.js';
 import { discoverModels, formatModelBadge, resolveModelCapabilities, type DiscoveredModel } from './provider.js';
 import { bashApprovalPrefix, isApprovedBashPrefix } from './approval.js';
-import type { PermissionMode } from './tools.js';
+import type { PermissionMode, RunBudget } from './tools.js';
 
 /**
  * Welcome lines shown when a session opens. Plain text (it is also printed in readline mode); the
@@ -926,6 +926,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         if (!values['no-subagents']) {
           subagents = new Subagents(runtime, store, reg, emit);
           subagents.register();
+        }
+        {
+          // Workflows run prompts and shell steps themselves; subagent and network steps degrade
+          // to a prompt when --no-subagents removed those features, so the tool stays available.
           const { discoverWorkflows, executeWorkflow, runWorkflowToolSchema } = await import('./workflow.js');
           const { formatBrainstormReport } = await import('./network.js');
           reg.register('run_workflow', {
@@ -956,7 +960,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                       childTools,
                       stepReadOnly ? 'readonly' : reg.planMode || step.mode === 'plan' ? 'plan' : 'ask',
                     );
-                    await new Harness(runtime, childStore, childTools).run(stepPrompt, stepSig, reg.budget);
+                    await new Harness(
+                      step.effort ? { ...runtime, effort: step.effort } : runtime,
+                      childStore,
+                      childTools,
+                    ).run(stepPrompt, stepSig, reg.budget);
                     const { lastAssistantAnswer } = await import('./reasoning.js');
                     return lastAssistantAnswer(childStore.session.messages, runtime.inlineReasoning);
                   } finally {
@@ -1307,11 +1315,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                 return;
               }
               if (tui) {
-                tui.submitExternalPrompt(remoteText);
+                tui.submitExternalPrompt(remoteText, { allowCommands: false });
               } else {
                 void (async () => {
-                  const handled = await executeImmediateCommand(remoteText);
-                  if (!handled && !controller) {
+                  // Remote input is never interpreted as a local slash command: `/cd`, `/revert`,
+                  // `/delete` and friends bypass the remote approval model. A leading `/` is just
+                  // prompt text (a path, for example).
+                  if (!controller) {
                     await run(remoteText);
                   }
                 })();
@@ -1329,6 +1339,21 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             },
             onNotice: msg => {
               if (tui) tui.setNotice(msg);
+            },
+            confirmCloudflaredDownload: async url => {
+              if (!tui && !rl) return false;
+              try {
+                const answer = (
+                  await question(
+                    `cloudflared is not installed. Download the official binary from GitHub?\n  ${url}\nDownload now? [y/N] `,
+                  )
+                )
+                  .trim()
+                  .toLowerCase();
+                return answer === 'y' || answer === 'yes';
+              } catch {
+                return false;
+              }
             },
           });
         }
@@ -2094,17 +2119,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             return true;
           }
           const pm = await ensurePairManager();
-          const skipTunnel = sub === 'lan' || sub === 'local';
-          if (pm.isRunning && skipTunnel && pm.listeningHost !== '0.0.0.0') {
+          const wantsLan = sub === 'lan' || sub === 'local';
+          const runningLan = pm.listeningHost === '0.0.0.0';
+          if (pm.isRunning && wantsLan !== runningLan) {
             await pm.stop();
           }
           if (!pm.isRunning) {
             if (tui) {
-              tui.setNotice(skipTunnel ? 'Starting local/LAN pair server...' : 'Starting Cloudflared tunnel & waiting for DNS...');
-              await tui.withStatus(skipTunnel ? 'Starting LAN pair' : 'Starting Cloudflared tunnel', () => pm.start({ skipTunnel }));
+              tui.setNotice(wantsLan ? 'Starting local/LAN pair server...' : 'Starting Cloudflared tunnel & waiting for DNS...');
+              await tui.withStatus(wantsLan ? 'Starting LAN pair' : 'Starting Cloudflared tunnel', () => pm.start({ skipTunnel: wantsLan }));
             } else {
-              display(skipTunnel ? 'Starting local/LAN pair server...\n' : 'Starting Cloudflared tunnel & waiting for DNS...\n');
-              await pm.start({ skipTunnel });
+              display(wantsLan ? 'Starting local/LAN pair server...\n' : 'Starting Cloudflared tunnel & waiting for DNS...\n');
+              await pm.start({ skipTunnel: wantsLan });
             }
           }
           display(`\n${pm.formatBanner()}\n`);
@@ -2885,6 +2911,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             controller = new AbortController();
             tui?.setStatus('Running');
             try {
+              // One budget for the whole invocation: a slash workflow must not reset the token
+              // counter at every step, and a network step must observe what the earlier steps spent.
+              const wfBudget: RunBudget = tools.budget ?? { spent: 0, limit: runtime.runTokenBudget };
               const wfRes = await executeWorkflow(matched, wfArgs, {
                 cwd: runtime.cwd,
                 signal: controller.signal,
@@ -2892,28 +2921,70 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                 approveShell: (command, stepSig) =>
                   tools.approve({ tool: 'bash', input: { command }, signal: stepSig }),
                 onProgress: text => display(text),
-                runPrompt: async (stepPrompt, _step, stepSig) => {
-                  return await harness.run(stepPrompt, stepSig);
+                runPrompt: async (stepPrompt, step, stepSig) => {
+                  // A prompt step can narrow permissions but never widen them beyond the live mode.
+                  const stepMode: PermissionMode =
+                    tools.readOnly || Boolean(step.readOnly) || step.mode === 'readonly'
+                      ? 'readonly'
+                      : tools.planMode || step.mode === 'plan'
+                        ? 'plan'
+                        : mode;
+                  const restoreMode: PermissionMode = tools.readOnly
+                    ? 'readonly'
+                    : tools.planMode
+                      ? 'plan'
+                      : mode;
+                  applyPermissionMode(tools, stepMode);
+                  try {
+                    const stepHarness = step.effort
+                      ? new Harness({ ...runtime, effort: step.effort }, store, tools, emit)
+                      : harness;
+                    return await stepHarness.run(stepPrompt, stepSig, wfBudget);
+                  } finally {
+                    applyPermissionMode(tools, restoreMode);
+                  }
                 },
                 runSubagents: async (tasks, readOnly, stepSig) => {
-                  if (!subagents) return await harness.run(tasks.join('\n\n'), stepSig);
-                  const res = await tools.execute(
-                    {
-                      toolCallId: `wf_${Date.now()}`,
-                      toolName: readOnly ? 'delegate_task' : 'delegate_edit',
-                      input: { tasks },
-                    },
-                    stepSig,
-                  );
-                  return res.text;
+                  if (!subagents) {
+                    const restoreMode: PermissionMode = tools.readOnly
+                      ? 'readonly'
+                      : tools.planMode
+                        ? 'plan'
+                        : mode;
+                    applyPermissionMode(tools, readOnly ? 'readonly' : mode);
+                    try {
+                      return await harness.run(tasks.join('\n\n'), stepSig, wfBudget);
+                    } finally {
+                      applyPermissionMode(tools, restoreMode);
+                    }
+                  }
+                  const previousBudget = tools.budget;
+                  tools.budget = wfBudget;
+                  try {
+                    const res = await tools.execute(
+                      {
+                        toolCallId: `wf_${Date.now()}`,
+                        toolName: readOnly ? 'delegate_task' : 'delegate_edit',
+                        input: { tasks },
+                      },
+                      stepSig,
+                    );
+                    return res.text;
+                  } finally {
+                    tools.budget = previousBudget;
+                  }
                 },
                 runNetwork: async (topic, roles, rounds, stepSig) => {
-                  if (!subagents) return await harness.run(topic, stepSig);
+                  if (!subagents) {
+                    display('Agent Network is disabled (--no-subagents); skipping the network step.\n');
+                    return '';
+                  }
                   const netRes = await subagents.network.brainstorm({
                     topic,
                     roles,
                     rounds,
                     signal: stepSig,
+                    budget: wfBudget,
                     onProgress: text => display(text),
                   });
                   const report = formatBrainstormReport(netRes);
@@ -2981,11 +3052,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               tui.write(`\n> ${input}\n`);
             }
             try {
+              const netBudget: RunBudget = tools.budget ?? { spent: 0, limit: runtime.runTokenBudget };
               const netRes = await subagents.network.brainstorm({
                 topic,
                 roles,
                 rounds,
                 signal: controller.signal,
+                budget: netBudget,
                 onProgress: text => display(text),
               });
               const report = formatBrainstormReport(netRes);

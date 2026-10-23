@@ -168,7 +168,7 @@ Khi model đang suy nghĩ hoặc chạy tool:
 - `/btw <câu_hỏi>`: Hỏi nhanh câu hỏi phụ (ephemeral side question) dựa trên ngữ cảnh hiện tại mà không làm bẩn lịch sử phiên.
 - `/goal [set|done|clear]`, `/memory [list|add|remove|clear]`, `/recap`: Đặt mục tiêu phiên, lưu ghi nhớ dài hạn (`memories.json`) hoặc tóm tắt tiến độ.
 - `/init`, `/skills`, `/mention <path>`: Khởi tạo `AGENTS.md`, liệt kê `SKILL.md` (gọi qua `$skill-name`) hoặc đính kèm `@file`/ảnh.
-- `/pair [start|stop|status|lan]`: Mở **Cloudflared Quick Tunnel** miễn phí (`*.trycloudflare.com`), tạo mã QR ngay trên terminal + link bảo mật để quét bằng điện thoại và điều khiển phiên `vyen` từ xa (chat, xem stream, đổi chế độ, duyệt/từ chối quyền tool).
+- `/pair [start|stop|status|lan]`: Mở **Cloudflared Quick Tunnel** miễn phí (`*.trycloudflare.com`), tạo mã QR ngay trên terminal + link bảo mật để quét bằng điện thoại và điều khiển phiên `vyen` từ xa (chat, xem stream, đổi chế độ, duyệt/từ chối quyền tool). Nếu chưa có `cloudflared`, vyen hỏi trước khi tải bản chính thức từ GitHub.
 - `/workflow [list|show|create|rm|run <tên> [tham_số]]`: Quản lý và thực thi các pipeline đa bước tuỳ chỉnh (`.json` hoặc `.md` trong `.vyen/workflows/`) hoặc workflow tích hợp sẵn (`feature-dev`, `bug-hunt`, `tdd-cycle`, `security-audit`).
 - `/network [<chủ_đề>|board|send|clear]` (hoặc `/brainstorm`, `/council`): Triệu tập **Agent Network** (nhiều vai trò `Architect`, `Researcher`, `Critic`, `Pragmatist`, `Security` thảo luận, phản biện qua lại nhiều vòng để lên ý tưởng và chốt phương án) hoặc kiểm tra **P2P Message Bus** giữa các subagents.
 - `/diff`, `/git`, `/review`: Xem `git status` + `git diff`, hoặc yêu cầu model review toàn bộ thay đổi hiện tại.

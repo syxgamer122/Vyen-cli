@@ -37,7 +37,7 @@ export { AnswerProjection, visibleAnswer, lastAssistantAnswer } from './reasonin
 export type { AnswerPart, InlineReasoning } from './reasoning.js';
 export { TerminalUI, InputCancelledError, SLASH_COMMANDS, THEME, GLYPH, formatInlineMarkdown, formatTokenCount, visibleLength, padEndVisible } from './tui.js';
 export { welcomeBanner, readGitBranch } from './cli.js';
-export { PairManager, encodeQrMatrix, renderQrTerminal, isForbiddenRemoteInput } from './pair.js';
+export { PairManager, encodeQrMatrix, renderQrTerminal, isForbiddenRemoteInput, pairBindHost } from './pair.js';
 export type { PairSessionInfo, PairCallbacks, PendingRemoteApproval } from './pair.js';
 export {
   AgentNetwork,

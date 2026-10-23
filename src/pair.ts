@@ -6,6 +6,7 @@ import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { configDir } from './config.js';
 import { limitText } from './files.js';
+import { childEnv } from './process.js';
 import type { HarnessEvent } from './harness.js';
 import type { SubagentEvent } from './subagents.js';
 
@@ -417,7 +418,7 @@ export interface PairSessionInfo {
   lanUrl: string;
   tunnelUrl?: string;
   publicPairUrl: string;
-  tunnelStatus: 'starting' | 'connected' | 'fallback_lan' | 'stopped';
+  tunnelStatus: 'starting' | 'connected' | 'disconnected' | 'fallback_lan' | 'stopped';
   tunnelError?: string;
   connectedClients: number;
 }
@@ -427,6 +428,13 @@ export interface PairLogEntry {
   seq: number;
   kind: 'user' | 'assistant' | 'tool' | 'system';
   text: string;
+}
+
+class PairHttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = 'PairHttpError';
+  }
 }
 
 export interface PairCallbacks {
@@ -445,6 +453,16 @@ export interface PairCallbacks {
   onRemoteModeChange: (mode: 'ask' | 'auto' | 'plan' | 'readonly') => void;
   onRemoteStop: () => void;
   onNotice?: (message: string) => void;
+  /**
+   * Asked before the first cloudflared download. The binary comes from GitHub without a
+   * checksum, so the download must be an explicit choice; without this callback nothing is
+   * fetched and the caller falls back to a PATH lookup.
+   */
+  confirmCloudflaredDownload?: (sourceUrl: string) => Promise<boolean> | boolean;
+}
+
+export function pairBindHost(options?: { skipTunnel?: boolean; bindLan?: boolean }): string {
+  return options?.skipTunnel || options?.bindLan ? '0.0.0.0' : '127.0.0.1';
 }
 
 function detectLanIp(): string {
@@ -824,11 +842,13 @@ function renderMobileHtml(): string {
 </html>`;
 }
 
-async function resolveCloudflaredBinary(): Promise<string> {
+async function resolveCloudflaredBinary(
+  confirmDownload?: (sourceUrl: string) => Promise<boolean> | boolean,
+): Promise<string> {
   const canSpawn = (bin: string) =>
     new Promise<boolean>(resolve => {
       try {
-        const p = spawn(bin, ['--version'], { stdio: 'ignore', windowsHide: true });
+        const p = spawn(bin, ['--version'], { stdio: 'ignore', windowsHide: true, env: childEnv() });
         p.once('error', () => resolve(false));
         p.once('exit', code => resolve(code === 0));
       } catch {
@@ -858,12 +878,13 @@ async function resolveCloudflaredBinary(): Promise<string> {
   }
   if (!assetName) return 'cloudflared';
 
+  const downloadUrl = `https://github.com/cloudflare/cloudflared/releases/latest/download/${assetName}`;
   try {
+    // GitHub publishes no checksum for this asset and the release is not pinned, so the
+    // download is only made after the user agrees to it.
+    if (!confirmDownload || !(await confirmDownload(downloadUrl))) return 'cloudflared';
     await mkdir(binDir, { recursive: true });
-    const res = await fetch(
-      `https://github.com/cloudflare/cloudflared/releases/latest/download/${assetName}`,
-      { signal: AbortSignal.timeout(30_000) },
-    );
+    const res = await fetch(downloadUrl, { signal: AbortSignal.timeout(30_000) });
     if (res.ok) {
       const bytes = Buffer.from(await res.arrayBuffer());
       await writeFile(localBin, bytes);
@@ -890,7 +911,6 @@ export class PairManager {
   private tunnelError?: string;
   private readonly clients = new Set<ServerResponse>();
   private readonly pendingApprovals = new Map<string, PendingRemoteApproval>();
-  private readonly recentEvents: string[] = [];
   private readonly entries: PairLogEntry[] = [];
   private nextEntryId = 1;
   private seqCounter = 0;
@@ -936,7 +956,7 @@ export class PairManager {
     this.tunnelUrl = undefined;
     this.tunnelError = undefined;
     this.tunnelStatus = 'starting';
-    this.bindHost = options?.skipTunnel || options?.bindLan ? '0.0.0.0' : '127.0.0.1';
+    this.bindHost = pairBindHost(options);
 
     const srv = createServer((req, res) => {
       void this.handleRequest(req, res);
@@ -1007,7 +1027,7 @@ export class PairManager {
 
   private async launchCloudflared(timeoutMs: number): Promise<void> {
     const targetLocal = `http://127.0.0.1:${this.port}`;
-    const cloudflaredBin = await resolveCloudflaredBinary();
+    const cloudflaredBin = await resolveCloudflaredBinary(this.callbacks.confirmCloudflaredDownload);
     return new Promise<void>(resolve => {
       let settled = false;
       let matchedUrl: string | undefined;
@@ -1049,6 +1069,7 @@ export class PairManager {
         const proc = spawn(cloudflaredBin, ['tunnel', '--no-autoupdate', '--url', targetLocal], {
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          env: childEnv(),
         });
         this.tunnelProc = proc;
 
@@ -1070,14 +1091,25 @@ export class PairManager {
         proc.stderr?.on('data', onChunk);
         proc.on('error', err => {
           this.tunnelStatus = 'fallback_lan';
-          this.tunnelError = `cloudflared not found or failed (${err.message}). Run "/pair lan" to pair over local Wi-Fi.`;
+          this.tunnelError = `cloudflared not found or failed (${err.message}). Run "/pair lan" to pair over local Wi-Fi, or run "/pair" again and accept the download prompt.`;
           finish();
         });
         proc.on('exit', code => {
+          if (this.tunnelProc === proc) this.tunnelProc = undefined;
           if (!this.tunnelUrl) {
             this.tunnelStatus = 'fallback_lan';
             this.tunnelError ??= `cloudflared exited with code ${code ?? 'unknown'}.`;
             finish();
+            return;
+          }
+          if (this.tunnelStatus === 'connected') {
+            this.tunnelStatus = 'disconnected';
+            this.tunnelUrl = undefined;
+            this.tunnelError = `cloudflared exited with code ${code ?? 'unknown'}; the public tunnel is down.`;
+            this.callbacks.onNotice?.(
+              `[Paired tunnel disconnected: cloudflared exited with code ${code ?? 'unknown'}. Run "/pair" to start it again.]`,
+            );
+            this.syncState();
           }
         });
       } catch (err) {
@@ -1151,17 +1183,13 @@ export class PairManager {
     this.entries.push(entry);
     if (this.entries.length > 150) this.entries.shift();
     if (broadcastNow) {
-      this.broadcast({ type: 'entry', entry }, false);
+      this.broadcast({ type: 'entry', entry });
     }
     return entry;
   }
 
-  broadcast(payload: Record<string, unknown>, replayable = true): void {
+  broadcast(payload: Record<string, unknown>): void {
     const data = `data: ${JSON.stringify(payload)}\n\n`;
-    if (replayable) {
-      this.recentEvents.push(data);
-      if (this.recentEvents.length > 60) this.recentEvents.shift();
-    }
     for (const res of this.clients) {
       try {
         res.write(data);
@@ -1214,7 +1242,7 @@ export class PairManager {
       } else {
         entry.text = limitText(entry.text + event.text, 8_000);
         entry.seq = ++this.seqCounter;
-        this.broadcast({ type: 'entry', entry }, false);
+        this.broadcast({ type: 'entry', entry });
       }
     } else if (event.type === 'tool' && event.state === 'start') {
       this.activeAssistantEntryId = undefined;
@@ -1232,7 +1260,7 @@ export class PairManager {
 
   syncState(): void {
     if (!this.server) return;
-    this.broadcast({ type: 'state', state: this.callbacks.getState() }, false);
+    this.broadcast({ type: 'state', state: this.callbacks.getState() });
   }
 
   /**
@@ -1255,24 +1283,24 @@ export class PairManager {
         resolve: decision => {
           this.pendingApprovals.delete(id);
           signal.removeEventListener('abort', onAbort);
-          this.broadcast({ type: 'approval_resolved', id, decision }, false);
+          this.broadcast({ type: 'approval_resolved', id, decision });
           resolve(decision);
         },
       };
       const onAbort = () => {
         this.pendingApprovals.delete(id);
-        this.broadcast({ type: 'approval_resolved', id, decision: 'cancelled' }, false);
+        this.broadcast({ type: 'approval_resolved', id, decision: 'cancelled' });
         reject(signal.reason ?? new Error('Cancelled'));
       };
       cleanup = (resolvedBy = 'terminal') => {
         if (this.pendingApprovals.delete(id)) {
           signal.removeEventListener('abort', onAbort);
-          this.broadcast({ type: 'approval_resolved', id, decision: resolvedBy }, false);
+          this.broadcast({ type: 'approval_resolved', id, decision: resolvedBy });
         }
       };
       this.pendingApprovals.set(id, entry);
       signal.addEventListener('abort', onAbort, { once: true });
-      this.broadcast({ type: 'approval', id, tool, preview: entry.preview }, false);
+      this.broadcast({ type: 'approval', id, tool, preview: entry.preview });
     });
     return { id, promise, cancel: cleanup };
   }
@@ -1282,7 +1310,15 @@ export class PairManager {
     const qr = renderQrTerminal(info.publicPairUrl, '  ');
     const lines: string[] = [
       `╭─── Pair Device via Cloudflared Tunnel ──────────────────────────╮`,
-      `  Status      : ${info.tunnelStatus === 'connected' ? 'Cloudflared Tunnel Active (Free)' : this.bindHost === '0.0.0.0' ? 'LAN Mode (0.0.0.0)' : 'Localhost Only (127.0.0.1)'}`,
+      `  Status      : ${
+        info.tunnelStatus === 'connected'
+          ? 'Cloudflared Tunnel Active (Free)'
+          : info.tunnelStatus === 'disconnected'
+            ? 'Cloudflared Tunnel Disconnected'
+            : this.bindHost === '0.0.0.0'
+              ? 'LAN Mode (0.0.0.0)'
+              : 'Localhost Only (127.0.0.1)'
+      }`,
       ...(info.tunnelUrl ? [`  Tunnel URL  : ${info.publicPairUrl}`] : []),
       ...(this.bindHost === '0.0.0.0' ? [`  LAN URL     : ${info.lanUrl}`] : []),
       `  Local URL   : ${info.localUrl}`,
@@ -1310,14 +1346,31 @@ export class PairManager {
   private async readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
     const chunks: Buffer[] = [];
     let total = 0;
+    let tooLarge = false;
     for await (const chunk of req) {
       const buf = Buffer.from(chunk);
       total += buf.length;
-      if (total > 256 * 1024) throw new Error('Payload too large');
+      // Drain and discard rather than breaking the stream: destroying it mid-request makes the
+      // client see a reset instead of the 413 this server is trying to send.
+      if (total > 256 * 1024) {
+        tooLarge = true;
+        continue;
+      }
       chunks.push(buf);
     }
+    if (tooLarge) throw new PairHttpError(413, 'Payload too large (limit 256 KiB).');
     const raw = Buffer.concat(chunks).toString('utf8').trim();
-    return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    if (!raw) return {};
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new PairHttpError(400, 'Malformed JSON body.');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new PairHttpError(400, 'The JSON body must be an object.');
+    }
+    return parsed as Record<string, unknown>;
   }
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -1467,8 +1520,12 @@ export class PairManager {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not found' }));
     } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      const status = err instanceof PairHttpError ? err.status : 500;
+      const message = err instanceof Error ? err.message : String(err);
+      if (!res.headersSent) {
+        res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+      }
+      res.end(JSON.stringify({ error: message }));
     }
   }
 }

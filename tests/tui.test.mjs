@@ -31,6 +31,31 @@ test('TUI edits Unicode input, recalls history and restores terminal state on cl
   assert(tty.written.endsWith('\x1b[?25h\x1b[?1049l'));
 });
 
+test('paired-device input answers a pending question but never executes slash commands', async t => {
+  const tty = terminal(t);
+  const executed = [];
+  tty.ui.onImmediateCommand = cmd => { executed.push(cmd); };
+
+  // A pending question accepts a path-like answer that starts with `/`, even from a remote device.
+  const answer = tty.ui.question('[path] ', undefined, true);
+  tty.ui.submitExternalPrompt('/etc/hosts', { allowCommands: false });
+  assert.equal(await answer, '/etc/hosts');
+  assert.deepEqual(executed, []);
+
+  // Command-looking remote input is queued as prompt text, never dispatched locally.
+  tty.ui.submitExternalPrompt('/cd C:\\Windows', { allowCommands: false });
+  tty.ui.submitExternalPrompt('/revert --force', { allowCommands: false });
+  tty.ui.submitExternalPrompt('/delete current', { allowCommands: false });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(executed, []);
+  assert.equal(tty.ui.hasQueuedPrompts(), true);
+
+  // Local input still runs commands; the option is what separates the two paths.
+  tty.ui.submitExternalPrompt('/help');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(executed, ['/help']);
+});
+
 test('TUI cancels approvals, handles Ctrl+C and redraws at narrow terminal sizes', async t => {
   const tty = terminal(t), controller = new AbortController();
   const approval = tty.ui.question('[y/N] ', controller.signal);

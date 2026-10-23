@@ -1274,8 +1274,11 @@ export class TerminalUI {
 
   /**
    * Submits an external prompt or slash command (e.g. from a paired mobile/web device).
+   * A paired device may answer a pending question and start a normal turn, but it must never
+   * reach the local slash-command dispatcher: commands such as `/cd`, `/revert` or `/delete`
+   * bypass the remote approval model. Pass `allowCommands: false` for remote input.
    */
-  submitExternalPrompt(text: string) {
+  submitExternalPrompt(text: string, options: { allowCommands?: boolean } = {}) {
     const trimmed = text.trim();
     if (!trimmed || this.closed) return;
     if (this.pending && this.remember) {
@@ -1287,7 +1290,11 @@ export class TerminalUI {
       this.schedule(0);
       return;
     }
-    if ((trimmed.startsWith('/') || trimmed.startsWith('!')) && this.onImmediateCommand) {
+    if (
+      options.allowCommands !== false &&
+      (trimmed.startsWith('/') || trimmed.startsWith('!')) &&
+      this.onImmediateCommand
+    ) {
       this.schedule(0);
       void this.onImmediateCommand(trimmed);
       return;

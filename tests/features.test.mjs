@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   PairManager,
   encodeQrMatrix,
   renderQrTerminal,
   isForbiddenRemoteInput,
+  pairBindHost,
   AgentNetwork,
   AgentNetworkBus,
   Subagents,
@@ -38,6 +39,13 @@ test('QR encoder produces valid ISO/IEC 18004 finder patterns and half-block ter
   assert(lines.length >= 12);
   assert(lines.every(l => l.startsWith('  ')));
   assert(/[▀▄█]/.test(rendered));
+});
+
+test('pairing binds localhost by default and LAN only on request', () => {
+  assert.equal(pairBindHost(), '127.0.0.1');
+  assert.equal(pairBindHost({}), '127.0.0.1');
+  assert.equal(pairBindHost({ skipTunnel: true }), '0.0.0.0');
+  assert.equal(pairBindHost({ bindLan: true }), '0.0.0.0');
 });
 
 test('PairManager enforces token auth on GET /, blocks remote auto/shell escalation, and supports delta polling', async t => {
@@ -105,6 +113,9 @@ test('PairManager enforces token auth on GET /, blocks remote auto/shell escalat
   assert.equal(isForbiddenRemoteInput('/auto on'), true);
   assert.equal(isForbiddenRemoteInput('/yolo'), true);
   assert.equal(isForbiddenRemoteInput('/mode auto'), true);
+  // A leading `/` alone is not an escalation: a path answer or prompt text must stay allowed.
+  assert.equal(isForbiddenRemoteInput('/etc/hosts'), false);
+  assert.equal(isForbiddenRemoteInput('/tmp/build.log is empty, explain why'), false);
 
   const shellBypassRes = await fetch(`http://127.0.0.1:${info.port}/api/prompt?t=${info.token}`, {
     method: 'POST',
@@ -113,6 +124,47 @@ test('PairManager enforces token auth on GET /, blocks remote auto/shell escalat
   });
   assert.equal(shellBypassRes.status, 403);
   assert.equal(receivedPrompts.length, 1);
+
+  // Command-looking prompts are delivered as plain text; the CLI must strip command semantics
+  // before routing them (tests/tui.test.mjs covers the dispatcher, the guard below the wiring).
+  const remoteCommands = [
+    '/cd C:\\Windows',
+    '/revert --force',
+    '/delete current',
+    '/mcp add evil',
+    '/goal set pwned',
+    '/exit',
+  ];
+  for (const prompt of remoteCommands) {
+    const res = await fetch(`http://127.0.0.1:${info.port}/api/prompt?t=${info.token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    assert.equal(res.status, 200, prompt);
+  }
+  assert.deepEqual(receivedPrompts.slice(1), remoteCommands);
+
+  // Malformed and oversized JSON bodies are client errors, not internal server errors.
+  const malformedBody = await fetch(`http://127.0.0.1:${info.port}/api/prompt?t=${info.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{not json',
+  });
+  assert.equal(malformedBody.status, 400);
+  const arrayBody = await fetch(`http://127.0.0.1:${info.port}/api/prompt?t=${info.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '[]',
+  });
+  assert.equal(arrayBody.status, 400);
+  const oversizedBody = await fetch(`http://127.0.0.1:${info.port}/api/prompt?t=${info.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: 'x'.repeat(300 * 1024) }),
+  });
+  assert.equal(oversizedBody.status, 413);
+  assert.equal(receivedPrompts.length, 1 + remoteCommands.length);
 
   const autoModeRes = await fetch(`http://127.0.0.1:${info.port}/api/mode?t=${info.token}`, {
     method: 'POST',
@@ -167,6 +219,65 @@ test('PairManager enforces token auth on GET /, blocks remote auto/shell escalat
     await fetch(`http://127.0.0.1:${info.port}/api/state?t=${info.token}&since=${maxSeq}`)
   ).json();
   assert.equal(deltaEmpty.entries.length, 0);
+});
+
+test('remote prompts are routed as text, never through the local slash-command dispatcher', async () => {
+  const source = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8');
+  const start = source.indexOf('onRemotePrompt: remoteText =>');
+  assert.ok(start > -1, 'the remote prompt handler must exist in cli.ts');
+  const end = source.indexOf('onRemoteModeChange:', start);
+  assert.ok(end > start, 'onRemoteModeChange must follow onRemotePrompt');
+  const handler = source.slice(start, end);
+  assert.match(handler, /submitExternalPrompt\(remoteText, \{ allowCommands: false \}\)/);
+  assert.doesNotMatch(handler, /submitExternalPrompt\(remoteText\)/);
+  assert.doesNotMatch(handler, /executeImmediateCommand/);
+});
+
+test('slash workflow and network use one shared budget and honour step permissions', async () => {
+  const source = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8');
+
+  // `run_workflow` must be registered even with --no-subagents: only its network/subagent steps
+  // degrade to a prompt, the workflow itself needs no child agents.
+  const noSubagents = source.indexOf("if (!values['no-subagents']) {");
+  assert.ok(noSubagents > -1, 'the --no-subagents block must exist');
+  let depth = 0;
+  let noSubagentsEnd = -1;
+  for (let i = source.indexOf('{', noSubagents); i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}' && --depth === 0) { noSubagentsEnd = i; break; }
+  }
+  assert.ok(noSubagentsEnd > noSubagents, 'the --no-subagents block must close');
+  assert.ok(
+    source.indexOf("reg.register('run_workflow'", noSubagentsEnd) > noSubagentsEnd,
+    'run_workflow must be registered outside the --no-subagents branch',
+  );
+
+  // The slash command is a separate wiring from the model tool; it must not regress either.
+  const workflowStart = source.indexOf("input.startsWith('/workflow ')");
+  const workflowEnd = source.indexOf("input.startsWith('/network ') ||", workflowStart);
+  assert.ok(workflowStart > -1 && workflowEnd > workflowStart, 'the slash workflow branch must exist');
+  const workflowBlock = source.slice(workflowStart, workflowEnd);
+  assert.match(workflowBlock, /const wfBudget: RunBudget = tools\.budget \?\?/);
+  assert.match(workflowBlock, /applyPermissionMode\(tools, stepMode\)/);
+  assert.match(workflowBlock, /budget: wfBudget/);
+
+  const networkStart = source.indexOf("input.startsWith('/network ') ||");
+  assert.ok(networkStart > -1, 'the slash network branch must exist');
+  const networkBlock = source.slice(networkStart);
+  assert.match(networkBlock, /const netBudget: RunBudget = tools\.budget \?\?/);
+  assert.match(networkBlock, /budget: netBudget/);
+});
+
+test('cloudflared runs without credentials and is downloaded only after consent', async () => {
+  const source = await readFile(new URL('../src/pair.ts', import.meta.url), 'utf8');
+  // Both the version probe and the tunnel process must drop VYEN_API_KEY from the environment.
+  assert.match(source, /spawn\(bin, \['--version'\], \{[^}]*env: childEnv\(\)[^}]*\}\)/);
+  assert.match(source, /spawn\(cloudflaredBin, \[[^\]]*\], \{[^}]*env: childEnv\(\)[^}]*\}\)/);
+  // This release asset has no checksum, so nothing is fetched until the user agrees.
+  assert.match(
+    source,
+    /if \(!confirmDownload \|\| !\(await confirmDownload\(downloadUrl\)\)\) return 'cloudflared';/,
+  );
 });
 
 test('Custom Workflows: shell escaping, awk $1 preservation, approval gates, and discovery isolation', async t => {
