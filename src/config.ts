@@ -22,6 +22,7 @@ export const configSchema = z.object({
   showReasoning: z.boolean().default(false),
   approvalMode: z.enum(['ask', 'auto', 'plan', 'readonly']).optional(),
   viewMode: z.enum(['normal', 'verbose', 'transcript']).optional(),
+  update: z.enum(['disable', 'notify', 'auto']).default('notify'),
 }).strict();
 export type Config = z.infer<typeof configSchema>;
 export interface RuntimeConfig extends Config { cwd: string; apiKey: string; dataDir: string; baseUrl: string; model: string }
@@ -109,6 +110,7 @@ export async function loadConfig(overrides: Record<string, unknown> = {}): Promi
     timeoutMs: ['VYEN_TIMEOUT_MS', 'GOON_TIMEOUT_MS'],
     runTokenBudget: ['VYEN_RUN_TOKEN_BUDGET', 'GOON_RUN_TOKEN_BUDGET'],
     inlineReasoning: ['VYEN_INLINE_REASONING', 'GOON_INLINE_REASONING'],
+    update: ['VYEN_UPDATE', 'GOON_UPDATE'],
   };
   const NUMERIC_KEYS = ['contextWindow', 'maxOutputTokens', 'timeoutMs', 'runTokenBudget'];
   for (const [key, names] of Object.entries(ENV_SOURCES)) {

@@ -78,12 +78,34 @@ git diff | vyen -p 'Review diff này'              # dữ liệu pipe vào stdin
 vyen -p 'Giải thích lỗi' < build.log               # tương tự với file chuyển hướng
 vyen -p 'Viết changelog' -o CHANGELOG.draft.md     # ghi câu trả lời cuối ra file (scripting/CI)
 vyen sessions
+vyen upgrade                        # Cập nhật lên bản mới nhất (tự dò npm/pnpm/yarn/bun)
+vyen upgrade 0.3.1                  # Ghim một phiên bản
+vyen upgrade --dry-run              # Chỉ in lệnh cài, không chạy
 ```
 
 Mặc định ở chế độ `ask` (yêu cầu chấp thuận khi sửa/ghi file hoặc chạy shell).
 Không có TTY thì những yêu cầu này bị từ chối trừ khi truyền `--yes` (tương đương
 chế độ `auto`). `--read-only` loại bỏ các công cụ ghi/sửa/bash khỏi bộ tool.
 Mã thoát: `0` thành công, `1` lỗi, `2` từ chối quyền, `130` Ctrl+C, `143` SIGTERM.
+
+## Cập nhật phiên bản
+
+`vyen upgrade` tự dò cách bạn đã cài vyen (`npm`, `pnpm`, `yarn` hoặc `bun`),
+lấy bản mới nhất từ npm rồi chạy đúng lệnh cài toàn cục của trình quản lý đó:
+
+```bash
+vyen upgrade                  # lên bản mới nhất
+vyen upgrade 0.3.1            # ghim một phiên bản cụ thể
+vyen upgrade --method pnpm    # ép trình quản lý khi dò sai
+vyen upgrade --dry-run        # chỉ in lệnh, không cài
+```
+
+Khi mở TUI, vyen đọc cache kiểm tra phiên bản
+(`$XDG_DATA_HOME/vyen/update-check.json`, làm mới mỗi 24 giờ) và in một dòng
+nhắc nếu có bản mới. Chế độ `-p` và `--json` không kiểm tra. Đặt
+`"update": "disable"` trong config hoặc `VYEN_UPDATE=disable` để tắt hẳn;
+`"auto"` tự cài khi cache đã biết bản mới (lần chạy kế tiếp mới dùng code mới).
+Mặc định là `"notify"` — chỉ nhắc, không tự sửa cài đặt.
 
 ## Giao diện TUI, Phím tắt & Slash Commands
 
@@ -281,7 +303,8 @@ vyen --no-subagents -p 'Đọc repo và làm trực tiếp'
 
 Các biến môi trường hỗ trợ: `VYEN_PROVIDER`, `VYEN_BASE_URL`, `VYEN_MODEL`, `VYEN_EFFORT`,
 `VYEN_KEY_ENV`, `VYEN_API_KEY`, `VYEN_CONTEXT_WINDOW`, `VYEN_MAX_OUTPUT_TOKENS`,
-`VYEN_TIMEOUT_MS`, `VYEN_RUN_TOKEN_BUDGET`, `VYEN_INLINE_REASONING`, `VYEN_NOTIFY` (`0` để tắt chuông).
+`VYEN_TIMEOUT_MS`, `VYEN_RUN_TOKEN_BUDGET`, `VYEN_INLINE_REASONING`, `VYEN_NOTIFY` (`0` để tắt chuông),
+`VYEN_UPDATE` (`disable` | `notify` | `auto`, mặc định `notify`).
 
 - Prompt tuỳ biến: `.vyen/prompts/*.md`, `.agents/prompts/*.md`, `$XDG_CONFIG_HOME/vyen/prompts/*.md`, `~/.codex/prompts/*.md`.
 - Chỉ mục phiên: `sessions/.index.json` (cache tóm tắt theo kích thước + mtime, tự dựng lại khi hỏng hoặc bị xoá).

@@ -22,8 +22,12 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   changed revisions are rejected. Shell commands require approval and execute
   as the current user, without an OS sandbox. Read-only mode omits all mutations
   and shell. --yes explicitly authorizes them without prompts.
-- Help/init/doctor/sessions perform no model request. No account login, plugin
-  marketplace, auto-updater, telemetry, browser, native addons or bundled runtime.
+- Help/init/doctor/sessions/upgrade perform no model request. No account login,
+  plugin marketplace, telemetry, browser, native addons or bundled runtime.
+  Updates are opt-in: `vyen upgrade` detects npm/pnpm/yarn/bun and runs that
+  manager's global install. The interactive start reads a 24-hour registry cache
+  and only notifies by default; `update: auto` installs before the TUI starts,
+  and prompt/JSON runs never check. No prebuilt binary is downloaded.
 - Cancellation aborts HTTP, approvals and process groups, records terminal tool
   results, and checkpoints before shutdown. Permission denial ends the current
   run rather than inviting repeated requests.
@@ -90,5 +94,6 @@ same tagged commit repairs the same release instead of bumping again. Superseded
 source commits are skipped. Release jobs are serialized, use contents:write only
 in their publishing job, upload npm archives plus SHA-256 checksums to a draft,
 and publish the release only after uploads complete. The repository GITHUB_TOKEN
-does not trigger recursive push workflows. No npm registry publishing or
-automatic updating of installed clients is enabled by this workflow.
+does not trigger recursive push workflows. Publishing uses npm OIDC trusted
+publishing (no stored token), and the workflow never updates an installed
+client; clients update only through `vyen upgrade`.

@@ -9,6 +9,7 @@ Usage: vyen [options] [prompt]
        vyen init --provider openai-compatible --base-url URL --model MODEL [--effort LEVEL]
        vyen doctor | sessions
        vyen mcp list | check [name] | get <name> | add <name> ... | remove <name> | import-codex [name...]
+       vyen upgrade [VERSION] [--method npm|pnpm|yarn|bun] [--dry-run]
 
 Options:
   -p, --prompt TEXT          Run one task (or pipe a prompt on stdin)
@@ -32,6 +33,8 @@ Options:
       --run-token-budget N   Run token budget (default 0 = unlimited)
       --timeout-ms N        Model request deadline (default 300000)
   -o, --output-last-message FILE  Also write the final answer of a -p run to FILE
+      --method NAME         Package manager for vyen upgrade: npm | pnpm | yarn | bun
+      --dry-run             Show the upgrade command without running it
   -h, --help                Show help
 
 Piping: with -p, text piped on stdin is attached as context, e.g.

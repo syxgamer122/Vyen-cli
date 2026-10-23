@@ -330,10 +330,25 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'context-window': { type: 'string' }, 'max-output-tokens': { type: 'string' },
       'run-token-budget': { type: 'string' }, 'timeout-ms': { type: 'string' },
       'output-last-message': { type: 'string', short: 'o' },
+      method: { type: 'string' }, 'dry-run': { type: 'boolean' },
     } });
     jsonOutput = values.json === true;
     if (values.help) { stdout.write(HELP); return; }
     if (values.version) { stdout.write(`vyen cli ${VERSION}\n`); return; }
+    // Update before reading config: a broken config must not stop the command
+    // that can replace this installation. It also keeps the registry call out
+    // of the normal startup path.
+    if (positionals[0] === 'upgrade') {
+      const { runUpgrade } = await import('./update.js');
+      process.exitCode = await runUpgrade({
+        target: positionals[1],
+        method: typeof values.method === 'string' ? values.method : undefined,
+        dryRun: values['dry-run'] === true,
+        stdout,
+        stderr,
+      });
+      return;
+    }
     const overrides: Record<string, unknown> = {};
     for (const [flag, key] of Object.entries({ provider: 'provider', 'base-url': 'baseUrl', model: 'model', effort: 'effort', 'key-env': 'keyEnv',
       'context-window': 'contextWindow', 'max-output-tokens': 'maxOutputTokens', 'run-token-budget': 'runTokenBudget', 'timeout-ms': 'timeoutMs', 'inline-reasoning': 'inlineReasoning' })) {
@@ -489,6 +504,28 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       config = await runSetupWizard(config);
     }
     const interactive = !prompt;
+    // Update checks belong to interactive runs only: a prompt or --json run must
+    // stay scriptable, and the local cache read must never delay the first frame.
+    let updateNoticeText: string | undefined;
+    if (interactive && stdin.isTTY && stdout.isTTY && !jsonOutput && config.update !== 'disable') {
+      try {
+        const { checkForUpdates, runUpgrade, updateNotice } = await import('./update.js');
+        const check = await checkForUpdates({ policy: config.update, current: VERSION });
+        if (check.refresh) void check.refresh;
+        if (check.action === 'auto' && check.latest) {
+          // The TUI owns the alternate screen, so the installer transcript is
+          // buffered and shown through display() instead of stdout.
+          let transcript = '';
+          const sink = { write: (chunk: string) => { transcript += chunk; return true; } };
+          const code = await runUpgrade({ target: check.latest, stdout: sink, stderr: sink });
+          updateNoticeText = code === 0 ? transcript.trim() : updateNotice(VERSION, check.latest);
+        } else if (check.action === 'notify' && check.latest) {
+          updateNoticeText = updateNotice(VERSION, check.latest);
+        }
+      } catch {
+        // An update check is advisory; a failure must never block the session.
+      }
+    }
     const outputLastMessage = typeof values['output-last-message'] === 'string' ? values['output-last-message'] : undefined;
     if (outputLastMessage && interactive) throw new Error('--output-last-message requires a prompt (-p or piped input).');
     let viewMode: 'normal' | 'verbose' | 'transcript' =
@@ -607,6 +644,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       };
       syncTuiHeader(true);
       const display = (text: string) => tui ? tui.write(text) : stderr.write(cleanTerminal(text));
+      if (updateNoticeText) display(`${updateNoticeText}\n`);
       const question = (label: string, signal?: AbortSignal, remember = false) => tui ? tui.question(label, signal, remember)
         : rl ? rl.question(label, { signal }) : Promise.reject(new Error('Input requires a TTY.'));
       // Plain readline mode: read a secret without echoing it.
