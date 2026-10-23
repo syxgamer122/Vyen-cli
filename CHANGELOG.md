@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- `vyen upgrade [VERSION]` thay bản cài toàn cục qua npm/pnpm/yarn/bun (tự nhận diện, có
+  `--method` và `--dry-run`). Bản mới khi khởi động TUI được báo một lần mỗi ngày; đặt
+  `update` = `disable`/`notify`/`auto` trong config hoặc `VYEN_UPDATE` để đổi.
+
 ## 0.3.0
 
 Giao diện tối giản, vá bảo mật, sửa lỗi và tăng hiệu năng. Chi tiết và cách tái hiện từng lỗi:
