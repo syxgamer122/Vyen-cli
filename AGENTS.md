@@ -39,8 +39,8 @@ report them as findings.
 
 **Known failures that are not regressions.** The first four fail on Windows and
 pass on Linux CI (`ubuntu-24.04`): Windows has no POSIX mode bits and refuses
-unprivileged symlinks. The fifth is a Windows spawn limitation, not a missing
-dependency.
+unprivileged symlinks. The other two are Windows limitations, not missing
+dependencies.
 
 - `tests/files.test.mjs` — "existing files require a fresh read; edits preserve
   file mode", "edits preserve exact permissions under restrictive umasks; new
@@ -57,7 +57,7 @@ dependency.
   real GitHub CLI is neither needed nor involved — do not "fix" this test.
 
 Measured 2026-10-22 on Windows, Node 26.12.0: the suite is green except the
-five failures above; the two POSIX pseudo-terminal tests are skipped on Windows.
+six failures above; the two POSIX pseudo-terminal tests are skipped on Windows.
 The exact counts live in `docs/VALIDATION.md`, which is the dated record — read
 the number there, never from memory or from this file. A count written into a
 rules file goes stale the moment a test is added.
@@ -216,9 +216,10 @@ without a row is **RED**. Plans written before 2026-10-22 are history and are
 not retrofitted (§4).
 
 The guard accepts a criterion written as `1.` or `1)`, a plan file named
-`YYYY-MM-DD-<slug>.md`, and a row that names `tests/<name>.test.mjs`. Anything
-else — an unnumbered criterion, a plan file with another name, a row without a
-test file — is **RED**, so write the plan in that shape from the start.
+`YYYY-MM-DD-<slug>.md`, and a row that names `tests/<name>.test.mjs`. From
+2026-10-23 a row must also name the test after `›` — a file whose test was
+deleted must go red. Anything else is **RED**, so write the plan in that shape
+from the start.
 
 The test **cannot** check that the row really covers the criterion: constraining
 it by comparing lead words once **falsely rejected a valid plan**. ⇒ The prose in
@@ -424,24 +425,23 @@ reuse it.
 **No secrets.** A lesson never records an API key, a token, a credential or
 personal data. Name the *place* where the secret lives, never the secret.
 
-- [pitfall] (2026-10-22) The test files import from `dist/`, not `src/` — run
-  `npm run build` before `node --test tests/<file>.test.mjs`. A mutation check
-  that skips the build reports false negatives: the old `dist/` is what runs.
+**Enforced vs self-declared.** An entry ending in `(guard: tests/<file>.test.mjs)`
+is enforced by that test; every other entry is self-declared and relies on the
+agent choosing to follow it.
+
+- [pitfall] (2026-10-22) Tests import from `dist/` — run `npm run build` before
+  `node --test tests/<file>.test.mjs`, or a mutation check runs stale code.
 - [pitfall] (2026-10-22) PowerShell `Set-Content -Encoding UTF8` writes a BOM
-  **and** re-encodes UTF-8 as Windows-1252, corrupting any file with non-ASCII
-  (`src/cli.ts`, `tests/tui.test.mjs`) — use a Node script for bulk replacements.
+  and re-encodes UTF-8 as Windows-1252 — use a Node script for bulk replacements
+  (guard: tests/repo-hygiene.test.mjs).
 - [pitfall] (2026-10-22) `execFile` and `spawn` cannot run `npm.cmd` on Windows
   without a shell (EINVAL) — run `node node_modules/typescript/bin/tsc` directly
   instead of `npm run build`.
-- [pitfall] (2026-10-22) The agent's `bash` tool is Git Bash/MSYS, never
-  cmd.exe — use POSIX syntax and `/dev/null`; `>nul` creates a literal file
-  named `nul`.
-- [mistake] (2026-10-22) A file that nothing loads is dead — grep the loader
-  for the file name before writing a file that is meant to be read. Only
-  `AGENTS.md`, `AGENTS.override.md` and `CLAUDE.md` reach the prompt.
-- [pitfall] (2026-10-22) A guard test that contains the literal it searches for
-  reports itself — spell the pattern in pieces, in the title and the message
-  too, then check that the guard's own file is not reported.
+- [mistake] (2026-10-22) A file nothing loads is dead — grep the loader first.
+  Only `AGENTS.md`, `AGENTS.override.md` and `CLAUDE.md` reach the prompt.
+- [pitfall] (2026-10-22) A guard that contains the literal it searches for
+  reports itself — spell the pattern in pieces and check its own file is clean
+  (guard: tests/repo-hygiene.test.mjs).
 - [mistake] (2026-10-22) A test count written into a rules file goes stale the
   moment a test is added — keep the number in the dated validation record and
   state only the criterion (which failures are allowed) in the rules.
