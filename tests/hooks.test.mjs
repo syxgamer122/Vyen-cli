@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fixture, provider, sse } from './helpers.mjs';
+import { SessionStore } from '../dist/session.js';
+import { ToolRegistry } from '../dist/tools.js';
+import { Harness } from '../dist/harness.js';
 import {
   calculateWorkspaceTrustHash,
   isWorkspaceTrusted,
@@ -167,4 +171,54 @@ test('hook process environment never receives sensitive API keys', async () => {
     if (originalToken !== undefined) process.env.ANTHROPIC_API_KEY = originalToken;
     else delete process.env.ANTHROPIC_API_KEY;
   }
+});
+
+test('Harness executeBatch intercepts tools with HookBus PreToolUse', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, async (req, res, n) => {
+    if (n === 1) {
+      sse(res, {
+        calls: [{ id: 'c1', name: 'write_file', input: { path: 'blocked.txt', content: 'should not exist' } }],
+      });
+    } else {
+      sse(res, { text: 'Turn complete.' });
+    }
+  });
+
+  const config = {
+    model: 'mock-model',
+    provider: 'openai',
+    baseUrl: p.url,
+    apiKey: 'mock-key',
+    cwd: f.cwd,
+    dataDir: f.data,
+    maxOutputTokens: 2048,
+    contextWindow: 8192,
+    timeoutMs: 10000,
+  };
+
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  const tools = new ToolRegistry(f.cwd, async () => true, false);
+  const hookBus = new HookBus({
+    cwd: f.cwd,
+    isTrusted: true,
+    hooks: [
+      {
+        event: 'PreToolUse',
+        matcher: 'write_file',
+        command: 'node -e "process.exit(2)"',
+      },
+    ],
+  });
+
+  let stoppedReason = '';
+  const harness = new Harness(config, store, tools, ev => {
+    if (ev.type === 'stopped') stoppedReason = ev.reason;
+  }, undefined, hookBus);
+
+  await harness.run('Do write', new AbortController().signal);
+
+  assert.equal(stoppedReason, 'Permission denied.');
+  const exists = await stat(join(f.cwd, 'blocked.txt')).then(() => true, () => false);
+  assert.equal(exists, false, 'file must not be created when hook exits 2');
 });

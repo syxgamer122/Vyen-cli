@@ -803,9 +803,20 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       const { Harness } = await import('./harness.js');
       const { loadLayeredSettings } = await import('./settings.js');
       const { evaluateToolPolicy } = await import('./policy.js');
+      const { HookBus, calculateWorkspaceTrustHash, isWorkspaceTrusted } = await import('./hooks.js');
 
       const buildHarness = async (currentMode: PermissionMode, options: { reconnectMcp?: boolean } = {}) => {
         const layered = await loadLayeredSettings(runtime.cwd, config.permissions);
+        let hookBus: InstanceType<typeof HookBus> | undefined;
+        if (layered.hooks && layered.hooks.length > 0) {
+          const hash = await calculateWorkspaceTrustHash(runtime.cwd, layered.hooks.map(h => h.command));
+          const isTrusted = await isWorkspaceTrusted(runtime.cwd, hash);
+          hookBus = new HookBus({
+            hooks: layered.hooks,
+            cwd: runtime.cwd,
+            isTrusted,
+          });
+        }
         const policyContext = {
           cliAllowed: cliAllowedTools,
           cliDisallowed: cliDisallowedTools,
@@ -1047,7 +1058,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             },
           });
         }
-        return { tools: reg, harness: new Harness(runtime, store, reg, emit) };
+        return { tools: reg, harness: new Harness(runtime, store, reg, emit, undefined, hookBus) };
       };
 
       const setPermissionMode = (nextMode: PermissionMode) => {

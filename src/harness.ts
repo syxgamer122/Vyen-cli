@@ -6,6 +6,7 @@ import { auxiliaryEffortHeaders, buildProviderOptions, createModel, resolveModel
 import { safeError } from './errors.js';
 import { buildGoalBudgetLimitPrompt, compactIfNeeded, compactNow, estimatedTokens, expandFileMentions, recapSession, systemPrompt, type SystemPromptCache } from './context.js';
 import { AnswerProjection, visibleAnswer, withReasoningReplay, type AnswerPart } from './reasoning.js';
+import type { HookBus } from './hooks.js';
 
 export interface ToolEventMeta {
   kind: 'read' | 'list' | 'search' | 'exec' | 'edit' | 'other';
@@ -268,7 +269,7 @@ export class Harness {
   private turnHadFailedExec = false;
   private flushGoalProgressHook?: (allowStopped?: boolean) => void;
   constructor(readonly config: RuntimeConfig, readonly store: SessionStore, readonly tools: ToolRegistry,
-    readonly emit: (event: HarnessEvent) => void = () => {}, model?: LanguageModel) {
+    readonly emit: (event: HarnessEvent) => void = () => {}, model?: LanguageModel, readonly hookBus?: HookBus) {
     this.model = model ?? createModel(config, this.store.session.id);
     if (this.store.session.todos?.length) {
       this.tools.todos = [...this.store.session.todos];
@@ -476,6 +477,17 @@ export class Harness {
     this.tools.files.beginTurn();
     try {
       signal.throwIfAborted();
+      if (this.hookBus) {
+        if (session.messages.length === 0) {
+          await this.hookBus.dispatch('SessionStart', { sessionId: session.id });
+        }
+        const promptHooks = await this.hookBus.dispatch('UserPromptSubmit', { prompt });
+        for (const h of promptHooks) {
+          if (h.injectedContext) {
+            this.addContextMessage({ role: 'user', content: h.injectedContext });
+          }
+        }
+      }
       this.drainPendingContext();
       const { expandedPrompt, imageParts } = await expandFileMentions(prompt, this.tools.files, {
         model: this.config.model,
@@ -605,9 +617,16 @@ export class Harness {
         // A successful terminal step needs its own answer. Reasoning may be
         // opaque to the adapter, and earlier tool narration is not completion.
         if (!calls.length && !stepText.trim()) throw new Error('Model finished without a visible answer.');
-        if (!calls.length) return text;
+        if (!calls.length) {
+          if (this.hookBus) await this.hookBus.dispatch('Stop', { reason: 'complete' });
+          return text;
+        }
         const outcome = await this.executeBatch(calls, signal);
-        if (outcome.denied) { this.emit({ type: 'stopped', reason: 'Permission denied.' }); return text; }
+        if (outcome.denied) {
+          if (this.hookBus) await this.hookBus.dispatch('Stop', { reason: 'permission_denied' });
+          this.emit({ type: 'stopped', reason: 'Permission denied.' });
+          return text;
+        }
         flushGoalTurnProgress();
         if (session.goal?.status === 'budget_limited' && !budgetLimitSteered) {
           budgetLimitSteered = true;
@@ -689,9 +708,42 @@ export class Harness {
             meta.verb = counts.verb;
           }
         }
+        if (this.hookBus) {
+          const preHooks = await this.hookBus.dispatch('PreToolUse', {
+            tool: call.toolName,
+            input: call.input,
+          });
+          if (preHooks.some(h => h.denied)) {
+            denied = true;
+            meta.durationMs = Date.now() - startedMs;
+            output = { type: 'error-text', value: 'Tool execution denied by PreToolUse hook.' };
+            this.emit({ type: 'tool', name: call.toolName, id: call.toolCallId, state: 'error', meta });
+            return { type: 'tool-result' as const, toolCallId: call.toolCallId, toolName: call.toolName, output };
+          }
+        }
         this.emit({ type: 'tool', name: call.toolName, id: call.toolCallId, state: 'start', meta });
         const result = await this.tools.execute(call, signal);
         denied ||= result.denied === true;
+        if (this.hookBus) {
+          if (result.denied) {
+            await this.hookBus.dispatch('PostToolUseFailure', {
+              tool: call.toolName,
+              input: call.input,
+              error: result.text,
+            });
+          } else {
+            const postHooks = await this.hookBus.dispatch('PostToolUse', {
+              tool: call.toolName,
+              input: call.input,
+              output: result.text,
+            });
+            for (const h of postHooks) {
+              if (h.injectedContext) {
+                this.addContextMessage({ role: 'user', content: h.injectedContext });
+              }
+            }
+          }
+        }
         meta.durationMs = Date.now() - startedMs;
         if (!result.denied) {
           const isFailedBash = meta.kind === 'exec' && /^Exit code:\s*(?!0\b)\d+/m.test(result.text);
