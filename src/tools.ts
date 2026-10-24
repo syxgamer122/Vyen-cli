@@ -731,7 +731,7 @@ export class ToolRegistry {
       }
       if (decision === 'allow') {
         // Explicitly allowed by policy
-      } else if (!definition.readOnly && !await this.approve({ tool: canonicalName, input, signal })) {
+      } else if ((decision === 'ask' || !definition.readOnly) && !await this.approve({ tool: canonicalName, input, signal })) {
         return { text: 'Permission denied by the user. Stop this run.', denied: true };
       }
     } else if (!definition.readOnly && !await this.approve({ tool: canonicalName, input, signal })) {

@@ -809,28 +809,44 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
       const buildHarness = async (currentMode: PermissionMode, options: { reconnectMcp?: boolean } = {}) => {
         const layered = await loadLayeredSettings(runtime.cwd, config.permissions);
-        let hookBus: InstanceType<typeof HookBus> | undefined;
-        if (layered.hooks && layered.hooks.length > 0) {
-          const hash = await calculateWorkspaceTrustHash(runtime.cwd, layered.hooks.map(h => h.command));
-          let isTrusted = await isWorkspaceTrusted(runtime.cwd, hash);
+        const hasProjectHooks = Boolean(layered.hooks && layered.hooks.length > 0);
+        const hasProjectAllow = Boolean(layered.projectPermissions?.allow && layered.projectPermissions.allow.length > 0);
+        let isTrusted = false;
+
+        if (hasProjectHooks || hasProjectAllow) {
+          const hash = await calculateWorkspaceTrustHash(runtime.cwd, (layered.hooks ?? []).map(h => h.command));
+          isTrusted = await isWorkspaceTrusted(runtime.cwd, hash);
           if (!isTrusted && values['trust-workspace']) {
             await recordWorkspaceTrust(runtime.cwd, hash);
             isTrusted = true;
           }
           if (!isTrusted) {
-            display(`\n[Warning: ${layered.hooks.length} project hook(s) disabled because workspace is not trusted. Run with --trust-workspace to enable.]\n`);
+            const reasons: string[] = [];
+            if (hasProjectHooks) reasons.push(`${layered.hooks!.length} project hook(s)`);
+            if (hasProjectAllow) reasons.push('project permission allow rules');
+            display(`\n[Warning: ${reasons.join(' and ')} disabled because workspace is not trusted. Run with --trust-workspace to enable.]\n`);
           }
+        }
+
+        let hookBus: InstanceType<typeof HookBus> | undefined;
+        if (hasProjectHooks) {
           hookBus = new HookBus({
-            hooks: layered.hooks,
+            hooks: layered.hooks!,
             cwd: runtime.cwd,
             isTrusted,
           });
         }
+
+        const projectRules = isTrusted ? layered.projectPermissions : {
+          ...layered.projectPermissions,
+          allow: undefined,
+        };
+
         const policyContext = {
           cliAllowed: cliAllowedTools,
           cliDisallowed: cliDisallowedTools,
           userRules: layered.userPermissions,
-          projectRules: layered.projectPermissions,
+          projectRules,
           mode,
           cwd: runtime.cwd,
         };

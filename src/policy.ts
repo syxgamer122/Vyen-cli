@@ -97,7 +97,14 @@ export function matchToolPattern(
     return matchSimplePattern(normalizedPattern, argStr);
   }
   const canonicalPatternTool = normalizeToolName(trimmed);
-  return matchSimplePattern(canonicalPatternTool, canonicalRequestTool);
+  if (!matchSimplePattern(canonicalPatternTool, canonicalRequestTool)) return false;
+  if (canonicalRequestTool === 'bash' && options.isAllow) {
+    const argStr = extractToolArgumentString(canonicalRequestTool, request.input, options.cwd);
+    if (CHAINING_PATTERN.test(argStr)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**

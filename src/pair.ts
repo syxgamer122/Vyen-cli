@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { chmod, mkdir, stat, writeFile } from 'node:fs/promises';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { chmod, mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { configDir } from './config.js';
@@ -887,9 +887,16 @@ async function resolveCloudflaredBinary(
     const res = await fetch(downloadUrl, { signal: AbortSignal.timeout(30_000) });
     if (res.ok) {
       const bytes = Buffer.from(await res.arrayBuffer());
-      await writeFile(localBin, bytes);
+      const tmpBin = `${localBin}.tmp-${randomUUID()}`;
+      await writeFile(tmpBin, bytes);
       if (process.platform !== 'win32') {
-        await chmod(localBin, 0o755);
+        await chmod(tmpBin, 0o755);
+      }
+      try {
+        await rename(tmpBin, localBin);
+      } catch (err) {
+        await unlink(tmpBin).catch(() => {});
+        throw err;
       }
       if (await canSpawn(localBin)) return localBin;
     }
