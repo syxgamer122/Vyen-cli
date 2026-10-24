@@ -81,6 +81,18 @@ test(`every ${TS_EXPECT_ERROR} states a reason on the same line`, async () => {
   assert.deepEqual(offenders, [], `${TS_EXPECT_ERROR} without a reason at: ${offenders.join(', ')}`);
 });
 
+test('AGENTS.md fits under the prompt cap with room to spare', async () => {
+  const context = await readFile(join(ROOT, 'src', 'context.ts'), 'utf8');
+  const cap = /limitText\(parts\.join\([^)]*\),\s*([\d_]+)\)/.exec(context);
+  assert.ok(cap, 'the prompt cap in src/context.ts was not found — update this guard');
+  const limit = Number(cap[1].replaceAll('_', ''));
+  const text = await readFile(join(ROOT, 'AGENTS.md'), 'utf8');
+  assert.ok(
+    text.length <= limit - 1000,
+    `AGENTS.md is ${text.length} characters; the loader truncates at ${limit} and drops the middle, so it must stay at or below ${limit - 1000}`,
+  );
+});
+
 test('the two guards protect each other', async () => {
   const hygiene = await readFile(new URL('./repo-hygiene.test.mjs', import.meta.url), 'utf8');
   const traceability = await readFile(new URL('./plan-traceability.test.mjs', import.meta.url), 'utf8');

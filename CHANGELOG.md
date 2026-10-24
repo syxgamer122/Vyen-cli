@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0
+
+- Ghép đôi thiết bị qua Cloudflared (`/pair`, `--pair`): QR + web UI trên điện thoại, token
+  128-bit, mặc định chỉ localhost; từ xa không bật được auto-approve hay `!cmd`, quyền `always`
+  chỉ có hiệu lực trong phiên.
+- Sửa bảo mật sau review: prompt từ thiết bị ghép đôi không bao giờ đi vào bộ xử lý lệnh `/`
+  cục bộ (`/cd`, `/revert`, `/delete`…); cloudflared chạy với môi trường đã lọc (`VYEN_API_KEY`
+  không bị lộ) và chỉ được tải sau khi người dùng xác nhận; thân request quá lớn/JSON hỏng trả
+  413/400 thay vì 500.
+- Workflow tự định nghĩa (`.vyen/workflows/*.json|*.md`) và 4 workflow tích hợp; bước shell
+  dùng chung approval của `bash` và bị chặn ở readonly/plan. Bước prompt áp dụng `readOnly`/
+  `mode`/`effort`; lệnh `/workflow` và `/network` dùng chung một ngân sách token cho cả lượt.
+- `run_workflow` vẫn khả dụng khi chạy `--no-subagents` (bước network/subagent tự hạ cấp).
+- Agent Network: nhiều persona brainstorm/council tối đa 4 vòng, kèm P2P bus giữa các subagent.
+- `package.json` khai báo `repository` để npm xác minh provenance khi publish.
+
 ## 0.3.1
 
 - `vyen upgrade [VERSION]` thay bản cài toàn cục qua npm/pnpm/yarn/bun (tự nhận diện, có

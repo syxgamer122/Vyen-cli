@@ -165,3 +165,38 @@ What the fork adds on top of upstream:
 
 Not established by this fork: Termux/Android device behaviour, macOS, ARM64,
 and the provenance of the upstream fixes on hardware other than Linux CI.
+
+## 2026-10-23 — the traceability guard resolves a test title
+
+Measured on Windows, Node 26.12.0: `npm test` → 172 tests, 163 pass, 7 fail,
+2 skipped. Six failures are exactly the platform failures listed in
+`AGENTS.md` §1; the seventh is `tests/files.test.mjs` "a workspace change makes
+the old backups unreachable instead of restoring them elsewhere", a test added
+by a concurrent, uncommitted change outside this work. `npm run typecheck` and
+`npm run lint` pass.
+
+What changed:
+
+- `tests/plan-traceability.test.mjs` now resolves a `Scenarios & Tests` row to
+  the **test title** inside the file, not only to the file. The upstream merge
+  of 2026-10-22 deleted the body of `tests/context.test.mjs` while the file
+  stayed in place, and the file-only check stayed green. Plans dated
+  2026-10-23 or later must write `tests/<file>.test.mjs › <test title>`;
+  earlier plans are history and are not retrofitted.
+- The end-to-end test that proves a workspace `AGENTS.md` reaches
+  `systemPrompt()` was restored, `## Lessons` section included.
+- `tests/repo-hygiene.test.mjs` reads the prompt truncation limit from
+  `src/context.ts` and fails when `AGENTS.md` comes within 1 000 characters
+  of it.
+- The `## Lessons` section now declares which entries a test enforces
+  (`(guard: tests/<file>.test.mjs)`) and that every other entry is
+  self-declared.
+
+Proved red before green: a plan row naming a missing title, a row naming a
+title that lives in a different file, and an `AGENTS.md` over the margin each
+failed with their own message. A plan dated 2026-10-22 without a title stayed
+green. The working tree was clean after the probes.
+
+Not established: the guard proves the test **exists by name**, not that the
+test covers the criterion. That prose still has to be read, by the agent and by
+the reviewer.

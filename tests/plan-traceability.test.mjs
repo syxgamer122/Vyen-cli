@@ -15,6 +15,10 @@ const PLANS_DIR = join(ROOT, 'docs', 'superpowers', 'plans');
 // not retrofitted (AGENTS.md §4: a completed plan is not rewritten); from this
 // date on, every plan must carry the traceability table.
 const RULE_ADOPTED = '2026-10-22';
+// From this date a row must name the test, not only the file: a file whose test
+// was deleted must turn this guard red. The upstream merge of 2026-10-22 deleted
+// the body of tests/context.test.mjs and the file-only check stayed green.
+const TEST_TITLE_ADOPTED = '2026-10-23';
 // A plan file is named YYYY-MM-DD-<slug>.md. Anything else in that directory
 // is not a plan and must not be judged as one.
 const PLAN_NAME = /^\d{4}-\d{2}-\d{2}-.*\.md$/;
@@ -54,6 +58,20 @@ function rowsOf(scenarios) {
     .split(/\r?\n/)
     .filter(line => /^\|\s*\d+\s*\|/.test(line))
     .map(line => ({ number: Number(/^\|\s*(\d+)\s*\|/.exec(line)[1]), text: line }));
+}
+
+// A row looks like: | 1 | criterion | tests/x.test.mjs › the test title |
+function rowTitle(cell) {
+  const parts = cell.split('›');
+  if (parts.length !== 2) return null;
+  const file = /tests\/[A-Za-z0-9._-]+\.test\.mjs/.exec(parts[0]);
+  if (!file) return null;
+  const title = parts[1].replace(/\|\s*$/, '').trim();
+  return title ? { file: file[0], title } : null;
+}
+
+function testTitles(source) {
+  return [...source.matchAll(/\btest\(\s*(['"`])([\s\S]*?)\1/g)].map(match => match[2]);
 }
 
 test('the traceability guard is not vacuous: plans exist and every plan states its criteria', async () => {
@@ -97,6 +115,25 @@ test('every Scenarios & Tests row names a test file that exists', async () => {
       assert.ok(file, `${plan.name}: row ${row.number} names no test file`);
       const exists = await stat(join(ROOT, file[0])).then(() => true, () => false);
       assert.ok(exists, `${plan.name}: row ${row.number} names ${file[0]}, which does not exist`);
+    }
+  }
+});
+
+test('from 2026-10-23 every Scenarios & Tests row names a test the file contains', async () => {
+  const plans = (await planFiles()).filter(plan => plan.date >= TEST_TITLE_ADOPTED);
+  assert.ok(plans.length > 0, `no plan dated ${TEST_TITLE_ADOPTED} or later exists — the title check guards nothing`);
+  for (const plan of plans) {
+    const text = await readFile(join(PLANS_DIR, plan.name), 'utf8');
+    const scenarios = section(text, 'Scenarios & Tests');
+    if (!scenarios) continue;
+    for (const row of rowsOf(scenarios)) {
+      const target = rowTitle(row.text);
+      assert.ok(target, `${plan.name}: row ${row.number} must name a test as "tests/<file>.test.mjs › <title>"`);
+      const source = await readFile(join(ROOT, target.file), 'utf8');
+      assert.ok(
+        testTitles(source).includes(target.title),
+        `${plan.name}: row ${row.number} names "${target.title}", which ${target.file} does not contain`,
+      );
     }
   }
 });

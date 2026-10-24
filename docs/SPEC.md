@@ -46,6 +46,28 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   have a 30k local budget, no MCP and no child delegation. Parent cancellation
   drains children; child permission denial stops the parent. Budgets are checked
   between requests and concurrent in-flight requests can exceed the threshold.
+- Pairing is opt-in (`vyen pair`, `--pair` or `/pair`). The HTTP server binds
+  127.0.0.1 unless LAN mode is requested explicitly. Every request needs the
+  per-session 128-bit token from the URL or a Bearer header. A remote device may
+  prompt, read the stream, switch to ask/plan/readonly and answer approvals; it
+  cannot enable auto-approval or run `!` shell commands, and `always` grants a
+  tool only for that session. The tunnel link is a credential: anyone holding it
+  can control the session. Cloudflared comes from PATH or is downloaded from
+  Cloudflare's GitHub release on first use; an ordinary install or start fetches
+  nothing, and only the explicit pair command can trigger the download, then
+  only after the user confirms it.
+- Workflows are data, not code: built-ins plus `.vyen/workflows/*.json|*.md` and
+  the user config directory. Steps run prompts, subagents, network sessions,
+  shell commands or approval gates. Shell steps use the same approval callback as
+  `bash`, are refused in read-only/plan modes, and have a 120-second deadline.
+  A prompt step's `readOnly`/`mode` narrows the tool registry for that step and
+  `effort` selects its reasoning level. The slash command and the `run_workflow`
+  tool each share one run budget across every step. Workflow child sessions
+  share the parent's budget and approval callback.
+- Agent Network convenes read-only persona subagents for at most four rounds and
+  exposes a P2P message bus to child agents. It shares the parent run budget;
+  when the parent is unbounded it caps a session at 120,000 tokens. Peer tools
+  cannot widen a child's permission mode.
 - TerminalUI owns the alternate screen, raw input, resize, scrollback and keyboard
   cleanup. It is enabled only for interactive TTYs; --no-tui, TERM=dumb, prompt
   mode and JSON retain plain output. Terminal controls in model/tool data are
@@ -81,19 +103,10 @@ Linux tests do not establish Android device compatibility.
 
 ## Automated GitHub releases
 
-Pushes to main and manual workflow dispatch run checks on Node 22.16 and 24.
-Pull requests run read-only checks without release permissions. After checks,
-the newest main commit is packed and installed in an isolated prefix. The first
-release uses package.json's stable version. Later changed commits auto-increment
-the latest patch, unless package.json declares a higher stable version. Version
-changes update package.json and npm-shrinkwrap.json in a bot commit before the
-annotated tag is pushed. CLI version output reads its installed manifest.
-
-Publishing owns tag/release state. Existing tags are never moved. A rerun at the
-same tagged commit repairs the same release instead of bumping again. Superseded
-source commits are skipped. Release jobs are serialized, use contents:write only
-in their publishing job, upload npm archives plus SHA-256 checksums to a draft,
-and publish the release only after uploads complete. The repository GITHUB_TOKEN
-does not trigger recursive push workflows. Publishing uses npm OIDC trusted
-publishing (no stored token), and the workflow never updates an installed
-client; clients update only through `vyen upgrade`.
+Pushing main and manual workflow dispatch run checks on Node 22.16 and 24.
+Pull requests run read-only checks without publish permissions. A `v*` tag push
+runs the publish job after those checks: the tag must equal package.json's
+version, and npm publishes through OIDC trusted publishing (no stored token,
+provenance enabled). Tags are never moved and the workflow never bumps a version
+or edits the repository. A rerun publishes the same version or fails when that
+version already exists. CLI version output reads its installed manifest.
