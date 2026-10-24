@@ -23,7 +23,7 @@ import {
 import { safeError } from './errors.js';
 import { VERSION } from './version.js';
 import { HELP } from './help.js';
-import type { HarnessEvent } from './harness.js';
+import type { Harness, HarnessEvent } from './harness.js';
 import type { SubagentEvent } from './subagents.js';
 import { InputCancelledError, terminalText as cleanTerminal, TerminalUI } from './tui.js';
 import type { McpManager } from './mcp.js';
@@ -678,6 +678,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     // rebuild during a run replace the run's signal, so Ctrl+C could no longer
     // cancel the request that was actually in flight.
     let mcpController: AbortController | undefined;
+    let activeHarness: Harness | undefined;
     let denied = false, exiting = false, terminating = false, starting = true;
     let mode: PermissionMode = values['read-only']
       ? 'readonly'
@@ -1041,6 +1042,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                       step.effort ? { ...runtime, effort: step.effort } : runtime,
                       childStore,
                       childTools,
+                      undefined,
+                      undefined,
+                      hookBus,
                     ).run(stepPrompt, stepSig, reg.budget);
                     const { lastAssistantAnswer } = await import('./reasoning.js');
                     return lastAssistantAnswer(childStore.session.messages, runtime.inlineReasoning);
@@ -1082,11 +1086,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       };
 
       let { tools, harness } = await buildHarness(mode);
+      activeHarness = harness;
       let rebuildPending = false;
       const rebuildHarness = async (options: { reconnectMcp?: boolean } = {}) => {
         const built = await buildHarness(mode, options);
         tools = built.tools;
         harness = built.harness;
+        activeHarness = harness;
       };
       // Rebuilding closes the MCP servers and subagents the running turn uses, so while a turn is
       // active the rebuild waits until it ends (the new settings apply from the next turn).
@@ -3014,7 +3020,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                   applyPermissionMode(tools, stepMode);
                   try {
                     const stepHarness = step.effort
-                      ? new Harness({ ...runtime, effort: step.effort }, store, tools, emit)
+                      ? new Harness({ ...runtime, effort: step.effort }, store, tools, emit, undefined, harness.hookBus)
                       : harness;
                     return await stepHarness.run(stepPrompt, stepSig, wfBudget);
                   } finally {
@@ -3273,6 +3279,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', terminate); process.removeListener('message', onIpcSignal);
       try { tui?.close(); rl?.close(); await pairManager?.stop(); await subagents?.closeAll(); await manager?.close(); }
       finally {
+        await activeHarness?.endSession().catch(() => {});
         await store.close();
         if (process.connected) {
           try { process.disconnect(); } catch { /* ignore */ }

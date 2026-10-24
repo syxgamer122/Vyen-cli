@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, mkdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { normalizeToolName } from './tools.js';
 import { configDir, atomicJson } from './config.js';
 import {
   type HookEvent,
@@ -172,7 +173,7 @@ export function matchesHook(
 
   if (event === 'PreToolUse' || event === 'PostToolUse' || event === 'PostToolUseFailure') {
     const toolName = typeof payload.tool === 'string' ? payload.tool : '';
-    if (matcher === toolName) return true;
+    if (matcher === toolName || normalizeToolName(matcher) === toolName) return true;
     if (matcher.endsWith('*') && toolName.startsWith(matcher.slice(0, -1))) return true;
     return false;
   }
@@ -252,6 +253,8 @@ export class HookBus {
         env,
         shell: true,
         stdio: ['pipe', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32',
+        windowsHide: true,
       });
 
       child.stdin.on('error', () => {
@@ -260,14 +263,28 @@ export class HookBus {
 
       const timer = setTimeout(() => {
         timedOut = true;
-        try {
-          if (process.platform === 'win32' && child.pid) {
-            spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-          } else {
+        if (!child.pid) return;
+        if (process.platform === 'win32') {
+          try {
+            const taskkill = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+              stdio: 'ignore',
+              windowsHide: true,
+            });
+            taskkill.on('error', () => {
+              try { child.kill('SIGKILL'); } catch { /* ignore */ }
+            });
             child.kill('SIGKILL');
+          } catch {
+            try { child.kill('SIGKILL'); } catch { /* ignore */ }
           }
-        } catch {
-          // Process already ended
+        } else {
+          try {
+            process.kill(-child.pid, 'SIGKILL');
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+              try { child.kill('SIGKILL'); } catch { /* ignore */ }
+            }
+          }
         }
       }, timeoutMs);
 

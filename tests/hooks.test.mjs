@@ -319,3 +319,101 @@ test('hook execution does not crash on fast-exiting child with EPIPE', async () 
   assert.equal(res[0].exitCode, 2);
   assert.equal(res[0].denied, true);
 });
+
+test('Harness endSession dispatches SessionEnd hook', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, async (req, res) => {
+    sse(res, { text: 'Done.' });
+  });
+
+  const config = {
+    model: 'mock-model', provider: 'openai', baseUrl: p.url, apiKey: 'mock-key',
+    cwd: f.cwd, dataDir: f.data, maxOutputTokens: 2048, contextWindow: 8192, timeoutMs: 10000,
+  };
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  const tools = new ToolRegistry(f.cwd, async () => true, false);
+  let sessionEnded = false;
+  const hookBus = new HookBus({
+    cwd: f.cwd,
+    isTrusted: true,
+    hooks: [
+      {
+        event: 'SessionEnd',
+        command: 'node -e "process.exit(0)"',
+      },
+    ],
+  });
+  hookBus.dispatch = async (event) => {
+    if (event === 'SessionEnd') sessionEnded = true;
+    return [];
+  };
+
+  const harness = new Harness(config, store, tools, () => {}, undefined, hookBus);
+  await harness.endSession();
+  assert.equal(sessionEnded, true, 'SessionEnd must be dispatched on endSession');
+});
+
+test('SessionStart hook stdout injects context into new session', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, async (req, res) => {
+    sse(res, { text: 'Hello.' });
+  });
+
+  const config = {
+    model: 'mock-model', provider: 'openai', baseUrl: p.url, apiKey: 'mock-key',
+    cwd: f.cwd, dataDir: f.data, maxOutputTokens: 2048, contextWindow: 8192, timeoutMs: 10000,
+  };
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  const tools = new ToolRegistry(f.cwd, async () => true, false);
+  const hookBus = new HookBus({
+    cwd: f.cwd,
+    isTrusted: true,
+    hooks: [
+      {
+        event: 'SessionStart',
+        command: 'node -e "process.stdout.write(\\"Injected system info\\")"',
+      },
+    ],
+  });
+
+  const harness = new Harness(config, store, tools, () => {}, undefined, hookBus);
+  await harness.run('first message', new AbortController().signal);
+
+  const injected = store.session.messages.find(m => typeof m.content === 'string' && m.content.includes('Injected system info'));
+  assert.ok(injected, 'SessionStart stdout must be injected into session messages');
+});
+
+test('PreCompact only dispatches when compaction threshold is reached or on manual compact', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, async (req, res) => {
+    sse(res, { text: 'Short turn.' });
+  });
+
+  const config = {
+    model: 'mock-model', provider: 'openai', baseUrl: p.url, apiKey: 'mock-key',
+    cwd: f.cwd, dataDir: f.data, maxOutputTokens: 2048, contextWindow: 8192, timeoutMs: 10000,
+  };
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  const tools = new ToolRegistry(f.cwd, async () => true, false);
+  let preCompactFired = false;
+  const hookBus = new HookBus({
+    cwd: f.cwd,
+    isTrusted: true,
+    hooks: [
+      {
+        event: 'PreCompact',
+        command: 'node -e "process.exit(0)"',
+      },
+    ],
+  });
+  const origDispatch = hookBus.dispatch.bind(hookBus);
+  hookBus.dispatch = async (event, payload) => {
+    if (event === 'PreCompact') preCompactFired = true;
+    return origDispatch(event, payload);
+  };
+
+  const harness = new Harness(config, store, tools, () => {}, undefined, hookBus);
+  await harness.run('Small query', new AbortController().signal);
+
+  assert.equal(preCompactFired, false, 'PreCompact must not fire when context is far below threshold');
+});

@@ -325,10 +325,19 @@ export class Harness {
     return true;
   }
 
+  async endSession(): Promise<void> {
+    if (this.hookBus) {
+      await this.hookBus.dispatch('SessionEnd', { sessionId: this.store.session.id });
+    }
+  }
+
   async compact(signal: AbortSignal, focus?: string): Promise<{ tokens: number; compactions: number }> {
     if (this.running) throw new Error('Cannot compact while a run is active.');
     this.running = true;
     try {
+      if (this.hookBus) {
+        await this.hookBus.dispatch('PreCompact', { trigger: 'manual', tokens: this.store.session.tokens });
+      }
       const res = await compactNow(this.store, this.config, this.model, signal, focus);
       this.emit({ type: 'compaction', count: res.compactions });
       if (res.tokens > 0) this.emit({ type: 'usage', input: 0, output: 0, total: res.tokens });
@@ -484,7 +493,12 @@ export class Harness {
       signal.throwIfAborted();
       if (this.hookBus) {
         if (session.messages.length === 0) {
-          await this.hookBus.dispatch('SessionStart', { sessionId: session.id });
+          const startHooks = await this.hookBus.dispatch('SessionStart', { sessionId: session.id });
+          for (const h of startHooks) {
+            if (h.injectedContext) {
+              this.addContextMessage({ role: 'user', content: h.injectedContext });
+            }
+          }
         }
         const promptHooks = await this.hookBus.dispatch('UserPromptSubmit', { prompt });
         for (const h of promptHooks) {
@@ -516,7 +530,10 @@ export class Harness {
         if (exhausted()) throw new Error('Run token budget reached. Resume with a new prompt or increase --run-token-budget.');
         const system = await systemPrompt(this.config, this.tools.readOnly, this.tools.planMode, session.goal, promptCache);
         const oldCount = session.compactions;
-        if (this.hookBus) await this.hookBus.dispatch('PreCompact', { trigger: 'token_limit', tokens: session.tokens });
+        const threshold = this.config.contextWindow * 0.7 - this.config.maxOutputTokens;
+        if (this.hookBus && Math.max(estimatedTokens(session.messages, system), measuredInput) >= threshold) {
+          await this.hookBus.dispatch('PreCompact', { trigger: 'token_limit', tokens: session.tokens });
+        }
         account(await compactIfNeeded(this.store, this.config, this.model, system, signal, measuredInput));
         if (session.compactions !== oldCount) { measuredInput = 0; this.emit({ type: 'compaction', count: session.compactions }); }
         if (exhausted()) throw new Error('Run token budget reached during compaction. Original history is archived; resume to continue.');
