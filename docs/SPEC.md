@@ -28,7 +28,11 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   changed revisions are rejected. Shell commands require approval and execute
   as the current user, without an OS sandbox. Read-only mode omits all mutations
   and shell. --yes explicitly authorizes them without prompts. Project settings
-  in `.vyen/settings.json` define permissions (`allow`, `ask`, `deny`). CLI flags
+  in `.vyen/settings.json` define permissions (`allow`, `ask`, `deny`) and lifecycle
+  `hooks` (`SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+  `PostToolUseFailure`, `PreCompact`, `Stop`). Hooks receive JSON payload on stdin with
+  sanitized environment; exit 2 denies tool execution, exit 0 injects stdout context,
+  and project hooks require workspace trust hash verification. CLI flags
   `--allowed-tools` and `--disallowed-tools` override layered settings. User deny
   cannot be widened by project rules; deny rules take effect even in auto mode.
 - Help/init/doctor/sessions/upgrade perform no model request. No account login,

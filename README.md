@@ -91,8 +91,9 @@ Mặc định ở chế độ `ask` (yêu cầu chấp thuận khi sửa/ghi fil
 Không có TTY thì những yêu cầu này bị từ chối trừ khi truyền `--yes` (tương đương
 chế độ `auto`). `--read-only` loại bỏ các công cụ ghi/sửa/bash khỏi bộ tool.
 Cấu hình phân tầng `.vyen/settings.json` cho phép đặt quy tắc `permissions.allow`,
-`permissions.ask`, `permissions.deny`. Cờ `--allowed-tools` và `--disallowed-tools`
+`permissions.ask`, `permissions.deny` cùng các `hooks` vòng đời (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, v.v.). Cờ `--allowed-tools` và `--disallowed-tools`
 cho phép ghi đè nhanh từ dòng lệnh; quy tắc `deny` luôn chặn ngay cả trong chế độ `auto`.
+Hook command nhận payload JSON qua stdin và có môi trường làm sạch (không lộ API key); mã thoát 2 chặn tool call, mã thoát 0 inject context. Project hooks yêu cầu xác thực Workspace Trust.
 Mã thoát: `0` thành công, `1` lỗi, `2` từ chối quyền, `130` Ctrl+C, `143` SIGTERM.
 
 ## Cập nhật phiên bản
@@ -346,7 +347,7 @@ npm install -g . --omit=dev
 | `src/provider.ts` | Chọn adapter API, quét `/models`, truyền `reasoningEffort` / thinking budget |
 | `src/setup.ts` | Setup wizard tương tác (`Esc` để huỷ), quét `/models` động, lưu `credentials.json` |
 | `src/tools.ts`, `src/approval.ts` | Registry, schema, alias chuẩn hoá, `sanitizeBashCommand`, approval và duyệt theo tiền tố lệnh |
-| `src/settings.ts`, `src/policy.ts` | Cấu hình dự án `.vyen/settings.json`, phân tầng quyền hạn allow/ask/deny |
+| `src/settings.ts`, `src/policy.ts`, `src/hooks.ts` | Cấu hình dự án `.vyen/settings.json`, phân tầng quyền hạn allow/ask/deny, Hook Bus vòng đời |
 | `src/prompts.ts`, `src/help.ts` | Prompt tuỳ biến `/prompts:<tên>`; nội dung `--help` (nạp nhanh, không kéo SDK) |
 | `src/files.ts`, `src/process.ts` | File I/O, unified diff, patch, backup cho /undo, bảo vệ `nul`, subprocess và lọc biến môi trường bí mật |
 | `src/session.ts` | Lock, checkpoint, rewind, resume và sửa lịch sử bị ngắt |

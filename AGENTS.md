@@ -388,7 +388,7 @@ caller in turn to "make it work".
 |---|---|
 | Tool registry, schemas, permission modes | `src/tools.ts` |
 | Session prefix approval and bypass rules | `src/approval.ts` |
-| Layered project settings, allow/ask/deny policy | `src/settings.ts`, `src/policy.ts` |
+| Layered project settings, policy and hook bus | `src/settings.ts`, `src/policy.ts`, `src/hooks.ts` |
 | System prompt, compaction, project instructions | `src/context.ts` |
 | Harness loop, streaming, tool batching | `src/harness.ts` |
 | Session store, checkpoints, locks | `src/session.ts` |

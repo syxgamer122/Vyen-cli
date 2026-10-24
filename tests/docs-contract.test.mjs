@@ -31,7 +31,7 @@ test('SPEC matches the implemented retry, budget and MCP-resource contract, and 
   assert.doesNotMatch(spec, /No sampling, OAuth, resources/);
 
   const sourceFiles = (await readdir('src')).filter(name => name.endsWith('.ts'));
-  assert.equal(sourceFiles.length, 27);
+  assert.equal(sourceFiles.length, 28);
   for (const file of sourceFiles) assert.ok(agents.includes(`src/${file}`), `AGENTS.md omits src/${file}`);
 
   const validationText = validation.replace(/\s+/g, ' ');
