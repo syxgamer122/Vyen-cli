@@ -10,9 +10,32 @@ export const permissionRulesSchema = z.object({
 
 export type PermissionRules = z.infer<typeof permissionRulesSchema>;
 
+export const hookEventSchema = z.enum([
+  'SessionStart',
+  'SessionEnd',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'PreCompact',
+  'Stop',
+]);
+
+export type HookEvent = z.infer<typeof hookEventSchema>;
+
+export const hookDefinitionSchema = z.object({
+  event: hookEventSchema,
+  matcher: z.string().trim().optional(),
+  command: z.string().trim(),
+  timeoutMs: z.number().int().positive().optional(),
+}).strict();
+
+export type HookDefinition = z.infer<typeof hookDefinitionSchema>;
+
 export const projectSettingsSchema = z.object({
   $schema: z.string().optional(),
   permissions: permissionRulesSchema.optional(),
+  hooks: z.array(hookDefinitionSchema).optional(),
 }).passthrough();
 
 export type ProjectSettings = z.infer<typeof projectSettingsSchema>;
@@ -20,6 +43,7 @@ export type ProjectSettings = z.infer<typeof projectSettingsSchema>;
 export interface LayeredSettings {
   projectPermissions: PermissionRules;
   userPermissions?: PermissionRules;
+  hooks: HookDefinition[];
 }
 
 export function projectSettingsPath(cwd: string): string {
@@ -55,5 +79,6 @@ export async function loadLayeredSettings(
   return {
     projectPermissions: project.permissions ?? {},
     userPermissions,
+    hooks: project.hooks ?? [],
   };
 }
