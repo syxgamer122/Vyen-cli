@@ -74,6 +74,8 @@ export const TOOL_NAME_ALIASES: Record<string, string> = {
   grep: 'search',
   edit: 'edit_file',
   write: 'write_file',
+  sh: 'bash',
+  shell: 'bash',
   wait: 'wait_agent',
   send_message: 'send_input',
   followup_task: 'send_input',

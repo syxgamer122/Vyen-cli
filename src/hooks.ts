@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, mkdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { normalizeToolName } from './tools.js';
+import { childEnv } from './process.js';
 import { configDir, atomicJson } from './config.js';
 import {
   type HookEvent,
@@ -77,7 +78,7 @@ export async function calculateWorkspaceTrustHash(
   // 2. Discover and hash any local files referenced in hook commands
   const checkedFiles = new Set<string>();
   for (const cmd of hookCommands) {
-    const tokens = cmd.split(/\s+/).filter(Boolean);
+    const tokens = cmd.match(/[^\s"']+|"[^"]*"|'[^']*'/g) || [];
     for (const token of tokens) {
       // Strip potential quotes
       const cleanToken = token.replace(/^['"]|['"]$/g, '');
@@ -147,10 +148,11 @@ import { spawn } from 'node:child_process';
  * so child hook processes cannot accidentally or maliciously access them.
  */
 export function sanitizeEnvironment(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const protectedBase = childEnv(baseEnv);
   const clean: NodeJS.ProcessEnv = {};
   const sensitivePattern = /API[_-]?KEY|TOKEN|SECRET|AUTH|PASSWORD|CREDENTIAL|PRIVATE/i;
 
-  for (const [key, value] of Object.entries(baseEnv)) {
+  for (const [key, value] of Object.entries(protectedBase)) {
     if (!key || sensitivePattern.test(key) || key === 'VYEN_API_KEY') {
       continue;
     }

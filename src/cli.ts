@@ -832,6 +832,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           userRules: layered.userPermissions,
           projectRules: layered.projectPermissions,
           mode,
+          cwd: runtime.cwd,
         };
         const reg = new ToolRegistry(runtime.cwd, async request => {
           const policyDecision = evaluateToolPolicy(request, policyContext);

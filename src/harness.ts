@@ -676,6 +676,10 @@ export class Harness {
       repairInterrupted(session.messages);
       this.drainPendingContext();
       await this.store.save();
+      if (this.hookBus) {
+        const reason = signal.aborted ? 'aborted' : 'error';
+        await this.hookBus.dispatch('Stop', { reason }).catch(() => {});
+      }
       throw error;
     } finally {
       this.flushGoalProgressHook = undefined;

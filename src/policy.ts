@@ -1,5 +1,6 @@
+import { resolve } from 'node:path';
 import type { PermissionRules } from './settings.js';
-import type { PermissionMode } from './tools.js';
+import { type PermissionMode, normalizeToolName } from './tools.js';
 
 export type PolicyDecision = 'allow' | 'ask' | 'deny';
 
@@ -14,22 +15,30 @@ export interface PolicyEvaluationContext {
   userRules?: PermissionRules;
   projectRules?: PermissionRules;
   mode?: PermissionMode;
+  cwd?: string;
 }
 
-function normalizePathForMatching(raw: string): string {
-  return raw.replace(/\\/g, '/').replace(/^\.\//, '');
+const CHAINING_PATTERN = /[\r\n;&|`]|\$\(|\$\{/;
+
+function normalizePathForMatching(raw: string, cwd = process.cwd()): string {
+  const clean = raw.trim().replace(/\\/g, '/');
+  if (!clean) return '';
+  const normalizedCwd = resolve(cwd).replace(/\\/g, '/');
+  const resolved = resolve(cwd, clean).replace(/\\/g, '/');
+  if (resolved === normalizedCwd) return '.';
+  if (resolved.startsWith(normalizedCwd + '/')) {
+    return resolved.slice(normalizedCwd.length + 1);
+  }
+  return resolved;
 }
 
-function extractToolArgumentString(tool: string, input: unknown): string {
-  if (typeof input === 'string') return normalizePathForMatching(input.trim());
+function extractToolArgumentString(tool: string, input: unknown, cwd?: string): string {
+  if (typeof input === 'string') return normalizePathForMatching(input, cwd);
   if (!input || typeof input !== 'object') return '';
   const obj = input as Record<string, unknown>;
-  if (tool === 'bash' && typeof obj.command === 'string') {
-    return obj.command.trim();
-  }
-  if (typeof obj.path === 'string') return normalizePathForMatching(obj.path.trim());
-  if (typeof obj.file_path === 'string') return normalizePathForMatching(obj.file_path.trim());
   if (typeof obj.command === 'string') return obj.command.trim();
+  if (typeof obj.path === 'string') return normalizePathForMatching(obj.path, cwd);
+  if (typeof obj.file_path === 'string') return normalizePathForMatching(obj.file_path, cwd);
   return JSON.stringify(input);
 }
 
@@ -51,23 +60,37 @@ function matchSimplePattern(pattern: string, text: string): boolean {
  * Checks whether a tool request matches a pattern.
  * Patterns can be:
  * - `*` (matches all tools)
- * - `tool_name` (e.g. `read_file`, `write_file`, `bash`)
+ * - `tool_name` (e.g. `read_file`, `write_file`, `bash`, `write`, `read`, `sh`)
  * - `tool_name*` (e.g. `mcp__*`)
  * - `tool_name(pattern)` (e.g. `bash(npm test *)`, `bash(git diff *)`, `read_file(docs/*)`)
  */
-export function matchToolPattern(pattern: string, request: ToolRequest): boolean {
+export function matchToolPattern(
+  pattern: string,
+  request: ToolRequest,
+  options: { isAllow?: boolean; cwd?: string } = {},
+): boolean {
   const trimmed = pattern.trim();
   if (!trimmed) return false;
   const parenIdx = trimmed.indexOf('(');
+  const canonicalRequestTool = normalizeToolName(request.tool);
   if (parenIdx > 0 && trimmed.endsWith(')')) {
     const toolName = trimmed.slice(0, parenIdx).trim();
+    const canonicalTool = normalizeToolName(toolName);
+    if (!matchSimplePattern(canonicalTool, canonicalRequestTool)) return false;
     const rawArgPattern = trimmed.slice(parenIdx + 1, -1).trim();
-    const argPattern = toolName === 'bash' ? rawArgPattern : normalizePathForMatching(rawArgPattern);
-    if (!matchSimplePattern(toolName, request.tool)) return false;
-    const argStr = extractToolArgumentString(request.tool, request.input);
-    return matchSimplePattern(argPattern, argStr);
+    const argStr = extractToolArgumentString(canonicalRequestTool, request.input, options.cwd);
+    if (canonicalRequestTool === 'bash') {
+      // Security: In allow rules, wildcard patterns must never match compound or chained commands
+      if (options.isAllow && rawArgPattern.includes('*') && CHAINING_PATTERN.test(argStr)) {
+        return false;
+      }
+      return matchSimplePattern(rawArgPattern, argStr);
+    }
+    const normalizedPattern = normalizePathForMatching(rawArgPattern, options.cwd);
+    return matchSimplePattern(normalizedPattern, argStr);
   }
-  return matchSimplePattern(trimmed, request.tool);
+  const canonicalPatternTool = normalizeToolName(trimmed);
+  return matchSimplePattern(canonicalPatternTool, canonicalRequestTool);
 }
 
 /**
@@ -86,36 +109,39 @@ export function evaluateToolPolicy(
   request: ToolRequest,
   ctx: PolicyEvaluationContext,
 ): PolicyDecision {
+  const allowOpts = { isAllow: true, cwd: ctx.cwd };
+  const denyOpts = { isAllow: false, cwd: ctx.cwd };
+
   // 1. CLI disallowed
-  if (ctx.cliDisallowed?.some(p => matchToolPattern(p, request))) {
+  if (ctx.cliDisallowed?.some(p => matchToolPattern(p, request, denyOpts))) {
     return 'deny';
   }
   // 2. CLI allowed
-  if (ctx.cliAllowed?.some(p => matchToolPattern(p, request))) {
+  if (ctx.cliAllowed?.some(p => matchToolPattern(p, request, allowOpts))) {
     return 'allow';
   }
   // 3. User deny
-  if (ctx.userRules?.deny?.some(p => matchToolPattern(p, request))) {
+  if (ctx.userRules?.deny?.some(p => matchToolPattern(p, request, denyOpts))) {
     return 'deny';
   }
   // 4. Project deny
-  if (ctx.projectRules?.deny?.some(p => matchToolPattern(p, request))) {
+  if (ctx.projectRules?.deny?.some(p => matchToolPattern(p, request, denyOpts))) {
     return 'deny';
   }
   // 5. User ask
-  if (ctx.userRules?.ask?.some(p => matchToolPattern(p, request))) {
+  if (ctx.userRules?.ask?.some(p => matchToolPattern(p, request, denyOpts))) {
     return 'ask';
   }
   // 6. Project ask
-  if (ctx.projectRules?.ask?.some(p => matchToolPattern(p, request))) {
+  if (ctx.projectRules?.ask?.some(p => matchToolPattern(p, request, denyOpts))) {
     return 'ask';
   }
   // 7. Project allow
-  if (ctx.projectRules?.allow?.some(p => matchToolPattern(p, request))) {
+  if (ctx.projectRules?.allow?.some(p => matchToolPattern(p, request, allowOpts))) {
     return 'allow';
   }
   // 8. User allow
-  if (ctx.userRules?.allow?.some(p => matchToolPattern(p, request))) {
+  if (ctx.userRules?.allow?.some(p => matchToolPattern(p, request, allowOpts))) {
     return 'allow';
   }
   // Default to ask

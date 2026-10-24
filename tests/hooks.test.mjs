@@ -417,3 +417,43 @@ test('PreCompact only dispatches when compaction threshold is reached or on manu
 
   assert.equal(preCompactFired, false, 'PreCompact must not fire when context is far below threshold');
 });
+
+test('hook process environment strips custom keyEnv protected secrets', async () => {
+  const { protectSecretEnv } = await import('../dist/process.js');
+  protectSecretEnv('CUSTOM_UNMATCHED_KEY');
+  process.env.CUSTOM_UNMATCHED_KEY = 'super-secret-key-12345';
+  try {
+    const bus = new HookBus({
+      cwd: process.cwd(),
+      isTrusted: true,
+      hooks: [
+        {
+          event: 'SessionStart',
+          command: 'node -e "process.stdout.write(process.env.CUSTOM_UNMATCHED_KEY || \\\"CLEAN\\\")"',
+        },
+      ],
+    });
+    const res = await bus.dispatch('SessionStart', { sessionId: 'test-custom-key' });
+    assert.equal(res.length, 1);
+    assert.equal(res[0].injectedContext?.trim(), 'CLEAN', 'CUSTOM_UNMATCHED_KEY must not reach child process');
+  } finally {
+    delete process.env.CUSTOM_UNMATCHED_KEY;
+  }
+});
+
+test('calculateWorkspaceTrustHash correctly extracts quoted script paths with spaces', async t => {
+  const f = await fixture(t);
+  const scriptDir = join(f.cwd, 'my scripts');
+  await mkdir(scriptDir, { recursive: true });
+  const scriptPath = join(scriptDir, 'guard test.js');
+  await writeFile(scriptPath, 'console.log("guard");');
+
+  const cmdWithQuotes = `node "${scriptPath}"`;
+  const hash1 = await calculateWorkspaceTrustHash(f.cwd, [cmdWithQuotes]);
+
+  // Modifying the script with spaces in path should change the trust hash
+  await writeFile(scriptPath, 'console.log("modified guard");');
+  const hash2 = await calculateWorkspaceTrustHash(f.cwd, [cmdWithQuotes]);
+
+  assert.notEqual(hash1, hash2, 'hash must change when quoted script file is modified');
+});
