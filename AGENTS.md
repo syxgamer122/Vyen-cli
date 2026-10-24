@@ -25,8 +25,8 @@ more is self-inflicted context loss.
 ## 1. The gate before reporting "done"
 
 ```bash
-npm run typecheck    # tsc --noEmit
 npm run lint         # oxlint src tests bin scripts
+npm run typecheck    # tsc --noEmit
 npm test             # tsc build -> node --test tests/*.test.mjs
 ```
 
@@ -37,30 +37,15 @@ work only — do not run it for an ordinary change.
 Lint must report zero errors. Warnings are baseline; do not "fix" them and do not
 report them as findings.
 
-**Known failures that are not regressions.** The first four fail on Windows and
-pass on Linux CI (`ubuntu-24.04`): Windows has no POSIX mode bits and refuses
-unprivileged symlinks. The other two are Windows limitations, not missing
-dependencies.
+**Known failures that are not regressions.** Five Windows cases remain: four in
+`tests/files.test.mjs` (POSIX mode bits and symlinks) and one in
+`tests/audit.test.mjs` (an outside-workspace symlink Windows refuses without
+administrator rights). Names and counts live in `docs/VALIDATION.md`; read them
+there. Use the **test name**, not the file name, and do not weaken an assertion.
 
-- `tests/files.test.mjs` — "existing files require a fresh read; edits preserve
-  file mode", "edits preserve exact permissions under restrictive umasks; new
-  files obey umask", "workspace containment rejects ../ and symlink escapes
-  including missing leaves", "portable search is bounded and skips symlinks"
-- `tests/audit.test.mjs` — "model-initiated image reads outside the workspace
-  require approval; workspace images do not". It creates a symlink to an image
-  outside the workspace, which Windows refuses without administrator rights, so
-  the spawn fails with EPERM before the behaviour under test is reached.
-- `tests/publish.test.mjs` — "publishing creates the first tag, bumps on update
-  and repairs a rerun without another bump". The test writes its **own** `gh`
-  stub without a file extension and puts it on `PATH`; Windows cannot execute
-  an extensionless shebang file, so the spawn fails with `spawn gh ENOENT`. The
-  real GitHub CLI is neither needed nor involved — do not "fix" this test.
-
-Measured 2026-10-22 on Windows, Node 26.12.0: the suite is green except the
-six failures above; the two POSIX pseudo-terminal tests are skipped on Windows.
-The exact counts live in `docs/VALIDATION.md`, which is the dated record — read
-the number there, never from memory or from this file. A count written into a
-rules file goes stale the moment a test is added.
+Measured 2026-10-24 on Windows, Node 24.18.0: the publish test is now green after
+the cross-platform release-packer fix; the three POSIX PTY tests are skipped on
+Windows.
 
 Distinguish a real regression by **reading the failing test name**, not the file
 name: one file can hold both a real regression and a known platform failure.
@@ -120,9 +105,18 @@ The gate above only counts if the agent does not lower it.
 > they are self-declared like Laws 2/3/4. Do not demand a test for them, and do
 > not treat them as optional.
 >
-> Measured 2026-10-22: 18 files in `src/`, none of them contains `as any`.
-> Measured 2026-10-22: no BOM and no `@ts-ignore` / `@ts-expect-error` anywhere in
-> `src/`, `tests/`, `scripts/`, `bin/`.
+> Measured 2026-10-24: 25 files in `src/`, none of them contains `as any`.
+> Two `oxlint-disable` comments in `src/tui.ts` are control-regex exceptions;
+> any new disable needs a reason on the same line.
+
+### 1.2 Speculative hardening
+
+Before writing code for a race, a security edge case or another unlikely
+failure, say in words a 10-year-old could understand what breaks, how likely it
+is, and how much complexity it adds. Ask and wait for approval; in a subagent
+or a background run, do not ask — leave it out and note it in the report. Never
+widen the task to cover it. Existing security, path and permission invariants
+are not speculative: never weaken or delete one without asking, tested or not.
 
 ## 2. New tests must be proven RED before the fix
 
@@ -278,11 +272,20 @@ A tool that runs is not yet a finished tool. Adding one means all of:
 Missing one of them is a silent defect: the tool works but the agent never sees
 it, or the agent sees it but the TUI shows a bare name.
 
+### 3.1 A slash command, config key or event has its own seams
+
+- **Slash command:** `src/cli.ts` parsing, `src/tui.ts` help/autocomplete,
+  `src/help.ts`, `README.md`, and a test that runs the command.
+- **Config key or CLI flag:** `src/config.ts` schema/default, `src/cli.ts` flag,
+  `src/help.ts`, `docs/SPEC.md`, `README.md`, and a test that proves the default.
+- **`HarnessEvent`:** the union and emit site in `src/harness.ts`, the TUI and
+  NDJSON renderers, `docs/SPEC.md`, and a consumer test at the stream boundary.
+
+Skipping a seam is SPEC drift even when the code compiles.
+
 ## 4. Docs
 
-**Docs have no effect. Tests do.** ⇒ The same principle applies to **PLANS**
-(§2.5): a prose `## Review Focus` has no effect; only the "criterion → test"
-table does.
+**Docs have no effect. Tests do.** Plans included — see §2.5.
 
 - `docs/SPEC.md` — the contract. If the code and SPEC disagree, one of them is a
   bug; say which.
@@ -374,12 +377,18 @@ caller in turn to "make it work".
   Windows), never cmd.exe: use POSIX syntax and `/dev/null`. `>nul` creates a
   literal file named `nul` — the tool rewrites it to `/dev/null` and deletes the
   stray file, but do not rely on the cleanup.
+- Termux: use `$PREFIX` paths, never assume `/tmp` or `/bin/sh`; no native
+  addons; probe bubblewrap instead of assuming Android allows it.
 
 ## 9. Quick map
 
+**Flow:** `bin/vyen.mjs` → `cli.ts` → `harness.ts` → `provider.ts` / `tools.ts` → `files.ts`, `process.ts`, `mcp.ts`.
+
 | Job | Where |
 |---|---|
-| Tool registry, schemas, permissions | `src/tools.ts` |
+| Tool registry, schemas, permission modes | `src/tools.ts` |
+| Session prefix approval and bypass rules | `src/approval.ts` |
+| Layered project settings, allow/ask/deny policy | `src/settings.ts`, `src/policy.ts` |
 | System prompt, compaction, project instructions | `src/context.ts` |
 | Harness loop, streaming, tool batching | `src/harness.ts` |
 | Session store, checkpoints, locks | `src/session.ts` |
@@ -394,6 +403,8 @@ caller in turn to "make it work".
 | Config paths, atomic writes | `src/config.ts` |
 | Error redaction | `src/errors.ts` |
 | Legacy `goon` → `vyen` migration | `src/migrate.ts` |
+| Remote pair server, Agent Network, workflows | `src/pair.ts`, `src/network.ts`, `src/workflow.ts` |
+| Setup, prompt files, help, update, version, exports | `src/setup.ts`, `src/prompts.ts`, `src/help.ts`, `src/update.ts`, `src/version.ts`, `src/index.ts` |
 | Tests (node:test + local mock provider) | `tests/*.test.mjs` |
 | Release packing | `scripts/pack-release.mjs` |
 
@@ -431,9 +442,6 @@ agent choosing to follow it.
 
 - [pitfall] (2026-10-22) Tests import from `dist/` — run `npm run build` before
   `node --test tests/<file>.test.mjs`, or a mutation check runs stale code.
-- [pitfall] (2026-10-22) PowerShell `Set-Content -Encoding UTF8` writes a BOM
-  and re-encodes UTF-8 as Windows-1252 — use a Node script for bulk replacements
-  (guard: tests/repo-hygiene.test.mjs).
 - [pitfall] (2026-10-22) `execFile` and `spawn` cannot run `npm.cmd` on Windows
   without a shell (EINVAL) — run `node node_modules/typescript/bin/tsc` directly
   instead of `npm run build`.
@@ -442,14 +450,8 @@ agent choosing to follow it.
 - [pitfall] (2026-10-22) A guard that contains the literal it searches for
   reports itself — spell the pattern in pieces and check its own file is clean
   (guard: tests/repo-hygiene.test.mjs).
-- [mistake] (2026-10-22) A test count written into a rules file goes stale the
-  moment a test is added — keep the number in the dated validation record and
-  state only the criterion (which failures are allowed) in the rules.
 - [mistake] (2026-10-22) `git add -A` swept in an untracked file without
   reading it — run `git status` and read every new file before committing it.
-- [approach] (2026-10-22) `npm run lint` (oxlint) is much faster than
-  `npm run typecheck` — use it to catch syntax errors before paying for the full
-  strict TypeScript pass.
 
 Keep this list short: when a lesson has been folded into a rule above, delete
 the dated line. The section is loaded into every prompt — an unbounded list

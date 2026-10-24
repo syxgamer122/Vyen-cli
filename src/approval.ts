@@ -31,7 +31,12 @@ const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun', 'pip', 'pip3', '
 const INSTALL_SUBCOMMANDS = new Set(['install', 'i', 'add', 'ci', 'update', 'upgrade', 'up', 'get', 'remove', 'rm', 'uninstall', 'un', 'sync']);
 // Options that make an otherwise read-only command write files, load config or run programs
 // (git diff --output=..., git diff --ext-diff, git -c core.pager=..., --exec, --upload-pack ...).
-const RISKY_OPTION_RE = /^--?(?:o|output|out|outfile|out-file|outdir|out-dir|output-dir|exec|ext-diff|upload-pack|receive-pack|config|c|eval|e|command|shell|pager|editor|global|prefix|target-dir|init-file|rcfile|require|r|import|loader)(?:=|$)/i;
+// `p`/`plugins` matters for interpreters: pytest loads a plugin from `-p NAME` or
+// `--plugins NAME`, and `--override-ini`/`--config-file` can put `-p` into addopts.
+// Node's --test-reporter loads a module from the argument, and
+// --test-reporter-destination writes a file; like pytest's -p, they must not
+// ride on an approved "npm test".
+const RISKY_OPTION_RE = /^--?(?:o|output|out|outfile|out-file|outdir|out-dir|output-dir|exec|ext-diff|upload-pack|receive-pack|config-file|override-ini|config|c|eval|e|command|shell|pager|editor|global|prefix|target-dir|init-file|rcfile|require|r|import|loader|test-reporter-destination|test-reporter|p|plugins?)(?:=|$)/i;
 
 function commandTokens(input: unknown): string[] | undefined {
   const command = input && typeof input === 'object' ? (input as { command?: unknown }).command : undefined;
@@ -45,6 +50,37 @@ function commandTokens(input: unknown): string[] | undefined {
 function leavesWorkspace(token: string): boolean {
   const value = token.includes('=') ? token.slice(token.indexOf('=') + 1) : token;
   return /^(?:\/|~|[A-Za-z]:[\\/]|\\\\)/.test(value) || /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value);
+}
+
+// Attached short-option values (`-C/tmp`, `-kfoo`) must not be read as a cluster
+// of flags. These options take the rest of the token as their value.
+const SHORT_VALUE_OPTIONS = new Set(['C', 'k', 'm', 'W', 'w']);
+const PYTHON_LAUNCHERS = new Set(['python', 'python3', 'py']);
+
+function hasRiskyOption(token: string, prefix: readonly string[]): boolean {
+  // pytest's argparse expands @file into more arguments, hiding a plugin option from
+  // the token scan. Other commands lose only a conservative false positive.
+  if (token.startsWith('@')) return true;
+  if (RISKY_OPTION_RE.test(token)) return true;
+  if (!token.startsWith('-') || token.startsWith('--') || token === '-') return false;
+  const chars = token.slice(1);
+  // `-r` is a report flag for pytest and a reverse/recursive flag for ls, but it
+  // preloads a module in node. Allow it only for the known read-only commands.
+  const isPytest = prefix[0] === 'pytest' || (PYTHON_LAUNCHERS.has(prefix[0]) && prefix[1] === '-m' && prefix[2] === 'pytest');
+  const reportsAreSafe = prefix[0] === 'ls' || isPytest;
+  for (let i = 0; i < chars.length; i += 1) {
+    const char = chars[i];
+    if (/r/i.test(char)) {
+      if (reportsAreSafe) continue;
+      return true;
+    }
+    if (/[ocep]/i.test(char)) return true;
+    if (SHORT_VALUE_OPTIONS.has(char)) {
+      const value = chars.slice(i + 1);
+      return value.length > 0 && leavesWorkspace(value);
+    }
+  }
+  return false;
 }
 
 /**
@@ -79,7 +115,7 @@ export function isApprovedBashPrefix(input: unknown, prefixes: ReadonlySet<strin
     const extra = tokens.slice(wanted.length);
     const exactOnly = EXACT_ONLY.has(tokens[0]) || (PACKAGE_MANAGERS.has(tokens[0]) && INSTALL_SUBCOMMANDS.has(tokens[1] ?? ''));
     if (exactOnly && extra.length) continue;
-    if (extra.some(token => leavesWorkspace(token) || RISKY_OPTION_RE.test(token))) continue;
+    if (extra.some(token => leavesWorkspace(token) || hasRiskyOption(token, wanted))) continue;
     return true;
   }
   return false;

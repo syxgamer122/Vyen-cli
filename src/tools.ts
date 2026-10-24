@@ -364,6 +364,7 @@ export class ToolRegistry {
   onPlanExit?: (plan: string) => void;
   askUser?: (questions: UserInputQuestion[], signal: AbortSignal) => Promise<Record<string, string[]>>;
   pendingImages: Array<{ path: string; mimeType: string; bytes: Uint8Array }> = [];
+  policy?: (request: { tool: string; input: unknown }) => 'allow' | 'ask' | 'deny';
   private definitions = new Map<string, RegisteredTool>();
   constructor(readonly cwd: string, readonly approve: Approve, public readOnly = false) {
     this.files = new WorkspaceFiles(cwd);
@@ -721,7 +722,17 @@ export class ToolRegistry {
     }
     const normalizedInput = normalizeToolInput(canonicalName, call.input);
     const input = definition.parse(normalizedInput);
-    if (!definition.readOnly && !await this.approve({ tool: canonicalName, input, signal })) {
+    if (this.policy) {
+      const decision = this.policy({ tool: canonicalName, input });
+      if (decision === 'deny') {
+        return { text: 'Permission denied by policy. Stop this run.', denied: true };
+      }
+      if (decision === 'allow') {
+        // Explicitly allowed by policy
+      } else if (!definition.readOnly && !await this.approve({ tool: canonicalName, input, signal })) {
+        return { text: 'Permission denied by the user. Stop this run.', denied: true };
+      }
+    } else if (!definition.readOnly && !await this.approve({ tool: canonicalName, input, signal })) {
       return { text: 'Permission denied by the user. Stop this run.', denied: true };
     }
     signal.throwIfAborted();

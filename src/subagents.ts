@@ -503,6 +503,7 @@ export class Subagents {
         },
         managed.readOnly || this.registry.readOnly,
       );
+      tools.policy = this.registry.policy;
       tools.allowPeerToolsInReadOnly = true;
       this.bus.registerPeerTools(tools, managed.nickname, managed.agentType);
       const peerInbox = this.bus.drainUnreadPromptBlock(managed.nickname);
@@ -837,6 +838,7 @@ export class Subagents {
         },
         readOnly || this.registry.readOnly,
       );
+      tools.policy = this.registry.policy;
       // No delegation tools are registered in children: depth is exactly one.
       const config = { ...this.config };
       const childHarness = new Harness(config, store, tools, event => {

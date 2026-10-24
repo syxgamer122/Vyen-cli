@@ -36,6 +36,8 @@ Options:
       --max-output-tokens N  Per-request output limit (default 16384)
       --run-token-budget N   Run token budget (default 0 = unlimited)
       --timeout-ms N        Model request deadline (default 300000)
+      --allowed-tools LIST   Comma-separated tools/patterns to auto-approve
+      --disallowed-tools LIST Comma-separated tools/patterns to deny
   -o, --output-last-message FILE  Also write the final answer of a -p run to FILE
       --method NAME         Package manager for vyen upgrade: npm | pnpm | yarn | bun
       --dry-run             Show the upgrade command without running it

@@ -9,6 +9,12 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   only from user config, environment and flags. MCP has a separate user-only
   mcp.json. Priority: flags > VYEN_* environment > user config > defaults.
   Credentials are resolved at runtime through keyEnv and are never saved by init.
+  If baseUrl is absent, Provider uses the built-in default
+  `https://api.yuristore.xyz/v1`; this is a third-party destination and README
+  discloses it. The CLI prints a one-time warning naming that destination before
+  the first model request; an explicit baseUrl suppresses it. The setup wizard
+  prints the same warning before its first `/models` probe when a first setup
+  still accepts the default gateway.
 - Harness owns ModelMessage history, token accounting, tool result pairing and
   compaction. A streamed response must complete before any tool executes. Reads
   can run in consecutive batches of up to six; mutations execute in declaration order.
@@ -16,14 +22,20 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   bound to its real workspace. Loading repairs interrupted tool calls with error
   results; it never replays a side effect. A live lock is never stolen.
 - Provider owns HTTP/model protocol handling through AI SDK: OpenAI chat,
-  OpenAI Responses, Anthropic Messages. Two retries; configurable request timeout.
+  OpenAI Responses, Anthropic Messages. Three retries; configurable request timeout.
 - Tools own file/shell I/O. File paths resolve within the real workspace;
   symlink escapes fail. Existing files must be read before overwrite/edit;
   changed revisions are rejected. Shell commands require approval and execute
   as the current user, without an OS sandbox. Read-only mode omits all mutations
-  and shell. --yes explicitly authorizes them without prompts.
+  and shell. --yes explicitly authorizes them without prompts. Project settings
+  in `.vyen/settings.json` define permissions (`allow`, `ask`, `deny`). CLI flags
+  `--allowed-tools` and `--disallowed-tools` override layered settings. User deny
+  cannot be widened by project rules; deny rules take effect even in auto mode.
 - Help/init/doctor/sessions/upgrade perform no model request. No account login,
   plugin marketplace, telemetry, browser, native addons or bundled runtime.
+  `vyen doctor --json` keeps `baseUrl` as the configured value or
+  `"provider default"` and adds `effectiveBaseUrl` and `defaultGateway` so a
+  headless consumer can audit the destination without parsing stderr.
   Updates are opt-in: `vyen upgrade` detects npm/pnpm/yarn/bun and runs that
   manager's global install. The interactive start reads a 24-hour registry cache
   and only notifies by default; `update: auto` installs before the TUI starts,
@@ -33,13 +45,14 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   run rather than inviting repeated requests.
 - Context is compacted before the next request when a conservative character
   estimate or measured input exceeds 70% of the declared window. Only complete
-  tool-result groups enter a compact summary. Default run token budget: 100,000;
-  zero disables it. Output/tool budgets and command deadlines are bounded.
+  tool-result groups enter a compact summary. Default run token budget: 0 (unlimited);
+  a positive value caps the run. Output/tool budgets and command deadlines are bounded.
 - MCP owns clients and transport cleanup. SDK stdio and Streamable HTTP tools
   are namespaced, schema-validated and bounded. Only user readOnlyTools entries
   bypass approvals; remote annotations do not grant privileges. Stdio inherits
   the SDK default environment plus explicit envFrom mappings. HTTP bearer keys
-  come from env variables. No sampling, OAuth, resources, prompts or legacy SSE.
+  come from env variables. No sampling, OAuth, prompts or legacy SSE; tools and
+  resources are supported.
 - Subagents own separate transcripts under subagents/PARENT_UUID. Research uses
   at most two concurrent children globally per manager; editing tasks are serial
   mutation barriers. Children share the parent's approval callback and run budget,
@@ -101,7 +114,7 @@ servers; subagent tests use the provider loop and cancellation. A POSIX PTY
 test exercises TUI input, resize, approval, terminal restoration and clean exit.
 Linux tests do not establish Android device compatibility.
 
-## Automated GitHub releases
+## Automated npm releases
 
 Pushing main and manual workflow dispatch run checks on Node 22.16 and 24.
 Pull requests run read-only checks without publish permissions. A `v*` tag push

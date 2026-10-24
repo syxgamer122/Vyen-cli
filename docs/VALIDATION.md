@@ -104,11 +104,13 @@ Node 22.16 and 24. Consult the repository's Actions runs for remote results.
 
 ## Scope
 
-No Android/Termux device, ARM64, macOS or Windows was available for execution.
-Termux is an implementation target, not a device-tested claim. POSIX PTY coverage
-is skipped on Windows. Emoji grapheme rendering can vary between terminals;
---no-tui retains plain readline. MCP integration covers tools over stdio and
-Streamable HTTP; resources, prompts, OAuth and legacy SSE are not implemented.
+For the 0.2.2 upstream record: no Android/Termux device, ARM64, macOS or Windows
+was available for execution. Termux is an implementation target, not a
+device-tested claim. POSIX PTY coverage is skipped on Windows. Emoji grapheme
+rendering can vary between terminals; --no-tui retains plain readline. MCP
+integration covered tools over stdio and Streamable HTTP at that time; resources,
+prompts, OAuth and legacy SSE were not implemented in that tree. Resources are
+implemented in the current tree; see the 2026-10-24 section below.
 Children have separate transcripts and tool policies, not OS isolation. They do
 not load MCP or spawn further agents. Shared budgets are checked between model
 requests, so concurrent in-flight requests may exceed the threshold.
@@ -134,7 +136,7 @@ lacks. Upstream's own audit is in `docs/AUDIT.md`; the fork's deviations are
 recorded in `docs/superpowers/plans/2026-10-22-upstream-merge.md`.
 
 Measured on Windows, Node 26.12.0: `npm test` → 158 tests, 146 pass, 6 fail,
-2 skipped. The six failures are the platform failures listed in `AGENTS.md` §1 —
+2 skipped. The six failures at that time are the platform failures then listed in `AGENTS.md` §1 —
 four in `tests/files.test.mjs` (no POSIX mode bits, no unprivileged
 symlinks), one in `tests/audit.test.mjs` (a symlink to an image outside the
 workspace) and one in `tests/publish.test.mjs` (an extensionless `gh` stub
@@ -200,3 +202,114 @@ green. The working tree was clean after the probes.
 Not established: the guard proves the test **exists by name**, not that the
 test covers the criterion. That prose still has to be read, by the agent and by
 the reviewer.
+
+## 2026-10-24 — POSIX terminal tests require `python3`
+
+The three pseudo-terminal tests spawn `python3` directly:
+
+- `tests/tui.test.mjs` — "real TUI pseudo-terminal handles status, resize,
+  approval and clean exit" and "real TUI pseudo-terminal: rebuilding the harness
+  mid-run keeps the run cancellable", through `tests/fixtures/terminal.py`.
+- `tests/audit.test.mjs` — "real TUI: approvals come back after switching from
+  `--yes` (auto) to ask mode", through `tests/fixtures/terminal-mode-switch.py`.
+
+Both fixtures import `pty`, `termios` and `fcntl`, so they are POSIX-only. The
+tests skip **explicitly** on `win32` with `t.skip('POSIX pseudo-terminal test')`.
+On a POSIX host without `python3`, `spawn` fails and the promise rejects through
+`child.on('error', reject)`, so the test is **red**, not silently skipped. A
+Linux CI image must therefore provide `python3`; do not add a "python missing"
+skip, which would turn the dependency into a silent gap.
+
+Not established: this record does not prove the tests ran on a host without
+`python3` — it records the code path that makes such a host fail loudly.
+
+## 2026-10-24 — stale release artifact removed
+
+The 0.1.0-era archive in `release/` and its `SHA256SUMS.txt` were stale: the
+archive contained the legacy `bin/` entry and 12 `src/` files, while
+`package.json` is at 0.4.0 with 25 modules. No script reads or writes
+`release/`; `scripts/pack-release.mjs` writes to `release-out/`, and
+`package.json`'s `files` list excludes `release`. The directory and the
+`!release/*.tgz` carve-out in `.gitignore` were deleted. `npm pack --dry-run
+--ignore-scripts` lists 45 files and contains no `release/` entry.
+
+Not established: the deletion is not guarded by a test. `tests/brand.test.mjs`
+filters by extension (`ts|mjs|md|json|yml|py`), so it could never see a `.tgz`
+even if `release/` were added to its scan list.
+
+## 2026-10-24 — Phase 0 critique fixes (Windows)
+
+Executed on Windows, Node 24.18.0, npm 12.0.2.
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` | 202 tests, 194 pass, 5 fail, 3 skipped, 184.9 s |
+| `npm run release:pack` | exit 0; packs, installs in an isolated prefix, and runs `--version` / `--help` |
+
+The five failures are the documented Windows-only cases, not regressions:
+
+- `tests/audit.test.mjs` — "model-initiated image reads outside the workspace
+  require approval; workspace images do not" (`EPERM` creating a symlink).
+- `tests/files.test.mjs` — "existing files require a fresh read; edits preserve
+  file mode" (POSIX mode bits reported as 438 instead of 493).
+- `tests/files.test.mjs` — "edits preserve exact permissions under restrictive
+  umasks; new files obey umask" (POSIX mode lost).
+- `tests/files.test.mjs` — "workspace containment rejects ../ and symlink
+  escapes including missing leaves" (`EPERM` creating a symlink).
+- `tests/files.test.mjs` — "portable search is bounded and skips symlinks"
+  (`EPERM` creating a symlink).
+
+The publish test is green. It now covers several portability defects that the
+previous record hid: `scripts/pack-release.mjs` runs `npm` through `cmd.exe` on
+Windows, accepts npm 11's array and npm 12's object from `npm pack --json`, and
+removes an inherited `npm_config_allow_scripts` before a project-scoped install.
+The test sets that exported value to reproduce the failure; without the removal
+it fails with `EALLOWSCRIPTS`, and with it the test passes. The packer leaves the
+caller's registry, proxy and authentication settings intact, so a private mirror
+still works. The publish test also runs a child process with a literal `%TEMP%`
+argument to prove that `cmd.exe` does not expand percent signs in checkout paths.
+
+The prefix-approval test now also rejects attached (`-pevil_plugin`) and
+clustered (`-qp`, `-qpevil_plugin`, `-qo`) short options, `--override-ini`,
+`--config-file` and `@file` argument expansion, and accepts the safe
+`-q -k smoke -W error` and `-ra` forms for `python`, `python3`, `py` and direct
+`pytest`. The same test rejects `--test-reporter` and `--test-reporter-destination`
+while keeping the safe `npm test -- --watch=false` form, and the reporter
+assertions were red before the regex change. It also keeps `ls -laR` approved
+while rejecting `node -r`, so the `r` exception is command-aware. The docs-contract test imports `MAX_API_RETRIES`,
+`configSchema` and `DEFAULT_GATEWAY_URL` so changing those values while the prose
+stays fixed fails the test; it also checks the MCP registrations, all 25 `src`
+modules in `AGENTS.md`, the five known Windows failures in this file, and the
+release workflow.
+
+New focused tests: `tests/errors.test.mjs` (redaction and 2,000-character cap),
+`tests/prompts.test.mjs` (template expansion, workspace precedence, front
+matter and the 64 KiB limit), `tests/help.test.mjs` (documented flags and
+subcommands), `tests/setup.test.mjs` (`parseEffortInput` names, numbers and
+rejects) and `tests/docs-contract.test.mjs` (SPEC retry/budget/MCP-resource
+claims, README release workflow and default-gateway disclosure). Each new test
+file had at least one test mutated once and observed red before restore; the
+docs-contract test was red against the pre-fix documents.
+
+R0.9 is covered by `tests/runtime.test.mjs` ("the default gateway warns once
+before the first request and an explicit gateway stays silent" and "gateway
+warning routes interactive runs to the display and noninteractive runs to
+stderr") and `tests/setup.test.mjs` ("setup warns before probing the default
+gateway and stays silent for another preset"). A test-only `--require` shim
+answers `/models` and `/chat/completions` without network access and records each
+request; the test asserts the warning appears once on stderr before the request
+marker for both a prompt and `doctor`, and that an explicit `--base-url` stays
+silent. The setup test uses the `SetupIO` seam and an isolated config/data
+directory to assert the warning is written before `discover`, is absent for a
+first setup choosing OpenRouter, and is absent for a later setup with an explicit
+saved default. `DEFAULT_GATEWAY_URL` is unchanged. `doctor --json` keeps its
+existing `baseUrl` field, adds `effectiveBaseUrl` and `defaultGateway`, and the
+same runtime test asserts both the default and explicit destination cases.
+
+Not established: no Termux/Android or ARM64 host was available, so the Termux
+sandbox and startup budget remain unmeasured. This workspace is not a git
+repository, so nothing was committed.
+
+The `--test-reporter` and `--test-reporter-destination` deny-list additions in `src/approval.ts` were proven RED before the fix and GREEN after; the full suite completed at 202 tests, 194 pass, 5 fail, 3 skipped.

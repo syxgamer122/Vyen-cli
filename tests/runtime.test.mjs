@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fixture, provider, sse, cli } from './helpers.mjs';
 
 test('real CLI streams tool arguments, writes, resumes and preserves reasoning through edit', async t => {
@@ -34,6 +34,58 @@ test('real CLI streams tool arguments, writes, resumes and preserves reasoning t
   assert.equal(session.tokens, 550);
   assert(!JSON.stringify(session).includes('test-secret-never-echo'));
   assert.deepEqual((await readdir(join(f.data, 'vyen/sessions'))).filter(n => n.endsWith('.lock')), []);
+});
+
+test('the default gateway warns once before the first request and an explicit gateway stays silent', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, (_, response) => sse(response, { text: 'Local gateway works.' }));
+  const explicit = await cli(f, p.url, ['-p', 'hello']).done;
+  assert.equal(explicit.code, 0, explicit.stderr);
+  assert.doesNotMatch(explicit.stderr, /default third-party gateway/);
+  assert.equal(p.requests.length, 1);
+
+  const preload = ['--require', resolve('tests/fixtures/default-gateway-fetch.cjs')];
+  const fallback = await cli(f, '', ['-p', 'hello'], { baseUrl: false, nodeArgs: preload }).done;
+  assert.equal(fallback.code, 0, fallback.stderr);
+  assert.match(fallback.stderr, /default third-party gateway https:\/\/api\.yuristore\.xyz\/v1/);
+  assert.equal((fallback.stderr.match(/default third-party gateway/g) ?? []).length, 1);
+  const warningIndex = fallback.stderr.indexOf('default third-party gateway');
+  const requestIndex = fallback.stderr.indexOf('[default-gateway-fetch]');
+  assert.ok(warningIndex >= 0, fallback.stderr);
+  assert.ok(requestIndex > warningIndex, fallback.stderr);
+  assert(fallback.stdout.includes('Default gateway works.'));
+
+  const doctor = await cli(f, '', ['doctor', '--json'], { baseUrl: false, nodeArgs: preload }).done;
+  assert.match(doctor.stderr, /default third-party gateway https:\/\/api\.yuristore\.xyz\/v1/);
+  assert.equal((doctor.stderr.match(/default third-party gateway/g) ?? []).length, 1);
+  assert.ok(doctor.stderr.indexOf('default third-party gateway') < doctor.stderr.indexOf('[default-gateway-fetch]'), doctor.stderr);
+  const doctorJson = JSON.parse(doctor.stdout);
+  assert.equal(doctorJson.baseUrl, 'provider default');
+  assert.equal(doctorJson.effectiveBaseUrl, 'https://api.yuristore.xyz/v1');
+  assert.equal(doctorJson.defaultGateway, true);
+});
+
+test('gateway warning routes interactive runs to the display and noninteractive runs to stderr', async () => {
+  const { emitDefaultGatewayWarning } = await import('../dist/cli.js');
+  const display = [];
+  const errors = [];
+  const sinks = { display: text => display.push(text), stderr: text => errors.push(text) };
+
+  emitDefaultGatewayWarning({}, true, sinks);
+  assert.equal(display.length, 1);
+  assert.equal(errors.length, 0);
+  assert.match(display[0], /default third-party gateway https:\/\/api\.yuristore\.xyz\/v1/);
+
+  display.length = 0;
+  emitDefaultGatewayWarning({}, false, sinks);
+  assert.equal(display.length, 0);
+  assert.equal(errors.length, 1);
+
+  display.length = 0;
+  errors.length = 0;
+  emitDefaultGatewayWarning({ baseUrl: 'https://example.com/v1' }, true, sinks);
+  assert.equal(display.length, 0);
+  assert.equal(errors.length, 0);
 });
 
 test('noninteractive mutations fail closed and end the run', async t => {
@@ -147,6 +199,8 @@ test('init saves only configuration, doctor probes /models without calling compl
   const docJson = JSON.parse(doctor.stdout);
   assert.equal(docJson.networkTested, true);
   assert(Array.isArray(docJson.discoveredModels));
+  assert.equal(docJson.effectiveBaseUrl, p.url);
+  assert.equal(docJson.defaultGateway, false);
   assert.equal(p.requests.length, 0);
 });
 

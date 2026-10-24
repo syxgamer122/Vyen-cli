@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import {
   DEFAULT_GATEWAY_URL,
   EFFORT_LEVELS,
+  defaultGatewayWarning,
   type Config,
   type EffortLevel,
   configPath,
@@ -235,6 +236,23 @@ async function doctorWarnings(config: Config, baseUrl: string, modelIds: string[
   return warnings;
 }
 
+export interface GatewayWarningSinks {
+  display: (text: string) => void;
+  stderr: (text: string) => void;
+}
+
+/** Route the one-time notice to the visible transcript in interactive runs, otherwise to stderr. */
+export function emitDefaultGatewayWarning(
+  config: Pick<Config, 'baseUrl'>,
+  interactive: boolean,
+  sinks: GatewayWarningSinks,
+): void {
+  const warning = defaultGatewayWarning(config);
+  if (!warning) return;
+  const text = `vyen: ${warning}\n`;
+  (interactive ? sinks.display : sinks.stderr)(text);
+}
+
 /** API keys sent over plain HTTP are readable by anyone on the network path (except loopback). */
 export function insecureBaseUrlWarning(baseUrl: string | undefined): string | undefined {
   if (!baseUrl) return undefined;
@@ -330,8 +348,25 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'context-window': { type: 'string' }, 'max-output-tokens': { type: 'string' },
       'run-token-budget': { type: 'string' }, 'timeout-ms': { type: 'string' },
       'output-last-message': { type: 'string', short: 'o' },
+      'allowed-tools': { type: 'string', multiple: true }, 'disallowed-tools': { type: 'string', multiple: true },
       method: { type: 'string' }, 'dry-run': { type: 'boolean' },
     } });
+    const collectToolList = (raw: unknown): string[] | undefined => {
+      if (!raw) return undefined;
+      const items = Array.isArray(raw) ? raw : [raw];
+      const result: string[] = [];
+      for (const item of items) {
+        if (typeof item === 'string') {
+          for (const part of item.split(',')) {
+            const trimmed = part.trim();
+            if (trimmed) result.push(trimmed);
+          }
+        }
+      }
+      return result.length > 0 ? result : undefined;
+    };
+    const cliAllowedTools = collectToolList(values['allowed-tools']);
+    const cliDisallowedTools = collectToolList(values['disallowed-tools']);
     jsonOutput = values.json === true;
     if (values.help) { stdout.write(HELP); return; }
     if (values.version) { stdout.write(`vyen cli ${VERSION}\n`); return; }
@@ -434,6 +469,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       return;
     }
     if (positionals[0] === 'doctor') {
+      const gatewayWarning = defaultGatewayWarning(config);
+      if (gatewayWarning) stderr.write(`vyen: ${gatewayWarning}\n`);
       const { runCommand } = await import('./process.js');
       const executable = async (name: string) => {
         try { const r = await runCommand(name, ['--version'], { cwd: resolve(values.cwd ?? '.'), signal: AbortSignal.timeout(5000), timeoutMs: 5000 }); return r.code === 0; }
@@ -448,6 +485,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       stdout.write(JSON.stringify({ version: VERSION, node: process.version, platform: process.platform, arch: process.arch,
         config: configPath(), provider: config.provider, model: config.model ?? null, effort: config.effort ?? 'default',
         baseUrl: config.baseUrl ?? 'provider default', credentialVariable: config.keyEnv, credentialPresent: Boolean(resolvedKey),
+        effectiveBaseUrl: targetUrl, defaultGateway: !config.baseUrl,
         bash, ripgrep: rg, searchFallback: !rg, data: dataDir(), networkTested: true, gatewayReachable: modelIds.length > 0,
         discoveredModels: modelIds, modelAvailable, warnings }, null, 2) + '\n');
       if (!bash || !config.model || !resolvedKey) process.exitCode = 1;
@@ -708,6 +746,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         pairManager?.notifySystem(cleanTerminal(text));
         return tui ? tui.write(text) : stderr.write(cleanTerminal(text));
       };
+      emitDefaultGatewayWarning(config, interactive, {
+        display: text => display(text),
+        stderr: text => stderr.write(cleanTerminal(text)),
+      });
       if (updateNoticeText) display(`${updateNoticeText}\n`);
       const question = (label: string, signal?: AbortSignal, remember = false) => tui ? tui.question(label, signal, remember)
         : rl ? rl.question(label, { signal }) : Promise.reject(new Error('Input requires a TTY.'));
@@ -759,9 +801,23 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       const { ToolRegistry, formatTodos, applyPermissionMode } = await import('./tools.js');
       const { Subagents } = await import('./subagents.js');
       const { Harness } = await import('./harness.js');
+      const { loadLayeredSettings } = await import('./settings.js');
+      const { evaluateToolPolicy } = await import('./policy.js');
 
       const buildHarness = async (currentMode: PermissionMode, options: { reconnectMcp?: boolean } = {}) => {
+        const layered = await loadLayeredSettings(runtime.cwd, config.permissions);
+        const policyContext = {
+          cliAllowed: cliAllowedTools,
+          cliDisallowed: cliDisallowedTools,
+          userRules: layered.userPermissions,
+          projectRules: layered.projectPermissions,
+          mode,
+        };
         const reg = new ToolRegistry(runtime.cwd, async request => {
+          const policyDecision = evaluateToolPolicy(request, policyContext);
+          if (policyDecision === 'deny') return false;
+          if (policyDecision === 'allow') return true;
+
           // Only the live mode counts. The mode captured when this harness was built must not keep
           // auto-approving after the user switches back to ask/plan (Shift+Tab, /mode, /auto off).
           if (mode === 'auto' || sessionAllowedTools.has(request.tool)) return true;
@@ -863,6 +919,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           }
           return reply === 'y' || reply === 'yes';
         });
+        reg.policy = request => evaluateToolPolicy(request, policyContext);
         applyPermissionMode(reg, currentMode);
         if (rl || tui) {
           reg.askUser = async (questions, callSignal) => {
@@ -956,6 +1013,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                   try {
                     const stepReadOnly = reg.readOnly || Boolean(step.readOnly) || step.mode === 'readonly';
                     const childTools = new ToolRegistry(runtime.cwd, req => reg.approve(req));
+                    childTools.policy = reg.policy;
                     applyPermissionMode(
                       childTools,
                       stepReadOnly ? 'readonly' : reg.planMode || step.mode === 'plan' ? 'plan' : 'ask',

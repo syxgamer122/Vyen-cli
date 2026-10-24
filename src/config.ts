@@ -4,6 +4,7 @@ import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { protectSecretEnv } from './process.js';
+import { permissionRulesSchema } from './settings.js';
 
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
@@ -23,6 +24,7 @@ export const configSchema = z.object({
   approvalMode: z.enum(['ask', 'auto', 'plan', 'readonly']).optional(),
   viewMode: z.enum(['normal', 'verbose', 'transcript']).optional(),
   update: z.enum(['disable', 'notify', 'auto']).default('notify'),
+  permissions: permissionRulesSchema.optional(),
 }).strict();
 export type Config = z.infer<typeof configSchema>;
 export interface RuntimeConfig extends Config { cwd: string; apiKey: string; dataDir: string; baseUrl: string; model: string }
@@ -73,6 +75,17 @@ export async function resolveApiKey(config: Config): Promise<string | undefined>
 }
 
 export const DEFAULT_GATEWAY_URL = 'https://api.yuristore.xyz/v1';
+
+/**
+ * Warn once per run when no baseUrl selects a destination. The default is a
+ * third-party gateway, so the user must see where the prompt and key go before
+ * the first request. An explicit baseUrl (including an explicit default URL) is
+ * a choice and stays silent.
+ */
+export function defaultGatewayWarning(config: Pick<Config, 'baseUrl'>): string | undefined {
+  if (config.baseUrl) return undefined;
+  return `Warning: no baseUrl is configured; using the default third-party gateway ${DEFAULT_GATEWAY_URL}. Prompts and your API key are sent there. Set --base-url or config baseUrl to choose another endpoint.`;
+}
 
 export function normalizeGatewayUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim().replace(/\/+$/, '');

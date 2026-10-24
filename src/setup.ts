@@ -6,6 +6,7 @@ import {
   DEFAULT_GATEWAY_URL,
   EFFORT_LEVELS,
   configPath,
+  defaultGatewayWarning,
   credentialsPath,
   loadConfig,
   normalizeGatewayUrl,
@@ -150,6 +151,15 @@ export async function runSetupWizard(initialConfig?: Config, io?: SetupIO): Prom
     write(`\nStep 2/5 · API Base URL (${preset.provider}):\n`);
     const urlInput = (await ask(`Base URL [${defaultUrl}]: `)).trim();
     const baseUrl = normalizeGatewayUrl(urlInput || defaultUrl);
+
+    // The wizard probes /models with the API key before saving anything. If the
+    // selected endpoint is the built-in third-party gateway and no explicit
+    // baseUrl was already saved, warn before the key is typed or sent. An
+    // existing explicit baseUrl is a choice and suppresses the notice.
+    if (baseUrl === DEFAULT_GATEWAY_URL) {
+      const warning = defaultGatewayWarning({ baseUrl: current.baseUrl });
+      if (warning) write(`\nvyen: ${warning}\n`);
+    }
 
     const keyHint = existingKey
       ? `saved (${existingKey.slice(0, 4)}...${existingKey.slice(-2)}) — press Enter to keep`

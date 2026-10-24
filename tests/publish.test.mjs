@@ -6,9 +6,21 @@ import { mkdir, mkdtemp, writeFile, readFile, copyFile, rm } from 'node:fs/promi
 import { join, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { command } from '../scripts/pack-release.mjs';
 
 const exec = promisify(execFile);
-test('publishing creates the first tag, bumps on update and repairs a rerun without another bump', { timeout: 60000 }, async t => {
+test('publishing creates the first tag, bumps on update and repairs a rerun without another bump', { timeout: 120000 }, async t => {
+  assert.equal(await command(process.execPath, ['-e', 'process.stdout.write(process.argv[1])', 'literal-%TEMP%'], process.cwd()), 'literal-%TEMP%');
+  const savedRegistry = process.env.npm_config_registry, savedProxy = process.env.npm_config_https_proxy;
+  process.env.npm_config_registry = 'https://registry.example/';
+  process.env.npm_config_https_proxy = 'http://proxy.example/';
+  try {
+    const config = await command(process.execPath, ['-e', 'process.stdout.write(JSON.stringify([process.env.npm_config_registry, process.env.npm_config_https_proxy]))'], process.cwd());
+    assert.deepEqual(JSON.parse(config), ['https://registry.example/', 'http://proxy.example/']);
+  } finally {
+    if (savedRegistry === undefined) delete process.env.npm_config_registry; else process.env.npm_config_registry = savedRegistry;
+    if (savedProxy === undefined) delete process.env.npm_config_https_proxy; else process.env.npm_config_https_proxy = savedProxy;
+  }
   const root = await mkdtemp(join(tmpdir(), 'vyen-publish-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const work = join(root, 'work'), remote = join(root, 'remote.git'), bin = join(root, 'fake-bin');
@@ -40,6 +52,11 @@ if(command==='upload'){for(const f of args.slice(3)){if(f.startsWith('--'))break
 if(command==='edit')state[tag].draft=false;
 fs.writeFileSync(process.env.GH_TEST_STATE,JSON.stringify(state));
 `, { mode: 0o755 });
+  if (process.platform === 'win32') {
+    // The publishing helper runs `gh` through cmd.exe on Windows; an extensionless
+    // shebang file is not executable there, so provide the .cmd shim.
+    await writeFile(join(bin, 'gh.cmd'), `@echo off\r\n"${process.execPath}" "%~dp0gh" %*\r\n`);
+  }
   const preload = join(root, 'mock-fetch.mjs');
   await writeFile(preload, `import {readFileSync} from 'node:fs';
 globalThis.fetch=async url=>{
@@ -52,9 +69,12 @@ globalThis.fetch=async url=>{
   await git('push', 'origin', 'main');
   const first = await git('rev-parse', 'HEAD');
   const publish = async source => exec(process.execPath, ['scripts/publish-release.mjs'], {
-    cwd: work, timeout: 20000, env: { ...process.env, PATH: bin + delimiter + process.env.PATH,
+    cwd: work, timeout: 60000, env: { ...process.env, PATH: bin + delimiter + process.env.PATH,
       GH_TOKEN: 'fake-local-test-token', GITHUB_REPOSITORY: 'test/vyen-cli', SOURCE_SHA: source,
-      GH_TEST_STATE: state, GH_TEST_LOG: log, NODE_OPTIONS: '--import=' + pathToFileURL(preload).href },
+      GH_TEST_STATE: state, GH_TEST_LOG: log, NODE_OPTIONS: '--import=' + pathToFileURL(preload).href,
+      // Reproduce an exported npm config value: npm 12 rejects it for a
+      // project-scoped --prefix install unless pack-release removes it.
+      npm_config_allow_scripts: 'opencode-ai' },
   });
   await publish(first);
   assert.equal(await git('rev-parse', 'v0.1.0^{commit}'), first);

@@ -171,6 +171,48 @@ test('bash prefix approvals only cover simple commands', () => {
   assert(!isApprovedBashPrefix({ command: 'npm test; curl evil' }, approved));
   assert(!isApprovedBashPrefix({ command: 'npm run build' }, approved));
 
+  // Node's --test-reporter loads a module from the argument; it must not ride
+  // on an approved "npm test" either.
+  for (const command of [
+    'npm test -- --test-reporter=./evil.js',
+    'npm test -- --test-reporter ./evil.js',
+    'npm test -- --test-reporter-destination=./out.txt',
+  ]) assert(!isApprovedBashPrefix({ command }, approved), command);
+
+  // pytest loads plugins from -p/--plugins, which can execute arbitrary code; a prefix
+  // approval for the test command must not cover those flags.
+  const pytestApproved = new Set(['python -m pytest']);
+  assert(isApprovedBashPrefix({ command: 'python -m pytest -q tests' }, pytestApproved));
+  assert(isApprovedBashPrefix({ command: 'python -m pytest -q -k smoke -W error tests' }, pytestApproved));
+  assert(isApprovedBashPrefix({ command: 'python -m pytest -ra tests' }, pytestApproved));
+  const pytest3Approved = new Set(['python3 -m pytest']);
+  const pyApproved = new Set(['py -m pytest']);
+  assert(isApprovedBashPrefix({ command: 'python3 -m pytest -ra tests' }, pytest3Approved));
+  assert(isApprovedBashPrefix({ command: 'py -m pytest -ra tests' }, pyApproved));
+  for (const command of [
+    'python -m pytest -p evil_plugin tests',
+    'python -m pytest --plugins evil_plugin tests',
+    'python -m pytest -pevil_plugin tests',
+    'python -m pytest -qp evil_plugin tests',
+    'python -m pytest -qpevil_plugin tests',
+    'python -m pytest -qo addopts=-p evil tests',
+    'python -m pytest -c/tmp/x tests',
+    'python -m pytest -o/tmp/x tests',
+    'python -m pytest --override-ini addopts=-pevil_plugin tests',
+    'python -m pytest --override-ini=addopts=-pevil_plugin tests',
+    'python -m pytest --config-file=pytest.ini tests',
+    'python -m pytest --config-file pytest.ini tests',
+    'python -m pytest @args.txt tests',
+    'python -m pytest @/tmp/args.txt tests',
+  ]) assert(!isApprovedBashPrefix({ command }, pytestApproved), command);
+  const lsApproved = new Set(['ls']);
+  assert(isApprovedBashPrefix({ command: 'ls -laR' }, lsApproved));
+  const nodeApproved = new Set(['node']);
+  assert(!isApprovedBashPrefix({ command: 'node -r evil' }, nodeApproved));
+  const gitApproved = new Set(['git diff']);
+  assert(isApprovedBashPrefix({ command: 'git diff --stat' }, gitApproved));
+  assert(!isApprovedBashPrefix({ command: 'git diff -C/tmp' }, gitApproved));
+
   // Package installs, file mutations and network commands are remembered as the exact command only.
   assert.equal(bashApprovalPrefix({ command: 'npm install lodash' }), 'npm install lodash');
   assert.equal(bashApprovalPrefix({ command: 'pip install requests' }), 'pip install requests');

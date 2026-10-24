@@ -3,9 +3,11 @@
 CLI coding agent độc lập, ưu tiên Termux và Windows/Linux/macOS, dùng API của bạn.
 Tham khảo kiến trúc OpenAI Codex, ZCode và DeepSeek Harness; **không fork base và không dùng runtime của các dự án đó**.
 
+> Lộ trình phát triển và các quyết định kiến trúc: [docs/ROADMAP.md](docs/ROADMAP.md).
+
 ## Cài đặt (Termux / Linux / macOS / Windows)
 
-Cài bản GitHub Release mới nhất:
+Cài bản phát hành mới nhất từ npm:
 
 ```bash
 # Trên Termux (cài thêm công cụ hệ thống nếu chưa có):
@@ -61,6 +63,8 @@ vyen
 
 Vyen giữ nguyên đường dẫn Base URL bạn cấu hình (chỉ tự động chuẩn hoá thêm `/v1` cho một số gateway quen thuộc như `api.yuristore.xyz` hoặc `localhost:8000` khi bỏ trống path). Nếu không đặt `baseUrl`, mặc định sẽ dùng `DEFAULT_GATEWAY_URL` (`https://api.yuristore.xyz/v1`). Endpoint phải hỗ trợ tool calling.
 
+> **Lưu ý bảo mật:** khi không đặt `baseUrl`, prompt và API key được gửi tới `https://api.yuristore.xyz/v1`, một dịch vụ bên thứ ba. Hãy đặt `baseUrl` (flag `--base-url` hoặc config) nếu bạn không muốn dữ liệu đi qua gateway mặc định. Vyen in cảnh báo một lần trước request mô hình đầu tiên khi dùng gateway mặc định; wizard setup cũng cảnh báo trước khi dò `/models` nếu lần thiết lập đầu tiên vẫn chọn gateway mặc định. Ở chế độ `vyen doctor --json`, trường `baseUrl` vẫn giữ giá trị cấu hình (hoặc `"provider default"`), kèm `effectiveBaseUrl` (đích thực tế sau chuẩn hoá) và `defaultGateway` để script/CI kiểm tra nơi dữ liệu sẽ đi.
+
 ## Cách dùng CLI
 
 ```bash
@@ -86,6 +90,9 @@ vyen upgrade --dry-run              # Chỉ in lệnh cài, không chạy
 Mặc định ở chế độ `ask` (yêu cầu chấp thuận khi sửa/ghi file hoặc chạy shell).
 Không có TTY thì những yêu cầu này bị từ chối trừ khi truyền `--yes` (tương đương
 chế độ `auto`). `--read-only` loại bỏ các công cụ ghi/sửa/bash khỏi bộ tool.
+Cấu hình phân tầng `.vyen/settings.json` cho phép đặt quy tắc `permissions.allow`,
+`permissions.ask`, `permissions.deny`. Cờ `--allowed-tools` và `--disallowed-tools`
+cho phép ghi đè nhanh từ dòng lệnh; quy tắc `deny` luôn chặn ngay cả trong chế độ `auto`.
 Mã thoát: `0` thành công, `1` lỗi, `2` từ chối quyền, `130` Ctrl+C, `143` SIGTERM.
 
 ## Cập nhật phiên bản
@@ -339,6 +346,7 @@ npm install -g . --omit=dev
 | `src/provider.ts` | Chọn adapter API, quét `/models`, truyền `reasoningEffort` / thinking budget |
 | `src/setup.ts` | Setup wizard tương tác (`Esc` để huỷ), quét `/models` động, lưu `credentials.json` |
 | `src/tools.ts`, `src/approval.ts` | Registry, schema, alias chuẩn hoá, `sanitizeBashCommand`, approval và duyệt theo tiền tố lệnh |
+| `src/settings.ts`, `src/policy.ts` | Cấu hình dự án `.vyen/settings.json`, phân tầng quyền hạn allow/ask/deny |
 | `src/prompts.ts`, `src/help.ts` | Prompt tuỳ biến `/prompts:<tên>`; nội dung `--help` (nạp nhanh, không kéo SDK) |
 | `src/files.ts`, `src/process.ts` | File I/O, unified diff, patch, backup cho /undo, bảo vệ `nul`, subprocess và lọc biến môi trường bí mật |
 | `src/session.ts` | Lock, checkpoint, rewind, resume và sửa lịch sử bị ngắt |
@@ -350,13 +358,21 @@ npm install -g . --omit=dev
 | `src/workflow.ts` | Custom Workflow engine (`.json` & `.md`), biến nội suy (`$input`, `$1`, `$prev`), bước `prompt`/`shell`/`subagent`/`network`/`approval` |
 | `src/pair.ts` | Ghép đôi thiết bị qua Cloudflared Tunnel miễn phí, bộ tạo mã QR ISO/IEC 18004 thuần TypeScript và giao diện Mobile Web/SSE |
 | `src/reasoning.ts` | `withReasoningReplay` (`reasoning_content`), `AnswerProjection`, giữ transcript gốc |
+| `src/errors.ts`, `src/config.ts` | Che API key trong thông báo lỗi; schema config, đường dẫn, atomic writes và credential store |
+| `src/update.ts`, `src/version.ts` | Kiểm tra/cập nhật qua npm/pnpm/yarn/bun; version đọc từ manifest đã cài |
+| `src/index.ts`, `src/migrate.ts` | Public exports cho package; migrate dữ liệu `goon` sang `vyen` |
 
 ## Repository & Tự động Release
 
 - Source: [syxgamer122/Vyen-cli](https://github.com/syxgamer122/Vyen-cli)
-- Bản cài và checksum: [GitHub Releases](https://github.com/syxgamer122/Vyen-cli/releases)
+- Package: [@nguyenhuumanh/vyen](https://www.npmjs.com/package/@nguyenhuumanh/vyen)
+- GitHub Releases hiện **không** được tạo tự động; workflow chỉ publish lên npm.
 
-Mỗi lần push lên `main` (trừ khi commit có `[skip ci]`), workflow `Check and release`
-sẽ chạy toàn bộ typecheck, lint, test (Node 22.16 & Node 24 + restrictive umasks),
-tự động tăng phiên bản patch, đóng gói `.tgz` kèm `SHA256SUMS.txt` và phát hành
-GitHub Release mới.
+Workflow `Check and release` chạy typecheck, lint và test trên Node 22.16 & Node 24
+cho mọi push lên `main`, pull request và `workflow_dispatch`. Job publish chỉ chạy
+khi push tag `v*`; tag phải khớp `package.json`, sau đó npm publish qua OIDC
+trusted publishing (không lưu token, có provenance). Workflow **không** tự tăng
+version, không tạo tarball/checksum và không tạo GitHub Release.
+
+`scripts/publish-release.mjs` và `scripts/pack-release.mjs` là công cụ đóng gói/
+phát hành chạy local hoặc cho một workflow riêng; workflow hiện tại không gọi chúng.

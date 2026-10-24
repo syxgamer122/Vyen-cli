@@ -44,7 +44,15 @@ export function sse(response, { text = '', calls = [], reasoning = '', textChunk
   response.end('data: [DONE]\n\n');
 }
 export function cli(f, url, args = [], options = {}) {
-  const child = spawn(process.execPath, [resolve(process.env.VYEN_TEST_BIN ?? 'bin/vyen.mjs'), '--cwd', f.cwd, '--base-url', url, '--model', 'test-model', ...args], {
+  const command = [
+    ...(options.nodeArgs ?? []),
+    resolve(process.env.VYEN_TEST_BIN ?? 'bin/vyen.mjs'),
+    '--cwd', f.cwd,
+    ...(options.baseUrl === false ? [] : ['--base-url', url]),
+    '--model', 'test-model',
+    ...args,
+  ];
+  const child = spawn(process.execPath, command, {
     env: { ...process.env, XDG_CONFIG_HOME: f.config, XDG_DATA_HOME: f.data, VYEN_API_KEY: 'test-secret-never-echo', ...options.env },
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
   });
