@@ -9,7 +9,7 @@ test('help lists the documented flags and subcommands', () => {
     '--provider', '--base-url', '--model', '--effort', '--key-env', '--resume',
     '--pair', '--yes', '--read-only', '--json', '--no-tui', '--no-mcp',
     '--no-subagents', '--run-token-budget', '--output-last-message',
-    '--allowed-tools', '--disallowed-tools',
+    '--allowed-tools', '--disallowed-tools', '--trust-workspace',
     'vyen setup', 'vyen mcp list', 'vyen upgrade',
   ]) assert.ok(HELP.includes(token), token);
 });

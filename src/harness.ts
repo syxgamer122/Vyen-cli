@@ -297,6 +297,11 @@ export class Harness {
     this.tools.onPlanExit = plan => {
       this.emit({ type: 'plan_exit', plan });
     };
+    if (this.hookBus && !this.hookBus.onWarning) {
+      this.hookBus.onWarning = warning => {
+        this.emit({ type: 'text', text: `\n[Hook Warning: ${warning}]\n` });
+      };
+    }
   }
   /** True while a run, compaction or other exclusive operation owns the session history. */
   get busy(): boolean {
@@ -511,6 +516,7 @@ export class Harness {
         if (exhausted()) throw new Error('Run token budget reached. Resume with a new prompt or increase --run-token-budget.');
         const system = await systemPrompt(this.config, this.tools.readOnly, this.tools.planMode, session.goal, promptCache);
         const oldCount = session.compactions;
+        if (this.hookBus) await this.hookBus.dispatch('PreCompact', { trigger: 'token_limit', tokens: session.tokens });
         account(await compactIfNeeded(this.store, this.config, this.model, system, signal, measuredInput));
         if (session.compactions !== oldCount) { measuredInput = 0; this.emit({ type: 'compaction', count: session.compactions }); }
         if (exhausted()) throw new Error('Run token budget reached during compaction. Original history is archived; resume to continue.');
@@ -708,15 +714,21 @@ export class Harness {
             meta.verb = counts.verb;
           }
         }
+        const canonicalName = normalizeToolName(call.toolName);
+        const normalizedInput = normalizeToolInput(canonicalName, call.input);
         if (this.hookBus) {
           const preHooks = await this.hookBus.dispatch('PreToolUse', {
-            tool: call.toolName,
-            input: call.input,
+            tool: canonicalName,
+            input: normalizedInput,
           });
           if (preHooks.some(h => h.denied)) {
             denied = true;
             meta.durationMs = Date.now() - startedMs;
-            output = { type: 'error-text', value: 'Tool execution denied by PreToolUse hook.' };
+            const reason = preHooks.find(h => h.denied)?.stderr?.trim();
+            output = {
+              type: 'error-text',
+              value: reason ? `Tool execution denied by PreToolUse hook: ${reason}` : 'Tool execution denied by PreToolUse hook.',
+            };
             this.emit({ type: 'tool', name: call.toolName, id: call.toolCallId, state: 'error', meta });
             return { type: 'tool-result' as const, toolCallId: call.toolCallId, toolName: call.toolName, output };
           }
@@ -727,14 +739,14 @@ export class Harness {
         if (this.hookBus) {
           if (result.denied) {
             await this.hookBus.dispatch('PostToolUseFailure', {
-              tool: call.toolName,
-              input: call.input,
+              tool: canonicalName,
+              input: normalizedInput,
               error: result.text,
             });
           } else {
             const postHooks = await this.hookBus.dispatch('PostToolUse', {
-              tool: call.toolName,
-              input: call.input,
+              tool: canonicalName,
+              input: normalizedInput,
               output: result.text,
             });
             for (const h of postHooks) {
@@ -765,6 +777,15 @@ export class Harness {
         output = { type: result.denied ? 'error-text' : 'text', value: result.text + loopNote };
         this.emit({ type: 'tool', name: call.toolName, id: call.toolCallId, state: result.denied ? 'error' : 'done', meta });
       } catch (error) {
+        if (this.hookBus) {
+          const canonicalName = normalizeToolName(call.toolName);
+          const normalizedInput = normalizeToolInput(canonicalName, call.input);
+          await this.hookBus.dispatch('PostToolUseFailure', {
+            tool: canonicalName,
+            input: normalizedInput,
+            error: error instanceof Error ? error.message : String(error),
+          }).catch(() => {});
+        }
         meta.durationMs = Date.now() - startedMs;
         output = { type: 'error-text', value: safeError(error, this.config.apiKey) };
         this.emit({ type: 'tool', name: call.toolName, id: call.toolCallId, state: 'error', meta });

@@ -15,6 +15,7 @@ import {
   agentNetworkToolSchema,
   formatBrainstormReport,
 } from './network.js';
+import type { HookBus } from './hooks.js';
 
 export type SubagentProgress = Exclude<HarnessEvent, { type: 'text' | 'reasoning' | 'tool_stream' }>;
 export type SubagentEvent =
@@ -184,6 +185,7 @@ export class Subagents {
     readonly parent: SessionStore,
     readonly registry: ToolRegistry,
     readonly emit: (event: SubagentEvent) => void = () => {},
+    readonly hookBus?: HookBus,
   ) {
     this.network = new AgentNetwork(this.config, this.parent, this.bus);
   }
@@ -512,7 +514,7 @@ export class Subagents {
         if (event.type !== 'text' && event.type !== 'reasoning' && event.type !== 'tool_stream') {
           this.emit({ type: 'subagent', id: managed.id, state: 'progress', event });
         }
-      });
+      }, undefined, this.hookBus);
       // The task text was written by the parent model, not typed by the user.
       childHarness.untrustedPrompts = true;
       await childHarness.run(effectivePrompt, signal, budget);
@@ -847,7 +849,7 @@ export class Subagents {
         if (event.type !== 'text' && event.type !== 'reasoning' && event.type !== 'tool_stream') {
           this.emit({ type: 'subagent', id, state: 'progress', event });
         }
-      });
+      }, undefined, this.hookBus);
       childHarness.untrustedPrompts = true;
       await childHarness.run(
         `You are a delegated agent. Complete this task and return a concise report with evidence. Do not ask other agents.\n\n${task}`,

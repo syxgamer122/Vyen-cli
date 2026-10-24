@@ -349,6 +349,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'run-token-budget': { type: 'string' }, 'timeout-ms': { type: 'string' },
       'output-last-message': { type: 'string', short: 'o' },
       'allowed-tools': { type: 'string', multiple: true }, 'disallowed-tools': { type: 'string', multiple: true },
+      'trust-workspace': { type: 'boolean' },
       method: { type: 'string' }, 'dry-run': { type: 'boolean' },
     } });
     const collectToolList = (raw: unknown): string[] | undefined => {
@@ -803,14 +804,21 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       const { Harness } = await import('./harness.js');
       const { loadLayeredSettings } = await import('./settings.js');
       const { evaluateToolPolicy } = await import('./policy.js');
-      const { HookBus, calculateWorkspaceTrustHash, isWorkspaceTrusted } = await import('./hooks.js');
+      const { HookBus, calculateWorkspaceTrustHash, isWorkspaceTrusted, recordWorkspaceTrust } = await import('./hooks.js');
 
       const buildHarness = async (currentMode: PermissionMode, options: { reconnectMcp?: boolean } = {}) => {
         const layered = await loadLayeredSettings(runtime.cwd, config.permissions);
         let hookBus: InstanceType<typeof HookBus> | undefined;
         if (layered.hooks && layered.hooks.length > 0) {
           const hash = await calculateWorkspaceTrustHash(runtime.cwd, layered.hooks.map(h => h.command));
-          const isTrusted = await isWorkspaceTrusted(runtime.cwd, hash);
+          let isTrusted = await isWorkspaceTrusted(runtime.cwd, hash);
+          if (!isTrusted && values['trust-workspace']) {
+            await recordWorkspaceTrust(runtime.cwd, hash);
+            isTrusted = true;
+          }
+          if (!isTrusted) {
+            display(`\n[Warning: ${layered.hooks.length} project hook(s) disabled because workspace is not trusted. Run with --trust-workspace to enable.]\n`);
+          }
           hookBus = new HookBus({
             hooks: layered.hooks,
             cwd: runtime.cwd,
@@ -992,7 +1000,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           subagents = undefined;
         }
         if (!values['no-subagents']) {
-          subagents = new Subagents(runtime, store, reg, emit);
+          subagents = new Subagents(runtime, store, reg, emit, hookBus);
           subagents.register();
         }
         {

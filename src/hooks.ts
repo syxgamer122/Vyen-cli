@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFile, mkdir, writeFile, stat } from 'node:fs/promises';
+import { readFile, mkdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { configDir } from './config.js';
+import { configDir, atomicJson } from './config.js';
 import {
   type HookEvent,
   type HookDefinition,
@@ -35,8 +35,21 @@ export interface HookExecutionResult {
   error?: string;
 }
 
+export interface HookBusOptions {
+  hooks: HookDefinition[];
+  cwd: string;
+  isTrusted?: boolean;
+  timeoutMs?: number;
+  onWarning?: (warning: string) => void;
+}
+
 function trustedWorkspacesFile(): string {
   return join(configDir(), 'trusted_workspaces.json');
+}
+
+function normalizeWorkspaceDir(cwd: string): string {
+  const resolved = resolve(cwd);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
 /**
@@ -98,7 +111,7 @@ export async function isWorkspaceTrusted(
   try {
     const raw = await readFile(storePath, 'utf8');
     const records = JSON.parse(raw) as Record<string, string>;
-    const normalized = resolve(cwd);
+    const normalized = normalizeWorkspaceDir(cwd);
     return records[normalized] === expectedHash;
   } catch {
     return false;
@@ -121,9 +134,9 @@ export async function recordWorkspaceTrust(
     records = {};
   }
 
-  records[resolve(cwd)] = hash;
+  records[normalizeWorkspaceDir(cwd)] = hash;
   await mkdir(configDir(), { recursive: true, mode: 0o700 });
-  await writeFile(storePath, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
+  await atomicJson(storePath, records);
 }
 
 import { spawn } from 'node:child_process';
@@ -172,17 +185,14 @@ export class HookBus {
   readonly cwd: string;
   readonly isTrusted: boolean;
   readonly defaultTimeoutMs: number;
+  onWarning?: (warning: string) => void;
 
-  constructor(options: {
-    hooks: HookDefinition[];
-    cwd: string;
-    isTrusted?: boolean;
-    timeoutMs?: number;
-  }) {
+  constructor(options: HookBusOptions) {
     this.hooks = options.hooks;
     this.cwd = resolve(options.cwd);
     this.isTrusted = options.isTrusted ?? true;
     this.defaultTimeoutMs = options.timeoutMs ?? 10_000;
+    this.onWarning = options.onWarning;
   }
 
   /**
@@ -216,6 +226,9 @@ export class HookBus {
     for (const hook of matching) {
       const timeoutMs = hook.timeoutMs ?? this.defaultTimeoutMs;
       const result = await this.executeCommand(hook.command, inputJson, sanitizedEnv, timeoutMs);
+      if (result.error && this.onWarning) {
+        this.onWarning(`[Hook error (${hook.event})]: ${result.error}`);
+      }
       results.push(result);
     }
 
@@ -232,6 +245,7 @@ export class HookBus {
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      const MAX_OUTPUT = 1024 * 1024; // 1MB buffer ceiling
 
       const child = spawn(command, {
         cwd: this.cwd,
@@ -240,21 +254,29 @@ export class HookBus {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
+      child.stdin.on('error', () => {
+        // Prevent unhandled stream error (e.g. EPIPE) if child exits before reading stdin
+      });
+
       const timer = setTimeout(() => {
         timedOut = true;
         try {
-          child.kill('SIGKILL');
+          if (process.platform === 'win32' && child.pid) {
+            spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+          } else {
+            child.kill('SIGKILL');
+          }
         } catch {
           // Process already ended
         }
       }, timeoutMs);
 
       child.stdout.on('data', chunk => {
-        stdout += chunk.toString('utf8');
+        if (stdout.length < MAX_OUTPUT) stdout += chunk.toString('utf8');
       });
 
       child.stderr.on('data', chunk => {
-        stderr += chunk.toString('utf8');
+        if (stderr.length < MAX_OUTPUT) stderr += chunk.toString('utf8');
       });
 
       child.on('error', err => {

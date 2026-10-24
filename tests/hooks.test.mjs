@@ -222,3 +222,100 @@ test('Harness executeBatch intercepts tools with HookBus PreToolUse', async t =>
   const exists = await stat(join(f.cwd, 'blocked.txt')).then(() => true, () => false);
   assert.equal(exists, false, 'file must not be created when hook exits 2');
 });
+
+test('hook bus calls onWarning when a hook fails or times out', async () => {
+  const warnings = [];
+  const bus = new HookBus({
+    cwd: process.cwd(),
+    isTrusted: true,
+    onWarning: msg => warnings.push(msg),
+    hooks: [
+      {
+        event: 'SessionStart',
+        command: 'node -e "throw new Error(\\"Crash test\\")"',
+      },
+    ],
+  });
+
+  await bus.dispatch('SessionStart', { sessionId: 'test-session-warn' });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /Crash test/);
+});
+
+test('Harness executeBatch normalizes tool aliases before PreToolUse matching and surfaces denial reason', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, async (req, res, n) => {
+    if (n === 1) {
+      sse(res, {
+        calls: [{ id: 'c1', name: 'write', input: { path: 'blocked.txt', content: 'should not exist' } }],
+      });
+    } else {
+      sse(res, { text: 'Turn complete.' });
+    }
+  });
+
+  const config = {
+    model: 'mock-model',
+    provider: 'openai',
+    baseUrl: p.url,
+    apiKey: 'mock-key',
+    cwd: f.cwd,
+    dataDir: f.data,
+    maxOutputTokens: 2048,
+    contextWindow: 8192,
+    timeoutMs: 10000,
+  };
+
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  const tools = new ToolRegistry(f.cwd, async () => true, false);
+  const hookBus = new HookBus({
+    cwd: f.cwd,
+    isTrusted: true,
+    hooks: [
+      {
+        event: 'PreToolUse',
+        matcher: 'write_file',
+        command: 'node -e "process.stderr.write(\\"policy violation: write forbidden\\"); process.exit(2);"',
+      },
+    ],
+  });
+
+  let stoppedReason = '';
+  const harness = new Harness(config, store, tools, ev => {
+    if (ev.type === 'stopped') stoppedReason = ev.reason;
+  }, undefined, hookBus);
+
+  await harness.run('Do write', new AbortController().signal);
+
+  assert.equal(stoppedReason, 'Permission denied.');
+  const toolMsg = store.session.messages.find(m => m.role === 'tool');
+  assert.ok(toolMsg, 'tool message should be recorded');
+  const part = toolMsg.content[0];
+  assert.match(part.output.value, /policy violation: write forbidden/);
+
+  const exists = await stat(join(f.cwd, 'blocked.txt')).then(() => true, () => false);
+  assert.equal(exists, false, 'file must not be created when alias is intercepted');
+});
+
+test('hook execution does not crash on fast-exiting child with EPIPE', async () => {
+  const bus = new HookBus({
+    cwd: process.cwd(),
+    isTrusted: true,
+    hooks: [
+      {
+        event: 'PreToolUse',
+        command: 'node -e "process.exit(2)"',
+      },
+    ],
+  });
+
+  const bigPayload = {
+    tool: 'bash',
+    input: { data: 'x'.repeat(64 * 1024) },
+  };
+
+  const res = await bus.dispatch('PreToolUse', bigPayload);
+  assert.equal(res.length, 1);
+  assert.equal(res[0].exitCode, 2);
+  assert.equal(res[0].denied, true);
+});

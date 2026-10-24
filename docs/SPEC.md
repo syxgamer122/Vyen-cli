@@ -32,7 +32,7 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   `hooks` (`SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
   `PostToolUseFailure`, `PreCompact`, `Stop`). Hooks receive JSON payload on stdin with
   sanitized environment; exit 2 denies tool execution, exit 0 injects stdout context,
-  and project hooks require workspace trust hash verification. CLI flags
+  and project hooks require workspace trust hash verification (opt in via --trust-workspace). CLI flags
   `--allowed-tools` and `--disallowed-tools` override layered settings. User deny
   cannot be widened by project rules; deny rules take effect even in auto mode.
 - Help/init/doctor/sessions/upgrade perform no model request. No account login,
