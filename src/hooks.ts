@@ -150,7 +150,7 @@ import { spawn } from 'node:child_process';
 export function sanitizeEnvironment(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const protectedBase = childEnv(baseEnv);
   const clean: NodeJS.ProcessEnv = {};
-  const sensitivePattern = /API[_-]?KEY|TOKEN|SECRET|AUTH|PASSWORD|CREDENTIAL|PRIVATE/i;
+  const sensitivePattern = /KEY|TOKEN|SECRET|AUTH|PASS|CREDENTIAL|PRIVATE/i;
 
   for (const [key, value] of Object.entries(protectedBase)) {
     if (!key || sensitivePattern.test(key) || key === 'VYEN_API_KEY') {

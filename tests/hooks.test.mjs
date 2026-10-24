@@ -12,6 +12,7 @@ import {
   isWorkspaceTrusted,
   recordWorkspaceTrust,
   HookBus,
+  sanitizeEnvironment,
 } from '../dist/hooks.js';
 
 test('project hooks require workspace trust and hash changes invalidate trust', async () => {
@@ -165,6 +166,14 @@ test('hook process environment never receives sensitive API keys', async () => {
 
     assert.equal(envCaptured.VYEN_API_KEY, undefined, 'VYEN_API_KEY must be sanitized');
     assert.equal(envCaptured.ANTHROPIC_API_KEY, undefined, 'ANTHROPIC_API_KEY must be sanitized');
+    const sanitized = sanitizeEnvironment({
+      SAFE_VAR: 'hello',
+      AWS_ACCESS_KEY_ID: 'aws-secret',
+      DB_PASSWORD: 'password123',
+    });
+    assert.equal(sanitized.SAFE_VAR, 'hello');
+    assert.equal(sanitized.AWS_ACCESS_KEY_ID, undefined);
+    assert.equal(sanitized.DB_PASSWORD, undefined);
   } finally {
     if (originalKey !== undefined) process.env.VYEN_API_KEY = originalKey;
     else delete process.env.VYEN_API_KEY;

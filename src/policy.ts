@@ -18,22 +18,29 @@ export interface PolicyEvaluationContext {
   cwd?: string;
 }
 
-const CHAINING_PATTERN = /[\r\n;&|`]|\$\(|\$\{/;
+const CHAINING_PATTERN = /[\r\n;&|`><]|\$\(|\$\{/;
 
 function normalizePathForMatching(raw: string, cwd = process.cwd()): string {
   const clean = raw.trim().replace(/\\/g, '/');
   if (!clean) return '';
   const normalizedCwd = resolve(cwd).replace(/\\/g, '/');
   const resolved = resolve(cwd, clean).replace(/\\/g, '/');
-  if (resolved === normalizedCwd) return '.';
-  if (resolved.startsWith(normalizedCwd + '/')) {
-    return resolved.slice(normalizedCwd.length + 1);
+  const isWin = process.platform === 'win32';
+  if (isWin ? resolved.toLowerCase() === normalizedCwd.toLowerCase() : resolved === normalizedCwd) {
+    return '.';
+  }
+  const prefix = normalizedCwd + '/';
+  const matchesPrefix = isWin
+    ? resolved.toLowerCase().startsWith(prefix.toLowerCase())
+    : resolved.startsWith(prefix);
+  if (matchesPrefix) {
+    return resolved.slice(prefix.length);
   }
   return resolved;
 }
 
 function extractToolArgumentString(tool: string, input: unknown, cwd?: string): string {
-  if (typeof input === 'string') return normalizePathForMatching(input, cwd);
+  if (typeof input === 'string') return tool === 'bash' ? input.trim() : normalizePathForMatching(input, cwd);
   if (!input || typeof input !== 'object') return '';
   const obj = input as Record<string, unknown>;
   if (typeof obj.command === 'string') return obj.command.trim();
