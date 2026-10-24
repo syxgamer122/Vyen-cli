@@ -7,6 +7,7 @@ import {
   calculateWorkspaceTrustHash,
   isWorkspaceTrusted,
   recordWorkspaceTrust,
+  HookBus,
 } from '../dist/hooks.js';
 
 test('project hooks require workspace trust and hash changes invalidate trust', async () => {
@@ -50,17 +51,120 @@ test('project hooks require workspace trust and hash changes invalidate trust', 
 });
 
 test('hook bus executes PreToolUse command and exit 2 denies execution', async () => {
-  assert.ok(true);
+  const bus = new HookBus({
+    cwd: process.cwd(),
+    isTrusted: true,
+    hooks: [
+      {
+        event: 'PreToolUse',
+        matcher: 'bash',
+        command: 'node -e "process.exit(2)"',
+      },
+      {
+        event: 'PreToolUse',
+        matcher: 'write_file',
+        command: 'node -e "process.exit(0)"',
+      },
+    ],
+  });
+
+  // Matching 'bash' triggers exit 2 -> denied
+  const resBash = await bus.dispatch('PreToolUse', {
+    tool: 'bash',
+    input: { command: 'rm -rf /' },
+  });
+  assert.equal(resBash.length, 1);
+  assert.equal(resBash[0].exitCode, 2);
+  assert.equal(resBash[0].denied, true);
+
+  // Matching 'write_file' triggers exit 0 -> not denied
+  const resWrite = await bus.dispatch('PreToolUse', {
+    tool: 'write_file',
+    input: { path: 'a.txt' },
+  });
+  assert.equal(resWrite.length, 1);
+  assert.equal(resWrite[0].exitCode, 0);
+  assert.equal(resWrite[0].denied, false);
+
+  // Non-matching 'read_file' executes no hooks
+  const resRead = await bus.dispatch('PreToolUse', {
+    tool: 'read_file',
+    input: { path: 'a.txt' },
+  });
+  assert.equal(resRead.length, 0);
 });
 
 test('hook command exit 0 stdout injects context', async () => {
-  assert.ok(true);
+  const bus = new HookBus({
+    cwd: process.cwd(),
+    isTrusted: true,
+    hooks: [
+      {
+        event: 'UserPromptSubmit',
+        command: 'node -e "process.stdout.write(\\"Injected system notice\\")"',
+      },
+    ],
+  });
+
+  const res = await bus.dispatch('UserPromptSubmit', { prompt: 'hello' });
+  assert.equal(res.length, 1);
+  assert.equal(res[0].exitCode, 0);
+  assert.equal(res[0].injectedContext, 'Injected system notice');
 });
 
 test('broken or timed out hook does not crash the run', async () => {
-  assert.ok(true);
+  const bus = new HookBus({
+    cwd: process.cwd(),
+    isTrusted: true,
+    timeoutMs: 300,
+    hooks: [
+      {
+        event: 'SessionStart',
+        command: 'node -e "throw new Error(\\"Crash test\\")"',
+      },
+      {
+        event: 'SessionStart',
+        command: 'node -e "setTimeout(() => {}, 2000)"',
+        timeoutMs: 100,
+      },
+    ],
+  });
+
+  // Dispatch should resolve safely without throwing uncaught exceptions
+  const res = await bus.dispatch('SessionStart', { sessionId: 'test-session-1' });
+  assert.equal(res.length, 2);
+  assert.ok(res[0].error, 'broken hook records error');
+  assert.ok(res[1].error, 'timed out hook records error');
 });
 
 test('hook process environment never receives sensitive API keys', async () => {
-  assert.ok(true);
+  const originalKey = process.env.VYEN_API_KEY;
+  const originalToken = process.env.ANTHROPIC_API_KEY;
+  process.env.VYEN_API_KEY = 'super-secret-vyen-key';
+  process.env.ANTHROPIC_API_KEY = 'super-secret-anthropic-token';
+
+  try {
+    const bus = new HookBus({
+      cwd: process.cwd(),
+      isTrusted: true,
+      hooks: [
+        {
+          event: 'Stop',
+          command: 'node -e "process.stdout.write(JSON.stringify(process.env))"',
+        },
+      ],
+    });
+
+    const res = await bus.dispatch('Stop', { reason: 'done' });
+    assert.equal(res.length, 1);
+    const envCaptured = JSON.parse(res[0].stdout);
+
+    assert.equal(envCaptured.VYEN_API_KEY, undefined, 'VYEN_API_KEY must be sanitized');
+    assert.equal(envCaptured.ANTHROPIC_API_KEY, undefined, 'ANTHROPIC_API_KEY must be sanitized');
+  } finally {
+    if (originalKey !== undefined) process.env.VYEN_API_KEY = originalKey;
+    else delete process.env.VYEN_API_KEY;
+    if (originalToken !== undefined) process.env.ANTHROPIC_API_KEY = originalToken;
+    else delete process.env.ANTHROPIC_API_KEY;
+  }
 });

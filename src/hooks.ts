@@ -126,20 +126,180 @@ export async function recordWorkspaceTrust(
   await writeFile(storePath, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
 }
 
-export class HookBus {
-  constructor(
-    readonly options: {
-      hooks: HookDefinition[];
-      cwd: string;
-      isTrusted?: boolean;
-      timeoutMs?: number;
-    },
-  ) {}
+import { spawn } from 'node:child_process';
 
+/**
+ * Creates a sanitized environment object that strips API keys and credentials
+ * so child hook processes cannot accidentally or maliciously access them.
+ */
+export function sanitizeEnvironment(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = {};
+  const sensitivePattern = /API[_-]?KEY|TOKEN|SECRET|AUTH|PASSWORD|CREDENTIAL|PRIVATE/i;
+
+  for (const [key, value] of Object.entries(baseEnv)) {
+    if (!key || sensitivePattern.test(key) || key === 'VYEN_API_KEY') {
+      continue;
+    }
+    clean[key] = value;
+  }
+  return clean;
+}
+
+/**
+ * Checks whether a hook's matcher matches the given event and payload.
+ */
+export function matchesHook(
+  matcher: string | undefined,
+  event: HookEvent,
+  payload: Record<string, unknown>,
+): boolean {
+  if (!matcher || matcher === '*' || matcher === '') {
+    return true;
+  }
+
+  if (event === 'PreToolUse' || event === 'PostToolUse' || event === 'PostToolUseFailure') {
+    const toolName = typeof payload.tool === 'string' ? payload.tool : '';
+    if (matcher === toolName) return true;
+    if (matcher.endsWith('*') && toolName.startsWith(matcher.slice(0, -1))) return true;
+    return false;
+  }
+
+  return true;
+}
+
+export class HookBus {
+  readonly hooks: HookDefinition[];
+  readonly cwd: string;
+  readonly isTrusted: boolean;
+  readonly defaultTimeoutMs: number;
+
+  constructor(options: {
+    hooks: HookDefinition[];
+    cwd: string;
+    isTrusted?: boolean;
+    timeoutMs?: number;
+  }) {
+    this.hooks = options.hooks;
+    this.cwd = resolve(options.cwd);
+    this.isTrusted = options.isTrusted ?? true;
+    this.defaultTimeoutMs = options.timeoutMs ?? 10_000;
+  }
+
+  /**
+   * Dispatches an event to all matching hooks sequentially.
+   * If any hook exits with code 2, it signals tool denial.
+   * Broken or timing-out hooks capture errors without throwing exceptions.
+   */
   async dispatch(
-    _event: HookEvent,
-    _payload: Record<string, unknown>,
+    event: HookEvent,
+    payload: Record<string, unknown>,
   ): Promise<HookExecutionResult[]> {
-    return [];
+    if (!this.isTrusted) {
+      return [];
+    }
+
+    const matching = this.hooks.filter(
+      h => h.event === event && matchesHook(h.matcher, event, payload),
+    );
+
+    const results: HookExecutionResult[] = [];
+    const sanitizedEnv = sanitizeEnvironment();
+
+    const basePayload: HookPayload = {
+      event,
+      timestamp: new Date().toISOString(),
+      cwd: this.cwd,
+      ...payload,
+    };
+    const inputJson = `${JSON.stringify(basePayload)}\n`;
+
+    for (const hook of matching) {
+      const timeoutMs = hook.timeoutMs ?? this.defaultTimeoutMs;
+      const result = await this.executeCommand(hook.command, inputJson, sanitizedEnv, timeoutMs);
+      results.push(result);
+    }
+
+    return results;
+  }
+
+  private executeCommand(
+    command: string,
+    inputJson: string,
+    env: NodeJS.ProcessEnv,
+    timeoutMs: number,
+  ): Promise<HookExecutionResult> {
+    return new Promise<HookExecutionResult>(resolvePromise => {
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+
+      const child = spawn(command, {
+        cwd: this.cwd,
+        env,
+        shell: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Process already ended
+        }
+      }, timeoutMs);
+
+      child.stdout.on('data', chunk => {
+        stdout += chunk.toString('utf8');
+      });
+
+      child.stderr.on('data', chunk => {
+        stderr += chunk.toString('utf8');
+      });
+
+      child.on('error', err => {
+        clearTimeout(timer);
+        resolvePromise({
+          executed: false,
+          exitCode: 1,
+          stdout,
+          stderr,
+          denied: false,
+          error: err.message,
+        });
+      });
+
+      child.on('close', code => {
+        clearTimeout(timer);
+        const exitCode = code ?? (timedOut ? 124 : 1);
+        const denied = exitCode === 2;
+        const injectedContext =
+          exitCode === 0 && stdout.trim().length > 0 ? stdout.trim() : undefined;
+        let error: string | undefined;
+
+        if (timedOut) {
+          error = `Hook timed out after ${timeoutMs}ms`;
+        } else if (exitCode !== 0 && exitCode !== 2) {
+          error = stderr.trim() || `Hook exited with code ${exitCode}`;
+        }
+
+        resolvePromise({
+          executed: true,
+          exitCode,
+          stdout,
+          stderr,
+          denied,
+          injectedContext,
+          error,
+        });
+      });
+
+      try {
+        child.stdin.write(inputJson, 'utf8');
+        child.stdin.end();
+      } catch {
+        // Child could exit before writing
+      }
+    });
   }
 }
