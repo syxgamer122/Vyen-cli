@@ -104,6 +104,7 @@ test('reverting never overwrites a file the user changed after the agent turn un
 });
 
 test('model-initiated image reads outside the workspace require approval; workspace images do not', async t => {
+  if (process.platform === 'win32') { t.skip('Windows lacks unprivileged symlinks'); return; }
   const f = await fixture(t);
   await writeFile(join(f.cwd, 'in.png'), PNG);
   const outside = join(f.root, 'private.png');

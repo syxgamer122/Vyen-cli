@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import type { PermissionRules } from './settings.js';
 import { type PermissionMode, normalizeToolName } from './tools.js';
 
-export type PolicyDecision = 'allow' | 'ask' | 'deny';
+export type PolicyDecision = 'allow' | 'ask' | 'deny' | 'default';
 
 export interface ToolRequest {
   tool: string;
@@ -158,6 +158,6 @@ export function evaluateToolPolicy(
   if (ctx.userRules?.allow?.some(p => matchToolPattern(p, request, allowOpts))) {
     return 'allow';
   }
-  // Default to ask
-  return 'ask';
+  // Default when no rule matches
+  return 'default';
 }

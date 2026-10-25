@@ -888,15 +888,18 @@ async function resolveCloudflaredBinary(
     if (res.ok) {
       const bytes = Buffer.from(await res.arrayBuffer());
       const tmpBin = `${localBin}.tmp-${randomUUID()}`;
-      await writeFile(tmpBin, bytes);
-      if (process.platform !== 'win32') {
-        await chmod(tmpBin, 0o755);
-      }
+      let renameSuccess = false;
       try {
+        await writeFile(tmpBin, bytes);
+        if (process.platform !== 'win32') {
+          await chmod(tmpBin, 0o755);
+        }
         await rename(tmpBin, localBin);
-      } catch (err) {
-        await unlink(tmpBin).catch(() => {});
-        throw err;
+        renameSuccess = true;
+      } finally {
+        if (!renameSuccess) {
+          await unlink(tmpBin).catch(() => {});
+        }
       }
       if (await canSpawn(localBin)) return localBin;
     }

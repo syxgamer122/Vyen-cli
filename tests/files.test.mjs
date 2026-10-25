@@ -8,6 +8,7 @@ import { runCommand } from '../dist/process.js';
 import { fixture } from './helpers.mjs';
 
 test('existing files require a fresh read; edits preserve file mode', async t => {
+  if (process.platform === 'win32') { t.skip('Windows lacks POSIX file mode bits'); return; }
   const f = await fixture(t), files = new WorkspaceFiles(f.cwd);
   const path = join(f.cwd, 'script.sh');
   await writeFile(path, 'first\n', { mode: 0o755 });
@@ -24,6 +25,7 @@ test('existing files require a fresh read; edits preserve file mode', async t =>
 });
 
 test('edits preserve exact permissions under restrictive umasks; new files obey umask', async t => {
+  if (process.platform === 'win32') { t.skip('Windows lacks POSIX umask/mode permissions'); return; }
   const f = await fixture(t);
   for (const mask of [0o027, 0o007, 0o077]) {
     const source = `
@@ -50,6 +52,7 @@ test('edits preserve exact permissions under restrictive umasks; new files obey 
 });
 
 test('workspace containment rejects ../ and symlink escapes including missing leaves', async t => {
+  if (process.platform === 'win32') { t.skip('Windows lacks unprivileged symlinks'); return; }
   const f = await fixture(t), files = new WorkspaceFiles(f.cwd);
   await writeFile(join(f.root, 'outside.txt'), 'private');
   await symlink(f.root, join(f.cwd, 'escape'));
@@ -67,6 +70,7 @@ test('exact edit rejects ambiguous replacements and supports explicit replaceAll
 });
 
 test('portable search is bounded and skips symlinks', async t => {
+  if (process.platform === 'win32') { t.skip('Windows lacks unprivileged symlinks'); return; }
   const f = await fixture(t), files = new WorkspaceFiles(f.cwd);
   await files.write('a.txt', 'hello needle\nworld');
   await symlink(join(f.root, 'missing'), join(f.cwd, 'link'));

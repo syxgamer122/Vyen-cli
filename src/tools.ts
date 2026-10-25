@@ -366,7 +366,7 @@ export class ToolRegistry {
   onPlanExit?: (plan: string) => void;
   askUser?: (questions: UserInputQuestion[], signal: AbortSignal) => Promise<Record<string, string[]>>;
   pendingImages: Array<{ path: string; mimeType: string; bytes: Uint8Array }> = [];
-  policy?: (request: { tool: string; input: unknown }) => 'allow' | 'ask' | 'deny';
+  policy?: (request: { tool: string; input: unknown }) => 'allow' | 'ask' | 'deny' | 'default';
   private definitions = new Map<string, RegisteredTool>();
   constructor(readonly cwd: string, readonly approve: Approve, public readOnly = false) {
     this.files = new WorkspaceFiles(cwd);

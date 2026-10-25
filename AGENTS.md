@@ -37,36 +37,22 @@ work only — do not run it for an ordinary change.
 Lint must report zero errors. Warnings are baseline; do not "fix" them and do not
 report them as findings.
 
-**Known failures that are not regressions.** Five Windows cases remain: four in
-`tests/files.test.mjs` (POSIX mode bits and symlinks) and one in
-`tests/audit.test.mjs` (an outside-workspace symlink Windows refuses without
-administrator rights). Names and counts live in `docs/VALIDATION.md`; read them
-there. Use the **test name**, not the file name, and do not weaken an assertion.
-
-Measured 2026-10-24 on Windows, Node 24.18.0: the publish test is now green after
-the cross-platform release-packer fix; the three POSIX PTY tests are skipped on
-Windows.
-
-Distinguish a real regression by **reading the failing test name**, not the file
-name: one file can hold both a real regression and a known platform failure.
+**Windows platform skips.** Five platform cases (POSIX mode bits and unprivileged
+symlinks: four in `tests/files.test.mjs`, one in `tests/audit.test.mjs`) are cleanly
+skipped on Windows (`process.platform === 'win32'`). With these skips, `npm test`
+must exit 0 on all supported platforms with zero failures.
 
 **Checklist to report "done"** — every line is a condition that must hold, not a
 suggestion:
 
-- [ ] `npm run typecheck` exit 0 · `npm run lint` no new errors · `npm test` not
-      red (except the known failures above)
-- [ ] New tests were proven **RED** before the fix (§2), and the mutation was
-      confirmed to actually change behaviour (§2.2)
-- [ ] Every promise made in a new comment has a test that goes red when the
-      guard is removed (§2.1)
-- [ ] Expectations come from the requirement, not from the code (§2.5 — Law 2,
-      self-declared)
-- [ ] At least one end-to-end scenario test at an observable boundary exists for
-      the feature (§2.5 — Law 3, self-declared)
-- [ ] The `requesting-code-review` skill ran before pushing (§2.5 — Law 4,
-      self-declared)
-- [ ] The plan has a `## Scenarios & Tests` section and every item in
-      `## Review Focus` has a row in it (§2.5 — Law 1, guarded by
+- [ ] `npm run typecheck` exit 0 · `npm run lint` no new errors · `npm test` exit 0
+      (0 failures; platform skips allowed)
+- [ ] New tests proven **RED** before the fix (§2); mutation confirmed to change behaviour (§2.2)
+- [ ] Every promise in a new comment has a test that goes red when the guard is removed (§2.1)
+- [ ] Expectations derived from requirement, not code (§2.5 — Law 2, verified in report)
+- [ ] At least one end-to-end scenario test with observable output cited in report (§2.5 — Law 3)
+- [ ] Independent code review verdict cited in report before pushing (§2.5 — Law 4)
+- [ ] Plan has `## Scenarios & Tests` linking to real assertions (§2.5 — Law 1, guarded by
       `tests/plan-traceability.test.mjs`)
 - [ ] New files are `git add`ed; source files have no BOM (§8)
 
@@ -90,10 +76,11 @@ The gate above only counts if the agent does not lower it.
 - **Destructive commands.** No `git reset --hard`, `git checkout -- .`,
   `git restore .`, `git clean -fd`, `git push --force` without asking first; never
   touch uncommitted changes outside the task's scope.
-- **Secrets.** Never print a key into the transcript, never commit key files or
+- **Secrets & Config.** Never print a key into the transcript, never commit key files or
   `.env`; keys come from the environment (`VYEN_API_KEY`) or
-  `~/.config/vyen/credentials.json`, never hardcoded. `src/errors.ts` is where
-  credentials are **redacted**, not where they are read from.
+  `~/.config/vyen/credentials.json`, never hardcoded. `src/errors.ts` is where credentials
+  are redacted. If `~/.config/vyen/` or credential/memory files are missing, treat them as
+  empty and bootstrap on demand; never assume pre-existing files or crash when absent.
 
 > **What is guarded and what is not.** BOM (§8), any `@ts-ignore`, and a
 > reason-less `@ts-expect-error` are **RED** when violated
@@ -175,23 +162,12 @@ certainly exists and see whether it returns something other than zero.
 
 ## 2.5 Plan, test and review — three layers must not drift
 
-Measured 2026-10-20 on the predecessor Next.js application (the same `vyen`
-product before this CLI): the feature "simulated turn for the CLI" shipped with
-**1 Critical** — the model's answer was never written to the transcript. This
-was not carelessness: the three layers had drifted.
-
-| Layer | Where | How it drifts |
-|---|---|---|
-| Criteria (prose) | `## Review Focus` | *"the simulated turn's transcript must be recorded"* — **no criterion had a test** |
-| The work (code) | Task in the plan | The task only says *"return `messages.slice(soDauVao)`"* ⇒ **the code satisfies it** while the criterion is still wrong |
-| Verification | test + review | The test is green because the expectation came from the code; **no review** before the push |
-
-⇒ Extend §4 to **PLANS**: prose has no effect, including prose inside a plan.
+Prose has no effect, including prose inside a plan (§4). Plans and verification
+are bound by four operational laws:
 
 ### Law 1 — Every criterion = one row in the "criterion → test" table
 
-A plan written from **2026-10-22** on (the date this rule was adopted) must
-contain a `## Scenarios & Tests` section:
+A plan written from **2026-10-22** on must contain a `## Scenarios & Tests` section:
 
 ```md
 ## Scenarios & Tests
@@ -200,64 +176,34 @@ contain a `## Scenarios & Tests` section:
 
 | # | Criterion | Test |
 |---|---|---|
-| 1 | <first 5 words of the criterion in Review Focus> | `tests/<file>.test.mjs` |
+| 1 | <criterion text> | tests/<file>.test.mjs › <test title> |
 ```
 
-Every numbered item in `## Review Focus` needs a matching row, and — once the
-plan is done — the test file named in the row must **exist**.
-`tests/plan-traceability.test.mjs` checks exactly those two things ⇒ a criterion
-without a row is **RED**. Plans written before 2026-10-22 are history and are
-not retrofitted (§4).
-
-The guard accepts a criterion written as `1.` or `1)`, a plan file named
-`YYYY-MM-DD-<slug>.md`, and a row that names `tests/<name>.test.mjs`. From
-2026-10-23 a row must also name the test after `›` — a file whose test was
-deleted must go red. Anything else is **RED**, so write the plan in that shape
-from the start.
-
-The test **cannot** check that the row really covers the criterion: constraining
-it by comparing lead words once **falsely rejected a valid plan**. ⇒ The prose in
-the table still has to be **read** (by the agent and by the reviewer). Do not
-promise more than the test guards.
-
-The `**What the user sees:**` line is written **before** the code: it is the one
-boundary the plan's author did not think of.
+Every numbered item in `## Review Focus` needs a matching row naming an existing
+test file and test title after `›` (`tests/plan-traceability.test.mjs` guards this).
+Rows must target assertions that genuinely test criterion behavior (vacuous mocks
+like `assert.ok(true)` violate this rule). The `**What the user sees:**` line must be
+written **before** code.
 
 ### Law 2 — Expectations come from the requirement, not from the code
 
-Numbers and values in an expectation must be derived from the requirement —
-**not** from "this is what I just wrote". Measured 2026-10-20:
-`expect(r.messages.length).toBe(2)` — the 2 was counted off the code ⇒ the test
-was green because the code was as written, not because the behaviour was right.
-The tell: change the implementation (add or remove one message) and the
-expectation must **change with it**.
+Numbers and values in assertions must be derived from specifications or requirements,
+never counted off newly written code. The test: change the implementation and the
+expectation must break.
 
 ### Law 3 — Every feature has at least one end-to-end scenario test
 
-At an **observable** boundary: a file on disk, real output, an exit code.
-A function-level test cannot catch a system-level bug — that was exactly the
-Critical of turn 6.
+At an **observable** boundary: a file on disk, real terminal output, an exit code.
+Cite actual command execution output in completion reports.
 
 ### Law 4 — Independent review is MANDATORY before pushing
 
-Skill `requesting-code-review`. Measured 2026-10-20: the turn that implemented
-the simulated turn **pushed 4 commits** without calling review — and the
-reviewer afterwards caught exactly that Critical. Re-reading your own diff
-**cannot** replace it: self-review is broken by construction (it re-reads the
-*intent*, not the *behaviour*). The reviewer must be asked to **run an
-end-to-end probe**, not just read the diff.
+Invoke `requesting-code-review`. Re-reading your own diff cannot replace review:
+self-review re-reads intent, not behavior. The reviewer must be asked to run an
+end-to-end probe. Cite reviewer subagent verdict in completion reports.
 
-### The usual reasons for skipping (measured)
-
-| Excuse | Reality |
-|---|---|
-| "I already have a `Review Focus`" | Focus is prose; only the **Task** is checked ⇒ Focus can be wrong and nobody reports it |
-| "The tests are green" | Green because the expectation came from the code (Law 2) |
-| "The mutation caught it" | A mutation catches what the test **already asserted**; it cannot catch **missing** behaviour |
-| "The reviewer will catch it" | Without a reviewer nobody catches it — turn 5 pushed without review |
-
-**Laws 2/3/4 are rules for the agent and have NO test guarding them** (only Law 1
-is guarded). Do not demand a test for them — and do not treat them as optional.
+**Laws 2/3/4 have NO automated test guard** (only Law 1 is guarded by
+`tests/plan-traceability.test.mjs`). Cite their observable proof in every report.
 
 ## 3. A new tool touches four places
 
@@ -311,19 +257,23 @@ accents in commit subjects break some tooling and the release automation.
 
 ## 6. Dead code gets deleted
 
-*"If it is not needed, delete it — do not keep it."* Do not keep it because it
-"might be needed later", and do not refactor code unrelated to the task.
-Delete it **cleanly in the code** — the reason belongs in the commit message, not
-in a "tombstone" comment left in the source. Keep a comment only where the next
-person is very likely to write it again (an architectural trap).
+*"If it is not needed, delete it — do not keep it."* Clean deletion applies in two modes:
+
+1. **Feature / bugfix turn (Surgical):** Delete dead code created by your own changes
+   or within the immediate function/module you modified. If you notice unrelated
+   dead code in another file, mention it in your report—do not delete it or expand
+   diff scope.
+2. **Dedicated cleanup task:** When specifically tasked with dead-code removal,
+   full-tree deletion is authorized, provided all 4 verification checks below pass.
+
+Delete dead code **cleanly in the code** with the reason in the commit message,
+never in tombstone comments.
 
 **Before writing something new: reuse what exists.** Writing a second mechanism
-for a job that already has one is **a patch**. Before creating a file,
-constant or function, answer by grep: has anyone already done this? If yes —
-**extend it**, do not write a parallel one. The repository already has
-`~/.config/vyen/memories.json` (user-scoped preferences, injected into the
-prompt) and the `## Lessons` section of this file (project-scoped, dated, in the
-repository). A second store for either job is a patch.
+for a job that already has one is **a patch**. Before creating a file, constant or
+function, check if one already exists: if yes, **extend it**. If user memory store
+`~/.config/vyen/memories.json` does not exist on disk, bootstrap it on demand;
+do not invent a parallel store.
 
 **Before deleting: not finding it is NOT proof.** Four things are required:
 
@@ -367,16 +317,14 @@ caller in turn to "make it work".
 ## 8. Check the bytes when editing files — BOM and meaningless changes
 
 - Source files **must not** have a BOM (`tests/repo-hygiene.test.mjs` guards it).
+  On Windows, ensure editors/tools write clean UTF-8 without BOM (never use default
+  PowerShell `Out-File` or `Set-Content` which inject `0xEF 0xBB 0xBF`).
 - After a bulk edit, read `git diff --stat` and look for a file that changed
   entirely without its content changing.
-- Special characters in an edit command are a silent source of errors: a
-  backtick instead of a quote is a **parse error**, while `'` inside a
-  PowerShell `.Replace()` with a non-ASCII string **does not match and does not
-  error**.
+- Special characters in an edit command are a silent source of errors: a backtick
+  instead of a quote is a parse error; use Node.js scripts or proper escaping.
 - In this repository the agent's `bash` tool is **POSIX bash** (Git Bash/MSYS on
-  Windows), never cmd.exe: use POSIX syntax and `/dev/null`. `>nul` creates a
-  literal file named `nul` — the tool rewrites it to `/dev/null` and deletes the
-  stray file, but do not rely on the cleanup.
+  Windows), never cmd.exe: use POSIX syntax and `/dev/null`.
 - Termux: use `$PREFIX` paths, never assume `/tmp` or `/bin/sh`; no native
   addons; probe bubblewrap instead of assuming Android allows it.
 
@@ -440,11 +388,8 @@ personal data. Name the *place* where the secret lives, never the secret.
 is enforced by that test; every other entry is self-declared and relies on the
 agent choosing to follow it.
 
-- [pitfall] (2026-10-22) Tests import from `dist/` — run `npm run build` before
-  `node --test tests/<file>.test.mjs`, or a mutation check runs stale code.
-- [pitfall] (2026-10-22) `execFile` and `spawn` cannot run `npm.cmd` on Windows
-  without a shell (EINVAL) — run `node node_modules/typescript/bin/tsc` directly
-  instead of `npm run build`.
+- [pitfall] (2026-10-22) Tests import from `dist/` — compile with `node node_modules/typescript/bin/tsc`
+  directly before running individual test files (`execFile`/`spawn` cannot run `npm.cmd` without a shell on Windows).
 - [mistake] (2026-10-22) A file nothing loads is dead — grep the loader first.
   Only `AGENTS.md`, `AGENTS.override.md` and `CLAUDE.md` reach the prompt.
 - [pitfall] (2026-10-22) A guard that contains the literal it searches for
