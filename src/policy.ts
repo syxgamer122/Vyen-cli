@@ -19,7 +19,7 @@ export interface PolicyEvaluationContext {
 }
 
 const CHAINING_PATTERN = /[\r\n;&|`><]|\$\(|\$\{/;
-const COMPOUND_SPLIT_REGEX = /[;\r\n|&]+|\$\(|\`/g;
+const COMPOUND_SPLIT_REGEX = /[;\r\n|&]+|\$\(|`/g;
 const WRAPPER_PREFIX_REGEX = /^(?:sudo(?:\s+-[a-zA-Z0-9]+)*|env(?:\s+[a-zA-Z0-9_]+=[^\s]+)*|sh\s+-c|bash\s+-c)\s+/i;
 
 function cleanCommandSegment(seg: string): string {

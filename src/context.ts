@@ -203,6 +203,15 @@ export async function loadProjectInstructions(cwd: string): Promise<string> {
         if (code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'EISDIR' && code !== 'EACCES' && code !== 'EPERM') throw error;
       }
     }
+    try {
+      const learnings = (await readFile(join(dir, 'AGENT_LEARNINGS.md'), 'utf8')).trim();
+      if (learnings) {
+        parts.push(learnings);
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'EISDIR' && code !== 'EACCES' && code !== 'EPERM') throw error;
+    }
   }
   return limitText(parts.join('\n\n'), 24_000);
 }

@@ -229,6 +229,34 @@ it, or the agent sees it but the TUI shows a bare name.
 
 Skipping a seam is SPEC drift even when the code compiles.
 
+### 3.2 A permission rule, policy or hook touches four execution seams
+
+Policy, hooks, and workspace trust are not finished until all 4 execution runners
+are wired:
+
+1. `src/cli.ts` — interactive TUI, headless `-p`, and session replace (`/new`, `/resume`)
+2. `src/subagents.ts` — child harnesses must inherit policy and hook bus
+3. `src/network.ts` — peer Agent Network harnesses must attach `policy` to `ToolRegistry` and pass `hookBus` to `Harness`
+4. `src/workflow.ts` — workflow step harnesses must inherit policy and hook bus
+
+Missing any one is a silent security bypass: prompts in that runner execute without
+user deny rules or audit hooks.
+
+### 3.3 Security controls fail closed, never open
+
+- **Defaults:** `HookBus.isTrusted` defaults to `false`.
+- **Timeouts & errors:** `PreToolUse` hook timeouts and spawn crashes default to
+  `denied: true` (fail-closed).
+- **Corrupt config:** `loadProjectSettings` must strip BOM, distinguish `ENOENT`
+  from syntax/schema errors, and fail closed with a clear error; never silently
+  discard `deny` rules into `{}`.
+- **Chained commands:** Deny rules must be segment-aware (`;&|` etc.): a `deny`
+  rule matches if ANY segment matches; an `allow` rule matches only if NO chained
+  segment exists.
+- **Trust coverage:** `calculateWorkspaceTrustHash` must cover all local scripts
+  and executables referenced in `permissions.allow`, hashing non-existent targets
+  as `file:<path>:missing`.
+
 ## 4. Docs
 
 **Docs have no effect. Tests do.** Plans included — see §2.5.
@@ -367,37 +395,17 @@ Run the §1 checklist. In addition:
 
 ## Lessons — append here
 
-The accumulating part: one dated, evidence-backed rule per mistake. Read this
-section before planning; append to it after you get something wrong.
-
-Format:
-
-```
-- [mistake|pitfall|approach] (YYYY-MM-DD) One reusable rule, naming the file,
-  command or path it is about. Evidence goes in the sentence, not in a story.
-```
-
-`mistake` — something done wrong that must not be repeated. `pitfall` — a trap
-in this codebase that surprises people. `approach` — a technique that worked,
-reuse it.
-
-**No secrets.** A lesson never records an API key, a token, a credential or
-personal data. Name the *place* where the secret lives, never the secret.
-
-**Enforced vs self-declared.** An entry ending in `(guard: tests/<file>.test.mjs)`
-is enforced by that test; every other entry is self-declared and relies on the
-agent choosing to follow it.
+Active tripwires and tactical lessons. Detailed failure patterns, anti-patterns,
+and security mistake analyses are maintained in `AGENT_LEARNINGS.md` (loaded
+automatically alongside this file by `src/context.ts`). When a lesson has been
+folded into a rule above (§3.2, §3.3), delete the dated line to preserve prompt room.
 
 - [pitfall] (2026-10-22) Tests import from `dist/` — compile with `node node_modules/typescript/bin/tsc`
   directly before running individual test files (`execFile`/`spawn` cannot run `npm.cmd` without a shell on Windows).
 - [mistake] (2026-10-22) A file nothing loads is dead — grep the loader first.
-  Only `AGENTS.md`, `AGENTS.override.md` and `CLAUDE.md` reach the prompt.
+  `loadProjectInstructions` loads `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`, and `AGENT_LEARNINGS.md`.
 - [pitfall] (2026-10-22) A guard that contains the literal it searches for
   reports itself — spell the pattern in pieces and check its own file is clean
   (guard: tests/repo-hygiene.test.mjs).
 - [mistake] (2026-10-22) `git add -A` swept in an untracked file without
   reading it — run `git status` and read every new file before committing it.
-
-Keep this list short: when a lesson has been folded into a rule above, delete
-the dated line. The section is loaded into every prompt — an unbounded list
-pushes the rules out of the context.

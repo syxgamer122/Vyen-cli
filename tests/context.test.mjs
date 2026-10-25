@@ -121,3 +121,16 @@ test('the workspace AGENTS.md reaches the system prompt, lessons section include
   assert.match(prompt, /build the workspace before running a single test file/);
 });
 
+test('loadProjectInstructions loads AGENT_LEARNINGS.md alongside AGENTS.md', async t => {
+  const { loadProjectInstructions } = await import('../dist/context.js');
+  const f = await fixture(t);
+  await writeFile(join(f.cwd, 'AGENTS.md'), '# Core Rules\n1. Always test.');
+  await writeFile(join(f.cwd, 'AGENT_LEARNINGS.md'), '# Learnings\n- [mistake] never anchor bash regexes.');
+
+  const instructions = await loadProjectInstructions(f.cwd);
+  assert.match(instructions, /# Core Rules/);
+  assert.match(instructions, /1\. Always test\./);
+  assert.match(instructions, /# Learnings/);
+  assert.match(instructions, /never anchor bash regexes\./);
+});
+
