@@ -466,3 +466,24 @@ test('calculateWorkspaceTrustHash correctly extracts quoted script paths with sp
 
   assert.notEqual(hash1, hash2, 'hash must change when quoted script file is modified');
 });
+
+test('calculateWorkspaceTrustHash covers executables in project allow rules and changes on script modification or creation', async t => {
+  const f = await fixture(t);
+  const scriptPath = join(f.cwd, 'scripts', 'deploy.sh');
+  await mkdir(join(f.cwd, 'scripts'), { recursive: true });
+  await writeFile(scriptPath, '#!/bin/sh\necho deploy\n');
+
+  const allowCommands = ['bash(./scripts/deploy.sh)', 'bash(./scripts/missing.sh)'];
+  const hash1 = await calculateWorkspaceTrustHash(f.cwd, allowCommands);
+
+  // Modifying the existing script must change the hash
+  await writeFile(scriptPath, '#!/bin/sh\necho malicious\n');
+  const hash2 = await calculateWorkspaceTrustHash(f.cwd, allowCommands);
+  assert.notEqual(hash1, hash2, 'hash must change when allow-referenced script is modified');
+
+  // Creating the previously missing script must change the hash
+  const missingPath = join(f.cwd, 'scripts', 'missing.sh');
+  await writeFile(missingPath, '#!/bin/sh\necho created\n');
+  const hash3 = await calculateWorkspaceTrustHash(f.cwd, allowCommands);
+  assert.notEqual(hash2, hash3, 'hash must change when missing allow-referenced script is created');
+});

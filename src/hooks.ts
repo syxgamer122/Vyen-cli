@@ -75,26 +75,51 @@ export async function calculateWorkspaceTrustHash(
     hasher.update('settings:none');
   }
 
-  // 2. Discover and hash any local files referenced in hook commands
+  // 2. Discover and hash any local files referenced in hook commands or allow rules
   const checkedFiles = new Set<string>();
-  for (const cmd of hookCommands) {
-    const tokens = cmd.match(/[^\s"']+|"[^"]*"|'[^']*'/g) || [];
-    for (const token of tokens) {
-      // Strip potential quotes
-      const cleanToken = token.replace(/^['"]|['"]$/g, '');
-      const potentialPath = resolve(normalizedCwd, cleanToken);
-      if (checkedFiles.has(potentialPath)) continue;
-      checkedFiles.add(potentialPath);
+  for (const rawCmd of hookCommands) {
+    const cmdStr = rawCmd.trim();
+    if (!cmdStr) continue;
 
-      try {
-        const fileStat = await stat(potentialPath);
-        if (fileStat.isFile()) {
-          const content = await readFile(potentialPath);
-          hasher.update(`file:${cleanToken}:`);
-          hasher.update(content);
+    // Unpack wrapper patterns like bash(...) or read_file(...)
+    const parenIdx = cmdStr.indexOf('(');
+    const candidateStrings = [cmdStr];
+    if (parenIdx > 0 && cmdStr.endsWith(')')) {
+      candidateStrings.push(cmdStr.slice(parenIdx + 1, -1).trim());
+    }
+
+    for (const str of candidateStrings) {
+      const tokens = str.match(/[^\s"']+|"[^"]*"|'[^']*'/g) || [];
+      for (const token of tokens) {
+        // Strip potential quotes
+        const cleanToken = token.replace(/^['"]|['"]$/g, '');
+        if (!cleanToken || cleanToken === '*' || cleanToken === '.') continue;
+
+        const isExplicitScriptOrPath =
+          cleanToken.startsWith('./') ||
+          cleanToken.startsWith('../') ||
+          cleanToken.includes('/') ||
+          cleanToken.includes('\\') ||
+          /\.(?:sh|bash|js|mjs|cjs|ts|py|rb|pl|exe|bat|cmd)$/i.test(cleanToken);
+
+        const potentialPath = resolve(normalizedCwd, cleanToken);
+        if (checkedFiles.has(potentialPath)) continue;
+        checkedFiles.add(potentialPath);
+
+        try {
+          const fileStat = await stat(potentialPath);
+          if (fileStat.isFile()) {
+            const content = await readFile(potentialPath);
+            hasher.update(`file:${cleanToken}:`);
+            hasher.update(content);
+          }
+        } catch {
+          // If it was an explicit script path that does not exist, hash a missing sentinel
+          // so creating the file later immediately invalidates the trust hash
+          if (isExplicitScriptOrPath) {
+            hasher.update(`file:${cleanToken}:missing`);
+          }
         }
-      } catch {
-        // Not a readable local file; skip
       }
     }
   }

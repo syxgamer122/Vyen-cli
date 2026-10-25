@@ -814,7 +814,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         let isTrusted = false;
 
         if (hasProjectHooks || hasProjectAllow) {
-          const hash = await calculateWorkspaceTrustHash(runtime.cwd, (layered.hooks ?? []).map(h => h.command));
+          const hookCommands = (layered.hooks ?? []).map(h => h.command);
+          const allowCommands = layered.projectPermissions?.allow ?? [];
+          const hash = await calculateWorkspaceTrustHash(runtime.cwd, [...hookCommands, ...allowCommands]);
           isTrusted = await isWorkspaceTrusted(runtime.cwd, hash);
           if (!isTrusted && values['trust-workspace']) {
             await recordWorkspaceTrust(runtime.cwd, hash);
