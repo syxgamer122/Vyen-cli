@@ -13,7 +13,7 @@ copy of a rule that already lives in `AGENTS.md`. Two copies of one rule drift a
 ## 2. Shell Security: Segment-Aware Matching vs. Start-Anchored Regexes
 - **Canonical rule:** `AGENTS.md` §3.3.
 - **Seen:** `echo a; rm -rf /` and `cd . && rm -rf /` bypassed start-anchored patterns.
-- **Detail:** split on `;`, `&&`, `||`, `|`, newline, `$()`, backticks; strip subshells `(...)`, `{...}`, quotes, and wrappers (`sudo`, `env`, `sh -c`, `bash -c`, flags); deny if ANY segment matches.
+- **Detail:** split on `;`, `&&`, `||`, `|`, newline, `$()`, `<()`, `>()`, backticks; strip subshells `(...)`, `{...}`, quotes, and wrappers (`sudo`, `env`, `sh -c`, `bash -c`, `eval`, `exec`, flags); deny if ANY segment matches.
 
 ## 3. Trust Coverage: Executables in Auto-Allow Rules
 - **Canonical rule:** `AGENTS.md` §3.3.
@@ -24,11 +24,12 @@ copy of a rule that already lives in `AGENTS.md`. Two copies of one rule drift a
 - **Canonical rule:** `AGENTS.md` §3.3.
 - **Anti-Pattern:** `isTrusted` defaulting to `true`, hook timeouts defaulting to `denied: false`, or `loadProjectSettings` catching errors into `{}`.
 - **Consequence:** Silently bypasses security controls. Defaults, errors, and timeouts must fail closed.
+- **Deny Precedence:** Persistent project/user `deny` rules strictly evaluate before `cliAllowed`, preventing `--allowed-tools` flag escalations over restricted files.
 
 ## 5. Lifecycle Synchronization: Process vs. Session Lifetime
 - **Canonical rule:** `AGENTS.md` §3.4.
 - **Anti-Pattern:** Dispatching `SessionEnd` only on CLI exit, `SessionStart` only on `messages.length === 0`, or storing flags on the transient `Harness`.
-- **Consequence:** `/new` and `/resume` drop old `SessionEnd`; resumed sessions miss `SessionStart`; store rebuilds restart sessions or lose ends.
+- **Consequence:** `/new`, `/resume`, and `/delete` drop old `SessionEnd`; resumed sessions miss `SessionStart`; store rebuilds restart sessions or lose ends.
 - **Guard:** `tests/hooks.test.mjs` › "Harness emits SessionStart once on the first turn of a resumed session and SessionEnd at most once".
 
 ## 6. Testing Rigor: Negative Baselines & Adversarial Tests
