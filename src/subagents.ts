@@ -187,7 +187,14 @@ export class Subagents {
     readonly emit: (event: SubagentEvent) => void = () => {},
     readonly hookBus?: HookBus,
   ) {
-    this.network = new AgentNetwork(this.config, this.parent, this.bus);
+    this.network = new AgentNetwork(
+      this.config,
+      this.parent,
+      this.bus,
+      () => {},
+      this.registry.policy,
+      this.hookBus,
+    );
   }
 
   get subagentsRoot(): string {
@@ -485,6 +492,7 @@ export class Subagents {
   ): Promise<void> {
     const signal = managed.controller.signal;
     let store: SessionStore | undefined;
+    let childHarness: Harness | undefined;
     let denied = false;
     let failure: { error: unknown } | undefined;
     let acquired = false;
@@ -510,7 +518,7 @@ export class Subagents {
       this.bus.registerPeerTools(tools, managed.nickname, managed.agentType);
       const peerInbox = this.bus.drainUnreadPromptBlock(managed.nickname);
       const effectivePrompt = peerInbox ? `${prompt}\n${peerInbox}` : prompt;
-      const childHarness = new Harness(childConfig, store, tools, event => {
+      childHarness = new Harness(childConfig, store, tools, event => {
         if (event.type !== 'text' && event.type !== 'reasoning' && event.type !== 'tool_stream') {
           this.emit({ type: 'subagent', id: managed.id, state: 'progress', event });
         }
@@ -537,6 +545,7 @@ export class Subagents {
       if (lastCp) {
         this.registry.files.mergeBackups(lastCp.files);
       }
+      await childHarness?.endSession().catch(() => {});
       await store?.close();
     } catch (error) {
       failure ??= { error };
@@ -820,6 +829,7 @@ export class Subagents {
   private async child(task: string, readOnly: boolean, signal: AbortSignal, budget: RunBudget): Promise<string> {
     await this.acquire(signal);
     let store: SessionStore | undefined;
+    let childHarness: Harness | undefined;
     let denied = false;
     let report = '';
     let failure: { error: unknown } | undefined;
@@ -843,7 +853,7 @@ export class Subagents {
       tools.policy = this.registry.policy;
       // No delegation tools are registered in children: depth is exactly one.
       const config = { ...this.config };
-      const childHarness = new Harness(config, store, tools, event => {
+      childHarness = new Harness(config, store, tools, event => {
         // Parent progress is a control channel. The complete text/reasoning
         // belongs to the child transcript, never a per-token parent mirror.
         if (event.type !== 'text' && event.type !== 'reasoning' && event.type !== 'tool_stream') {
@@ -867,6 +877,7 @@ export class Subagents {
           this.registry.files.mergeBackups(cp.files);
         }
       }
+      await childHarness?.endSession().catch(() => {});
       await store?.close();
     } catch (error) {
       // Preserve a primary run/denial error if cleanup also fails; a successful

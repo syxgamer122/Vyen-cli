@@ -4,6 +4,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { Harness } from '../dist/harness.js';
+import { HookBus } from '../dist/hooks.js';
 import { SessionStore } from '../dist/session.js';
 import { Subagents } from '../dist/subagents.js';
 import { ToolRegistry } from '../dist/tools.js';
@@ -428,4 +429,37 @@ test('wait_agent reports timed_out while a target is still running', async t => 
   assert.ok(statuses.includes('running'), 'the slow child must still be running');
   assert.equal(waited.timed_out, true, 'a target that is still running means the wait timed out');
   await subagents.closeAll();
+});
+
+test('subagent cleanup dispatches SessionEnd once for the child session', async t => {
+  const f = await fixture(t);
+  let parentTurns = 0;
+  const p = await provider(t, (body, response) => {
+    if (isChild(body)) return sse(response, { text: 'Child report.' });
+    parentTurns++;
+    if (parentTurns === 1) {
+      return sse(response, { calls: [{ id: 'delegate1', name: 'delegate_task', input: { tasks: ['Inspect alpha'] } }] });
+    }
+    return sse(response, { text: 'Parent done.' });
+  });
+  const config = configFor(f, p);
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  t.after(() => store.close());
+  const tools = new ToolRegistry(f.cwd, async () => true);
+  const seen = [];
+  const hookBus = new HookBus({ cwd: f.cwd, isTrusted: true, hooks: [] });
+  hookBus.dispatch = async (event, payload) => { seen.push({ event, payload }); return []; };
+  new Subagents(config, store, tools, () => {}, hookBus).register();
+
+  await new Harness(config, store, tools, () => {}, undefined, hookBus)
+    .run('delegate', AbortSignal.timeout(10_000));
+
+  const ends = seen.filter(e => e.event === 'SessionEnd');
+  assert.equal(ends.length, 1, 'child cleanup must end its session once');
+  const childId = ends[0].payload.sessionId;
+  assert.notEqual(childId, store.session.id, 'SessionEnd must identify the child session');
+  assert(
+    seen.some(e => e.event === 'SessionStart' && e.payload.sessionId === childId),
+    'the child session must have started before it ends',
+  );
 });

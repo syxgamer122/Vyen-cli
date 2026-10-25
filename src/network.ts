@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { Harness, type HarnessEvent } from './harness.js';
 import { SessionStore } from './session.js';
 import { ToolRegistry, type RunBudget } from './tools.js';
+import type { HookBus } from './hooks.js';
 import type { RuntimeConfig } from './config.js';
 import { limitText } from './files.js';
 import { safeError } from './errors.js';
@@ -501,6 +502,8 @@ export class AgentNetwork {
     readonly parent: SessionStore,
     readonly bus: AgentNetworkBus,
     readonly emitEvent: (event: HarnessEvent) => void = () => {},
+    readonly policy?: ToolRegistry['policy'],
+    readonly hookBus?: HookBus,
   ) {}
 
   get networkSessionsRoot(): string {
@@ -633,6 +636,7 @@ export class AgentNetwork {
     store.session.title = `Network · ${params.persona.name} (R${params.round})`;
     try {
       const tools = new ToolRegistry(this.config.cwd, async () => false, true);
+      tools.policy = this.policy;
       tools.allowPeerToolsInReadOnly = true;
       this.bus.registerPeerTools(tools, params.persona.name, params.persona.role);
       if (!params.explore) {
@@ -672,7 +676,9 @@ export class AgentNetwork {
             `2. Point out specific strengths, blind spots, or trade-offs in other agents' ideas (reference them by name, e.g. @Architect, @Critic).\n` +
             `3. Refine your recommendation so the group converges toward the strongest practical solution (150-300 words).`;
 
-      const harness = new Harness(this.config, store, tools);
+      const harness = new Harness(this.config, store, tools, this.emitEvent, undefined, this.hookBus);
+      // A network round is an ephemeral nested runner: tool hooks apply, global lifecycle does not.
+      harness.sessionLifecycle = false;
       await harness.run(prompt, params.signal, params.budget);
       const answer = lastAssistantAnswer(store.session.messages, this.config.inlineReasoning);
       return limitText(answer || '(no response)', 6_000);
@@ -698,6 +704,7 @@ export class AgentNetwork {
     store.session.title = `Network · Moderator Synthesis`;
     try {
       const tools = new ToolRegistry(this.config.cwd, async () => false, true);
+      tools.policy = this.policy;
       tools.onlyPeerTools = true;
       const transcript = params.contributions
         .map(c => `### [Round ${c.round}] ${c.persona.name} (${c.persona.role})\n${c.response}`)
@@ -718,7 +725,8 @@ export class AgentNetwork {
         `3. **Actionable Implementation Plan** (concrete files, components, and verification steps)\n` +
         `Respond in the same language as the user's Topic.`;
 
-      const harness = new Harness(this.config, store, tools);
+      const harness = new Harness(this.config, store, tools, this.emitEvent, undefined, this.hookBus);
+      harness.sessionLifecycle = false;
       await harness.run(prompt, params.signal, params.budget);
       const answer = lastAssistantAnswer(store.session.messages, this.config.inlineReasoning);
       return limitText(answer || '(no synthesis generated)', 12_000);

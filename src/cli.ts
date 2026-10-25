@@ -1057,14 +1057,17 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                       childTools,
                       stepReadOnly ? 'readonly' : reg.planMode || step.mode === 'plan' ? 'plan' : 'ask',
                     );
-                    await new Harness(
+                    const wfHarness = new Harness(
                       step.effort ? { ...runtime, effort: step.effort } : runtime,
                       childStore,
                       childTools,
                       undefined,
                       undefined,
                       hookBus,
-                    ).run(stepPrompt, stepSig, reg.budget);
+                    );
+                    // A workflow step is an ephemeral nested runner: tool hooks apply, global lifecycle does not.
+                    wfHarness.sessionLifecycle = false;
+                    await wfHarness.run(stepPrompt, stepSig, reg.budget);
                     const { lastAssistantAnswer } = await import('./reasoning.js');
                     return lastAssistantAnswer(childStore.session.messages, runtime.inlineReasoning);
                   } finally {
@@ -2761,6 +2764,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               newStore.session.title = newTitle;
               await newStore.save();
             }
+            await activeHarness?.endSession().catch(() => {});
             const oldStore = store;
             store = newStore;
             await oldStore.discardIfEmpty();
@@ -2864,6 +2868,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                 runtime = previousRuntime;
                 throw error;
               }
+              await activeHarness?.endSession().catch(() => {});
               const oldStore = store;
               store = newStore;
               await oldStore.discardIfEmpty();
@@ -3041,6 +3046,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                     const stepHarness = step.effort
                       ? new Harness({ ...runtime, effort: step.effort }, store, tools, emit, undefined, harness.hookBus)
                       : harness;
+                    if (stepHarness !== harness) stepHarness.sessionLifecycle = false;
                     return await stepHarness.run(stepPrompt, stepSig, wfBudget);
                   } finally {
                     applyPermissionMode(tools, restoreMode);

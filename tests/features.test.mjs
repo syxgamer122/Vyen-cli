@@ -20,6 +20,7 @@ import {
   parseMarkdownWorkflow,
   interpolateWorkflowTemplate,
 } from '../dist/index.js';
+import { HookBus } from '../dist/hooks.js';
 import { fixture, provider, sse } from './helpers.mjs';
 
 test('QR encoder produces valid ISO/IEC 18004 finder patterns and half-block terminal output', () => {
@@ -520,4 +521,92 @@ test('Agent Network: P2P bus, explore_codebase=false isolation, live Round 2 pee
   assert(!Object.keys(tools.schemas()).includes('agent_network'));
   tools.planMode = false;
   assert(Object.keys(tools.schemas()).includes('agent_network'));
+});
+
+test('Agent Network enforces parent tool policy and hooks without emitting session lifecycle', async t => {
+  const f = await fixture(t);
+  await writeFile(join(f.cwd, 'secret.txt'), 'TOP-SECRET-CONTENT');
+  const p = await provider(t, (body, response) => {
+    if (!body.messages.some(m => m.role === 'tool')) {
+      return sse(response, { calls: [{ id: 'read-secret', name: 'read_file', input: { path: 'secret.txt' } }] });
+    }
+    return sse(response, { text: 'blocked-observed' });
+  });
+  const config = {
+    cwd: f.cwd,
+    dataDir: f.data,
+    provider: 'openai-compatible',
+    model: 'test-model',
+    baseUrl: p.url,
+    apiKey: 'fake',
+    contextWindow: 128000,
+    maxOutputTokens: 8192,
+    timeoutMs: 5000,
+    runTokenBudget: 0,
+  };
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  t.after(() => store.close());
+  const policyCalls = [];
+  const policy = request => {
+    policyCalls.push(request.tool);
+    return request.tool === 'read_file' ? 'deny' : 'default';
+  };
+  const seen = [];
+  const hookBus = new HookBus({ cwd: f.cwd, isTrusted: true, hooks: [] });
+  hookBus.dispatch = async (event, payload) => { seen.push({ event, payload }); return []; };
+
+  const net = new AgentNetwork(config, store, new AgentNetworkBus(), () => {}, policy, hookBus);
+  const result = await net.brainstorm({
+    topic: 'Policy probe',
+    roles: ['critic'],
+    rounds: 1,
+    exploreCodebase: true,
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  assert.ok(result.contributions.length >= 1);
+  for (const contribution of result.contributions) assert.doesNotMatch(contribution.response, /TOP-SECRET-CONTENT/);
+  assert(
+    !p.requests.some(r => JSON.stringify(r).includes('TOP-SECRET-CONTENT')),
+    'denied file contents must never reach the model',
+  );
+  assert(policyCalls.includes('read_file'), 'the persona tool call must be evaluated by the parent policy');
+  assert(seen.some(e => e.event === 'PreToolUse' && e.payload.tool === 'read_file'));
+  assert.equal(
+    seen.filter(e => e.event === 'SessionStart' || e.event === 'SessionEnd').length,
+    0,
+    'ephemeral network turns must not emit global session lifecycle',
+  );
+
+  const tools = new ToolRegistry(f.cwd, async () => true);
+  tools.policy = policy;
+  const sub = new Subagents(config, store, tools, () => {}, hookBus);
+  t.after(() => sub.closeAll());
+  assert.equal(sub.network.policy, policy, 'Subagents must hand its policy to the network');
+  assert.equal(sub.network.hookBus, hookBus, 'Subagents must hand its hook bus to the network');
+});
+
+test('CLI ends the active session before store swaps and suppresses lifecycle for nested workflow harnesses', async () => {
+  const source = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8');
+
+  for (const marker of ["if (input === '/new'", "input === '/resume' || input.startsWith('/resume ')"]) {
+    const start = source.indexOf(marker);
+    assert.ok(start > -1, `missing branch ${marker}`);
+    const block = source.slice(start, source.indexOf('rebuildHarness', start));
+    const endCall = block.indexOf('activeHarness?.endSession()');
+    const swap = block.indexOf('store = newStore');
+    assert.ok(endCall > -1, `${marker} must end the active session`);
+    assert.ok(swap > -1, `${marker} must swap the store`);
+    assert.ok(endCall < swap, `${marker} must end the session before the store swap`);
+  }
+
+  const childStart = source.indexOf('const childTools = new ToolRegistry(runtime.cwd, req => reg.approve(req));');
+  assert.ok(childStart > -1, 'workflow runPrompt child harness must exist');
+  const childBlock = source.slice(childStart, source.indexOf('await childStore.close()', childStart));
+  assert.match(childBlock, /sessionLifecycle = false/);
+
+  const stepStart = source.indexOf('const stepHarness = step.effort');
+  assert.ok(stepStart > -1, 'workflow step harness must exist');
+  const stepBlock = source.slice(stepStart, source.indexOf('return await stepHarness.run', stepStart));
+  assert.match(stepBlock, /stepHarness !== harness[\s\S]*sessionLifecycle = false/);
 });
