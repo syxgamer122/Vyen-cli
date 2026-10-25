@@ -27,9 +27,10 @@ Loaded by `loadProjectInstructions` in `src/context.ts`. When an agent makes a m
 - **Rule:** Security controls MUST fail closed: `isTrusted` defaults to `false`; timeouts/crashes default to `denied: true`; corrupt configs abort startup with an error.
 
 ## 5. Lifecycle Synchronization: Process vs. Session Lifetime
-- **Anti-Pattern (CLI-Exit Hook):** Dispatching `SessionEnd` only on CLI exit and `SessionStart` only on `messages.length === 0`.
-- **Consequence:** `/new` and `/resume` drop old `SessionEnd`; resumed sessions miss `SessionStart`.
-- **Rule:** Track `sessionStarted` on `Harness` instance. Trigger `activeHarness.endSession()` before store swaps in `/new` and `/resume`, and in subagent cleanup. Nested runners inherit tool hooks but do not spam global session lifecycle hooks.
+- **Anti-Pattern (CLI-Exit Hook):** Dispatching `SessionEnd` only on CLI exit and `SessionStart` only on `messages.length === 0`, or storing started/ended flags on the `Harness` instance.
+- **Consequence:** `/new` and `/resume` drop old `SessionEnd`; resumed sessions miss `SessionStart`; a rebuild (`/model`, `/effort`, `/cd`) over the same store restarts the session or loses its end.
+- **Rule:** Key lifecycle state to the `SessionStore` (module-level `WeakSet`), never to the harness that happens to be running. Trigger `activeHarness.endSession()` before store swaps in `/new` and `/resume`, and in subagent cleanup. Nested runners inherit tool hooks but do not spam global session lifecycle hooks.
+- **Guard:** tests/hooks.test.mjs › "Harness emits SessionStart once on the first turn of a resumed session and SessionEnd at most once"
 
 ## 6. Testing Rigor: Negative Baselines & Adversarial Tests
 - **Anti-Pattern (Happy-Path Mocks):** Testing only positive rule triggers without negative baselines (e.g. testing `ask: ['read_file']` without testing empty `{}` baseline).
