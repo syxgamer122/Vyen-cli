@@ -839,6 +839,17 @@ test('Non-PreToolUse hook timeout or error preserves denied false', async () => 
   const results = await bus.dispatch('SessionStart', {});
   assert.equal(results.length, 1);
   assert.equal(results[0].denied, false, 'Non-PreToolUse spawn error must not mark denied: true');
+
+  const timeoutBus = new HookBus({
+    cwd: process.cwd(),
+    isTrusted: true,
+    timeoutMs: 100,
+    hooks: [{ event: 'SessionStart', command: 'node -e "setTimeout(() => {}, 5000)"' }],
+  });
+  const timeoutResults = await timeoutBus.dispatch('SessionStart', {});
+  assert.equal(timeoutResults.length, 1);
+  assert.equal(timeoutResults[0].timedOut, true);
+  assert.equal(timeoutResults[0].denied, false, 'Non-PreToolUse timeout must not mark denied: true');
 });
 
 
