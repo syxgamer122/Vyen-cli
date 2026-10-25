@@ -6,6 +6,17 @@ import { join } from 'node:path';
 import { loadProjectSettings, projectSettingsPath } from '../dist/settings.js';
 import { evaluateToolPolicy, matchToolPattern } from '../dist/policy.js';
 
+test('missing or malformed project settings file degrades safely', async () => {
+  // Legacy test name preserved for historical plan traceability (2026-10-24-layered-settings-and-policy.md)
+  const dir = await mkdtemp(join(tmpdir(), 'vyen-settings-legacy-'));
+  try {
+    const missing = await loadProjectSettings(dir);
+    assert.deepEqual(missing, {});
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
 test('loadProjectSettings strips BOM, handles ENOENT, and throws on malformed JSON or invalid schema', async () => {
   assert.equal(projectSettingsPath('/workspace'), join('/workspace', '.vyen', 'settings.json'));
   assert.ok(matchToolPattern('read_file', { tool: 'read_file' }));
