@@ -4,23 +4,17 @@ TypeScript 5.9 (strict, NodeNext) + Node ≥ 22.16 + AI SDK 6, packaged as the
 `vyen` terminal coding agent. Primary target is Termux/Android on Linux; Windows
 is supported.
 
-**The contract is `docs/SPEC.md`** — read it when you need to know what the code
-promises. This file only adds the working agreements SPEC cannot express. Keep it
-short: it is loaded into the prompt of every model call (`loadProjectInstructions`
-in `src/context.ts`, truncated at 24 000 characters), so a rule that nobody follows
-is worse than no rule.
+**The contract is `docs/SPEC.md`** — read it for what code promises. This file adds
+working agreements. Keep it short: loaded in prompts via `loadProjectInstructions`
+(`src/context.ts`), truncated at 24 000 characters; unenforced rules are harmful.
 
 **Budget: stay under 24 000 characters combined, with at least 1 000 to spare.**
-`loadProjectInstructions` truncates the combined instructions (`AGENTS.md` +
-`AGENT_LEARNINGS.md`) at 24 000 and drops the **middle**, not the end — a total
-that grows past the cap silently loses the middle section. When it needs more
-room, fold a lesson into a rule, move historical background to `AGENT_LEARNINGS.md`,
-or move the rule into `docs/SPEC.md` and keep only the pointer here.
+`loadProjectInstructions` truncates combined instructions (`AGENTS.md` + `AGENT_LEARNINGS.md`)
+at 24 000 and drops the middle. Keep $\ge 1,000$ spare. Fold lessons into rules or move
+background to `AGENT_LEARNINGS.md`.
 
-**Read only what this turn needs.** This repository holds long plans and ledgers
-under `docs/superpowers/plans/`; they are **history**, not input. A turn needs:
-this file + the plan of the current turn + the spec sections it touches. Reading
-more is self-inflicted context loss.
+**Read only what this turn needs.** Plans in `docs/superpowers/plans/` are history,
+not input. Read this file, current plan, and touched spec sections.
 
 ## 1. The gate before reporting "done"
 
@@ -60,27 +54,19 @@ suggestion:
 
 The gate above only counts if the agent does not lower it.
 
-- **Do not lower the gate.** `@ts-ignore` is banned outright; `@ts-expect-error`
-  only with a reason on the same line; no `as any` to silence `tsc`; no disabling
-  a lint rule; no `--no-verify` when committing. Fix the code, not the rule.
-  The two rules about `as any` and lint disabling apply to **new** code — they
-  are not a licence to clean up the old tree (§6 forbids out-of-scope refactors).
-- **Do not edit the gatekeepers.** `tests/plan-traceability.test.mjs` and
-  `tests/repo-hygiene.test.mjs` guard this file; editing them to make a failing
-  assertion pass is self-declaring "the criterion was wrong". *Exception:* when a
-  rule here changes, change the guard with it, deliberately, and say so in the
-  commit message.
-- **Do not bend the evidence.** Never write "verified" or "done" for something
-  that was not run. Name the command and the real result (e.g. `npm test` →
-  248/249 files green, 1 file flaky).
-- **Destructive commands.** No `git reset --hard`, `git checkout -- .`,
-  `git restore .`, `git clean -fd`, `git push --force` without asking first; never
-  touch uncommitted changes outside the task's scope.
-- **Secrets & Config.** Never print a key into the transcript, never commit key files or
-  `.env`; keys come from the environment (`VYEN_API_KEY`) or
-  `~/.config/vyen/credentials.json`, never hardcoded. `src/errors.ts` is where credentials
-  are redacted. If `~/.config/vyen/` or credential/memory files are missing, treat them as
-  empty and bootstrap on demand; never assume pre-existing files or crash when absent.
+- **Do not lower the gate.** `@ts-ignore` banned; `@ts-expect-error` requires reason
+  on same line; no `as any` to silence `tsc`; no disabling lint rules; no `--no-verify`.
+  Fix code, not rules (`as any` and lint rules apply to new code; §6 forbids out-of-scope refactors).
+- **Do not edit gatekeepers.** `tests/plan-traceability.test.mjs` and
+  `tests/repo-hygiene.test.mjs` guard this file; editing them to pass failures is forbidden.
+  *Exception:* deliberate rule changes must update the guard with commit explanation.
+- **Do not bend evidence.** Never report "verified" or "done" without running the command.
+  Report exact command output (e.g. `npm test` -> 248/249 green).
+- **Destructive commands.** No `git reset --hard`, `git checkout -- .`, `git restore .`,
+  `git clean -fd`, `git push --force` without asking first; never touch uncommitted changes outside scope.
+- **Secrets & Config.** Never print keys into transcripts or commit `.env`/key files; keys
+  come from `VYEN_API_KEY` or `~/.config/vyen/credentials.json`. Redaction in `src/errors.ts`.
+  Missing `~/.config/vyen/` or credentials/memories bootstrap on demand; never crash when absent.
 
 > **Guarded vs self-declared.** BOM, `@ts-ignore`, and reason-less `@ts-expect-error`
 > are guarded by `tests/repo-hygiene.test.mjs`. Traceability tables are guarded by
@@ -218,34 +204,31 @@ Session lifecycle synchronization (`SessionStart`/`SessionEnd`):
 - Key lifecycle state to the `SessionStore` (module-level `WeakSet`), never to
   transient `Harness` instances.
 - Trigger `activeHarness.endSession()` before store swaps (`/new`, `/resume`,
-  `/delete`) and in subagent cleanup.
-- Nested runners inherit tool hooks but do not spam global session lifecycle hooks.
+  `/delete`) and in subagent cleanup (subagents maintain their own child `SessionStore`).
+- Nested runners (Agent Network, workflow steps with `sessionLifecycle: false`) inherit tool hooks but do not emit global session lifecycle hooks.
 
 ## 4. Docs
 
 **Docs have no effect. Tests do.** Plans included — see §2.5.
 
-- `docs/SPEC.md` — the contract. If the code and SPEC disagree, one of them is a
-  bug; say which.
-- `docs/VALIDATION.md` — what the suite actually covers, and which claims are
-  *not* established.
-- `docs/REFERENCE_REVIEW.md` — design references and the reasoning behind the
-  stream and subagent contracts.
-- `README.md` — the user-facing surface. A behaviour change the user can notice
-  belongs here.
-- Plans in `docs/superpowers/plans/` are **history**. A completed plan is not
-  rewritten; if code still points at a section of a plan, keep the pointer
-  resolvable.
+- `docs/SPEC.md` — the contract. If code and SPEC disagree, one is a bug; say which.
+- `docs/VALIDATION.md` — what the suite covers, and what claims are *not* established.
+- `docs/REFERENCE_REVIEW.md` — stream and subagent design references and rationale.
+- `docs/MCP.md` — Model Context Protocol architecture, tools and resources.
+- `docs/AUDIT.md` — audit checklist, threat model, and security review history.
+- `docs/ROADMAP.md` — evolutionary milestones, phase tracking, and completed architecture.
+- `README.md` — the user-facing surface. A behaviour change the user can notice belongs here.
+- Plans in `docs/superpowers/plans/` are **history**. A completed plan is not rewritten;
+  keep existing pointers resolvable.
 
 ## 5. Language
 
 | Where | Language |
 |---|---|
-| Code, comments, docs, test names | **English** |
+| Code, comments, docs, test names | **English** *(Exception: `README.md` and `CHANGELOG.md` are in Vietnamese)* |
 | Commit messages | **English**, `type(scope): description` (`feat:`, `fix:`, `refactor:`, `chore:`) |
 
-Measured 2026-10-22: the last 20 commits are ASCII-only. Keep it that way —
-accents in commit subjects break some tooling and the release automation.
+Measured 2026-10-22: commit subjects are ASCII-only to prevent tooling/release breaks.
 
 ## 6. Dead code gets deleted
 

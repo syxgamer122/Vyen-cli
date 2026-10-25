@@ -1,4 +1,4 @@
-# Vyen CLI 0.2
+# Vyen CLI
 
 Independent implementation informed by ZCode's separation of runtime, provider,
 tools and persistence. No ZCode runtime source is copied or loaded.
@@ -14,7 +14,9 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   discloses it. The CLI prints a one-time warning naming that destination before
   the first model request; an explicit baseUrl suppresses it. The setup wizard
   prints the same warning before its first `/models` probe when a first setup
-  still accepts the default gateway.
+  still accepts the default gateway. Known gateway endpoints (`api.yuristore.xyz`,
+  `localhost:8000`, `127.0.0.1:8000`) without a path component are automatically
+  normalized to append `/v1`.
 - Harness owns ModelMessage history, token accounting, tool result pairing and
   compaction. A streamed response must complete before any tool executes. Reads
   can run in consecutive batches of up to six; mutations execute in declaration order.
@@ -34,8 +36,9 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   `event`, `sessionId`, `timestamp`, `cwd` and event-specific fields in a sanitized
   environment; exit 2 denies tool execution, exit 0 injects stdout context,
   and project hooks require workspace trust hash verification (opt in via --trust-workspace).
-  Nested ephemeral runners (Agent Network rounds, workflow steps) inherit tool hooks but do
-  not emit global `SessionStart`/`SessionEnd`. CLI flags
+  Subagents maintain their own child SessionStore and invoke endSession() on cleanup.
+  Nested ephemeral runners (Agent Network rounds, workflow steps with sessionLifecycle: false)
+  inherit tool hooks but do not emit global `SessionStart`/`SessionEnd`. CLI flags
   `--allowed-tools` and `--disallowed-tools` override layered settings. User deny
   cannot be widened by project rules; deny rules take effect even in auto mode.
 - Help/init/doctor/sessions/upgrade perform no model request. No account login,
@@ -107,7 +110,7 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   includes task; progress excludes text/reasoning. Child reports select the last
   non-empty visible assistant answer. Terminal publication follows session close,
   and capacity is released on cleanup failures as well as successful runs.
-  See REFERENCE_REVIEW.md for exact source references and NDJSON migration.
+  See [REFERENCE_REVIEW.md](docs/REFERENCE_REVIEW.md) for exact source references and NDJSON migration.
 
 ## Hook Events & Lifecycle
 
