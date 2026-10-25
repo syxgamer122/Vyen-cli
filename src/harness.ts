@@ -259,6 +259,13 @@ export class Harness {
    * the workspace; a user-typed prompt may attach any image the user points at.
    */
   untrustedPrompts = false;
+  /**
+   * Nested runners (Agent Network, workflows) inherit tool hooks but must not
+   * emit global SessionStart/SessionEnd events for their ephemeral sessions.
+   */
+  sessionLifecycle = true;
+  private sessionStarted = false;
+  private sessionEnded = false;
   private running = false;
   private pendingContext: ModelMessage[] = [];
   private readonly model: LanguageModel;
@@ -326,9 +333,9 @@ export class Harness {
   }
 
   async endSession(): Promise<void> {
-    if (this.hookBus) {
-      await this.hookBus.dispatch('SessionEnd', { sessionId: this.store.session.id });
-    }
+    if (!this.hookBus || !this.sessionLifecycle || !this.sessionStarted || this.sessionEnded) return;
+    this.sessionEnded = true;
+    await this.hookBus.dispatch('SessionEnd', { sessionId: this.store.session.id });
   }
 
   async compact(signal: AbortSignal, focus?: string): Promise<{ tokens: number; compactions: number }> {
@@ -336,7 +343,11 @@ export class Harness {
     this.running = true;
     try {
       if (this.hookBus) {
-        await this.hookBus.dispatch('PreCompact', { trigger: 'manual', tokens: this.store.session.tokens });
+        await this.hookBus.dispatch('PreCompact', {
+          trigger: 'manual',
+          tokens: this.store.session.tokens,
+          sessionId: this.store.session.id,
+        });
       }
       const res = await compactNow(this.store, this.config, this.model, signal, focus);
       this.emit({ type: 'compaction', count: res.compactions });
@@ -492,7 +503,8 @@ export class Harness {
     try {
       signal.throwIfAborted();
       if (this.hookBus) {
-        if (session.messages.length === 0) {
+        if (!this.sessionStarted && this.sessionLifecycle) {
+          this.sessionStarted = true;
           const startHooks = await this.hookBus.dispatch('SessionStart', { sessionId: session.id });
           for (const h of startHooks) {
             if (h.injectedContext) {
@@ -500,7 +512,7 @@ export class Harness {
             }
           }
         }
-        const promptHooks = await this.hookBus.dispatch('UserPromptSubmit', { prompt });
+        const promptHooks = await this.hookBus.dispatch('UserPromptSubmit', { prompt, sessionId: session.id });
         for (const h of promptHooks) {
           if (h.injectedContext) {
             this.addContextMessage({ role: 'user', content: h.injectedContext });
@@ -532,7 +544,11 @@ export class Harness {
         const oldCount = session.compactions;
         const threshold = this.config.contextWindow * 0.7 - this.config.maxOutputTokens;
         if (this.hookBus && Math.max(estimatedTokens(session.messages, system), measuredInput) >= threshold) {
-          await this.hookBus.dispatch('PreCompact', { trigger: 'token_limit', tokens: session.tokens });
+          await this.hookBus.dispatch('PreCompact', {
+            trigger: 'token_limit',
+            tokens: session.tokens,
+            sessionId: session.id,
+          });
         }
         account(await compactIfNeeded(this.store, this.config, this.model, system, signal, measuredInput));
         if (session.compactions !== oldCount) { measuredInput = 0; this.emit({ type: 'compaction', count: session.compactions }); }
@@ -641,12 +657,12 @@ export class Harness {
         // opaque to the adapter, and earlier tool narration is not completion.
         if (!calls.length && !stepText.trim()) throw new Error('Model finished without a visible answer.');
         if (!calls.length) {
-          if (this.hookBus) await this.hookBus.dispatch('Stop', { reason: 'complete' });
+          if (this.hookBus) await this.hookBus.dispatch('Stop', { reason: 'complete', sessionId: session.id });
           return text;
         }
         const outcome = await this.executeBatch(calls, signal);
         if (outcome.denied) {
-          if (this.hookBus) await this.hookBus.dispatch('Stop', { reason: 'permission_denied' });
+          if (this.hookBus) await this.hookBus.dispatch('Stop', { reason: 'permission_denied', sessionId: session.id });
           this.emit({ type: 'stopped', reason: 'Permission denied.' });
           return text;
         }
@@ -678,7 +694,7 @@ export class Harness {
       await this.store.save();
       if (this.hookBus) {
         const reason = signal.aborted ? 'aborted' : 'error';
-        await this.hookBus.dispatch('Stop', { reason }).catch(() => {});
+        await this.hookBus.dispatch('Stop', { reason, sessionId: session.id }).catch(() => {});
       }
       throw error;
     } finally {
@@ -741,6 +757,7 @@ export class Harness {
           const preHooks = await this.hookBus.dispatch('PreToolUse', {
             tool: canonicalName,
             input: normalizedInput,
+            sessionId: this.store.session.id,
           });
           const failedPreHook = preHooks.find(h => h.denied || h.timedOut || Boolean(h.error));
           if (failedPreHook) {
@@ -766,12 +783,14 @@ export class Harness {
               tool: canonicalName,
               input: normalizedInput,
               error: result.text,
+              sessionId: this.store.session.id,
             });
           } else {
             const postHooks = await this.hookBus.dispatch('PostToolUse', {
               tool: canonicalName,
               input: normalizedInput,
               output: result.text,
+              sessionId: this.store.session.id,
             });
             for (const h of postHooks) {
               if (h.injectedContext) {
@@ -808,6 +827,7 @@ export class Harness {
             tool: canonicalName,
             input: normalizedInput,
             error: error instanceof Error ? error.message : String(error),
+            sessionId: this.store.session.id,
           }).catch(() => {});
         }
         meta.durationMs = Date.now() - startedMs;

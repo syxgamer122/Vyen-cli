@@ -364,6 +364,7 @@ test('Harness endSession dispatches SessionEnd hook', async t => {
   };
 
   const harness = new Harness(config, store, tools, () => {}, undefined, hookBus);
+  await harness.run('hello', AbortSignal.timeout(10_000));
   await harness.endSession();
   assert.equal(sessionEnded, true, 'SessionEnd must be dispatched on endSession');
 });
@@ -593,4 +594,105 @@ test('sanitizeEnvironment preserves SSH_AUTH_SOCK and Git identity while strippi
   assert.equal(clean.GITHUB_TOKEN, undefined);
   assert.equal(clean.AUTH_SECRET, undefined);
   assert.equal(clean.CUSTOM_PASSWORD, undefined);
+});
+
+test('Harness emits SessionStart once on the first turn of a resumed session and SessionEnd at most once', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, (req, res) => { sse(res, { text: 'Answer.' }); });
+  const config = {
+    model: 'mock-model', provider: 'openai', baseUrl: p.url, apiKey: 'mock-key',
+    cwd: f.cwd, dataDir: f.data, maxOutputTokens: 2048, contextWindow: 8192, timeoutMs: 10000,
+  };
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  t.after(() => store.close());
+  const tools = new ToolRegistry(f.cwd, async () => true, false);
+
+  const firstEvents = [];
+  const firstBus = new HookBus({ cwd: f.cwd, isTrusted: true, hooks: [] });
+  firstBus.dispatch = async event => { firstEvents.push(event); return []; };
+  await new Harness(config, store, tools, () => {}, undefined, firstBus).run('first', AbortSignal.timeout(10_000));
+
+  assert.equal(firstEvents.filter(e => e === 'SessionStart').length, 1);
+  assert.equal(firstEvents.filter(e => e === 'SessionEnd').length, 0, 'a run must not end the session by itself');
+
+  // Resumed store: messages already exist, yet the first turn must open a session.
+  const secondEvents = [];
+  const secondBus = new HookBus({ cwd: f.cwd, isTrusted: true, hooks: [] });
+  secondBus.dispatch = async event => { secondEvents.push(event); return []; };
+  const resumed = new Harness(config, store, tools, () => {}, undefined, secondBus);
+  await resumed.run('second', AbortSignal.timeout(10_000));
+  assert.equal(secondEvents.filter(e => e === 'SessionStart').length, 1, 'resumed session must start');
+
+  await resumed.endSession();
+  await resumed.endSession();
+  assert.equal(secondEvents.filter(e => e === 'SessionEnd').length, 1, 'SessionEnd must be idempotent');
+});
+
+test('hook payloads carry the session id for prompt, tool, stop and compact events', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, async (req, res, n) => {
+    if (n === 1) sse(res, { calls: [{ id: 'c1', name: 'list_files', input: { path: '.' } }] });
+    else sse(res, { text: 'Done.' });
+  });
+  const config = {
+    model: 'mock-model', provider: 'openai', baseUrl: p.url, apiKey: 'mock-key',
+    cwd: f.cwd, dataDir: f.data, maxOutputTokens: 2048, contextWindow: 8192, timeoutMs: 10000,
+  };
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  t.after(() => store.close());
+  const tools = new ToolRegistry(f.cwd, async () => true, false);
+  const seen = [];
+  const bus = new HookBus({ cwd: f.cwd, isTrusted: true, hooks: [] });
+  bus.dispatch = async (event, payload) => { seen.push({ event, payload }); return []; };
+  const harness = new Harness(config, store, tools, () => {}, undefined, bus);
+
+  await harness.run('Inspect.', AbortSignal.timeout(10_000));
+  // The mock provider only speaks SSE; compaction fails after PreCompact dispatches,
+  // which is all this test observes.
+  await harness.compact(AbortSignal.timeout(10_000)).catch(() => {});
+
+  for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'PreCompact']) {
+    const entry = seen.find(e => e.event === event);
+    assert.ok(entry, `${event} must dispatch`);
+    assert.equal(entry.payload.sessionId, store.session.id, `${event} payload must carry sessionId`);
+  }
+});
+
+test('PostToolUseFailure payloads carry the session id for denied and thrown tool calls', async t => {
+  const f = await fixture(t);
+  const deniedProvider = await provider(t, async (req, res, n) => {
+    if (n === 1) sse(res, { calls: [{ id: 'w1', name: 'write_file', input: { path: '../escape.txt', content: 'no' } }] });
+    else sse(res, { text: 'Stopped.' });
+  });
+  const deniedConfig = {
+    model: 'mock-model', provider: 'openai', baseUrl: deniedProvider.url, apiKey: 'mock-key',
+    cwd: f.cwd, dataDir: join(f.data, 'denied'), maxOutputTokens: 2048, contextWindow: 8192, timeoutMs: 10000,
+  };
+  const deniedStore = await SessionStore.open(join(f.data, 'denied', 'sessions'), deniedConfig);
+  t.after(() => deniedStore.close());
+  const deniedEvents = [];
+  const deniedBus = new HookBus({ cwd: f.cwd, isTrusted: true, hooks: [] });
+  deniedBus.dispatch = async (event, payload) => { deniedEvents.push({ event, payload }); return []; };
+  await new Harness(deniedConfig, deniedStore, new ToolRegistry(f.cwd, async () => false, false), () => {}, undefined, deniedBus)
+    .run('Try escape.', AbortSignal.timeout(10_000));
+  const denied = deniedEvents.find(e => e.event === 'PostToolUseFailure');
+  assert.ok(denied, 'denied tool must dispatch PostToolUseFailure');
+  assert.equal(denied.payload.sessionId, deniedStore.session.id);
+
+  // A read of a directory throws inside ToolRegistry.execute, hitting the catch path.
+  const thrownProvider = await provider(t, async (req, res, n) => {
+    if (n === 1) sse(res, { calls: [{ id: 'r1', name: 'read_file', input: { path: '.' } }] });
+    else sse(res, { text: 'Done.' });
+  });
+  const thrownConfig = { ...deniedConfig, baseUrl: thrownProvider.url, dataDir: join(f.data, 'thrown') };
+  const thrownStore = await SessionStore.open(join(f.data, 'thrown', 'sessions'), thrownConfig);
+  t.after(() => thrownStore.close());
+  const thrownEvents = [];
+  const thrownBus = new HookBus({ cwd: f.cwd, isTrusted: true, hooks: [] });
+  thrownBus.dispatch = async (event, payload) => { thrownEvents.push({ event, payload }); return []; };
+  await new Harness(thrownConfig, thrownStore, new ToolRegistry(f.cwd, async () => true, false), () => {}, undefined, thrownBus)
+    .run('Read a directory.', AbortSignal.timeout(10_000));
+  const thrown = thrownEvents.find(e => e.event === 'PostToolUseFailure');
+  assert.ok(thrown, 'thrown tool must dispatch PostToolUseFailure');
+  assert.equal(thrown.payload.sessionId, thrownStore.session.id);
 });
