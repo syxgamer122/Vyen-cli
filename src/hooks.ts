@@ -33,6 +33,7 @@ export interface HookExecutionResult {
   stdout: string;
   stderr: string;
   denied?: boolean;
+  timedOut?: boolean;
   injectedContext?: string;
   error?: string;
 }
@@ -377,6 +378,7 @@ export class HookBus {
           stdout,
           stderr,
           denied,
+          timedOut: Boolean(timedOut),
           injectedContext,
           error,
         });

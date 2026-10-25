@@ -507,3 +507,59 @@ test('HookBus defaults isTrusted to false when omitted and skips execution', asy
   const results = await bus.dispatch('PreToolUse', { tool: 'bash', input: { command: 'ls' } });
   assert.deepEqual(results, [], 'untrusted hook bus must dispatch zero hooks');
 });
+
+test('Harness blocks tool execution when PreToolUse hook times out or fails', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, async (req, res, n) => {
+    if (n === 1) {
+      sse(res, {
+        calls: [{ id: 'c1', name: 'write', input: { path: 'timed_out_blocked.txt', content: 'should not exist' } }],
+      });
+    } else {
+      sse(res, { text: 'Turn complete.' });
+    }
+  });
+
+  const config = {
+    model: 'mock-model',
+    provider: 'openai',
+    baseUrl: p.url,
+    apiKey: 'mock-key',
+    cwd: f.cwd,
+    dataDir: f.data,
+    maxOutputTokens: 2048,
+    contextWindow: 8192,
+    timeoutMs: 10000,
+  };
+
+  const store = await SessionStore.open(join(f.data, 'sessions'), config);
+  const tools = new ToolRegistry(f.cwd, async () => true, false);
+  const hookBus = new HookBus({
+    cwd: f.cwd,
+    isTrusted: true,
+    timeoutMs: 150,
+    hooks: [
+      {
+        event: 'PreToolUse',
+        matcher: 'write_file',
+        command: 'node -e "setTimeout(() => {}, 5000)"',
+      },
+    ],
+  });
+
+  let stoppedReason = '';
+  const harness = new Harness(config, store, tools, ev => {
+    if (ev.type === 'stopped') stoppedReason = ev.reason;
+  }, undefined, hookBus);
+
+  await harness.run('Do write', new AbortController().signal);
+
+  assert.equal(stoppedReason, 'Permission denied.');
+  const toolMsg = store.session.messages.find(m => m.role === 'tool');
+  assert.ok(toolMsg, 'tool message should be recorded');
+  const part = toolMsg.content[0];
+  assert.match(part.output.value, /Tool execution blocked.*timed out/i);
+
+  const exists = await stat(join(f.cwd, 'timed_out_blocked.txt')).then(() => true, () => false);
+  assert.equal(exists, false, 'file must not be created when hook times out');
+});

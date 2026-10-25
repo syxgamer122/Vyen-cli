@@ -742,13 +742,16 @@ export class Harness {
             tool: canonicalName,
             input: normalizedInput,
           });
-          if (preHooks.some(h => h.denied)) {
+          const failedPreHook = preHooks.find(h => h.denied || h.timedOut || Boolean(h.error));
+          if (failedPreHook) {
             denied = true;
             meta.durationMs = Date.now() - startedMs;
-            const reason = preHooks.find(h => h.denied)?.stderr?.trim();
+            const reason = failedPreHook.denied
+              ? (failedPreHook.stderr?.trim() || 'Tool execution denied by PreToolUse hook.')
+              : (failedPreHook.error || (failedPreHook.timedOut ? 'PreToolUse hook timed out.' : 'PreToolUse hook failed.'));
             output = {
               type: 'error-text',
-              value: reason ? `Tool execution denied by PreToolUse hook: ${reason}` : 'Tool execution denied by PreToolUse hook.',
+              value: reason.startsWith('Tool execution') ? reason : `Tool execution blocked: ${reason}`,
             };
             this.emit({ type: 'tool', name: call.toolName, id: call.toolCallId, state: 'error', meta });
             return { type: 'tool-result' as const, toolCallId: call.toolCallId, toolName: call.toolName, output };
