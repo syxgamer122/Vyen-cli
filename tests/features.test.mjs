@@ -406,6 +406,73 @@ test('Custom Workflows: shell escaping, awk $1 preservation, approval gates, and
   assert(!afterRm.some(w => w.name === 'my-pipeline'));
 });
 
+test('workflow shell step sanitizes ambient sensitive environment variables', async t => {
+  const f = await fixture(t);
+  const prevToken = process.env.GITHUB_TOKEN;
+  const prevSecret = process.env.AWS_SECRET_ACCESS_KEY;
+  process.env.GITHUB_TOKEN = 'ghp_secret_token_123';
+  process.env.AWS_SECRET_ACCESS_KEY = 'aws_secret_key_456';
+
+  try {
+    const wf = {
+      name: 'env-check',
+      description: 'Check env sanitization',
+      scope: 'workspace',
+      steps: [
+        {
+          id: 's1',
+          type: 'shell',
+          command: 'node -e "process.stdout.write(JSON.stringify(process.env))"',
+        },
+      ],
+    };
+
+    const res = await executeWorkflow(wf, '', {
+      cwd: f.cwd,
+      signal: new AbortController().signal,
+      effectiveReadOnly: false,
+    });
+
+    assert.equal(res.status, 'completed');
+    const captured = JSON.parse(res.steps[0].output.replace(/^Exit code: 0\s*/, ''));
+    assert.equal(captured.GITHUB_TOKEN, undefined, 'GITHUB_TOKEN must be stripped in workflow shell step');
+    assert.equal(captured.AWS_SECRET_ACCESS_KEY, undefined, 'AWS_SECRET_ACCESS_KEY must be stripped in workflow shell step');
+  } finally {
+    if (prevToken !== undefined) process.env.GITHUB_TOKEN = prevToken;
+    else delete process.env.GITHUB_TOKEN;
+    if (prevSecret !== undefined) process.env.AWS_SECRET_ACCESS_KEY = prevSecret;
+    else delete process.env.AWS_SECRET_ACCESS_KEY;
+  }
+});
+
+test('workflow shell step preserves explicit workflow arguments and variables', async t => {
+  const f = await fixture(t);
+  const wf = {
+    name: 'var-check',
+    description: 'Check workflow variables',
+    inputs: { target: 'default-target' },
+    scope: 'workspace',
+    steps: [
+      {
+        id: 's1',
+        type: 'shell',
+        command: 'node -e "process.stdout.write(JSON.stringify({ input: process.env.VYEN_WF_INPUT, target: process.env.VYEN_WF_VAR_TARGET }))"',
+      },
+    ],
+  };
+
+  const res = await executeWorkflow(wf, 'target=prod my-arg', {
+    cwd: f.cwd,
+    signal: new AbortController().signal,
+    effectiveReadOnly: false,
+  });
+
+  assert.equal(res.status, 'completed');
+  const captured = JSON.parse(res.steps[0].output.replace(/^Exit code: 0\s*/, ''));
+  assert.equal(captured.input, 'my-arg');
+  assert.equal(captured.target, 'prod');
+});
+
 test('Agent Network: P2P bus, explore_codebase=false isolation, live Round 2 peer visibility, and session cleanup', async t => {
   const f = await fixture(t);
 

@@ -5,6 +5,7 @@ import { atomicJson, configDir, type EffortLevel } from './config.js';
 import { sanitizeBashCommand } from './tools.js';
 import { runCommand } from './process.js';
 import { limitText } from './files.js';
+import { sanitizeEnvironment } from './hooks.js';
 
 export type WorkflowStepType = 'prompt' | 'shell' | 'subagent' | 'network' | 'approval';
 
@@ -637,8 +638,9 @@ export async function executeWorkflow(
           }
         }
         hooks.onProgress?.(`  $ ${cmd}\n`);
+        const baseEnv = sanitizeEnvironment(process.env);
         const wfEnv: NodeJS.ProcessEnv = {
-          ...process.env,
+          ...baseEnv,
           VYEN_WF_INPUT: parsedArgs.fullInput,
           VYEN_WF_PREV: prevOutput,
         };
