@@ -422,7 +422,7 @@ test('workflow shell step sanitizes ambient sensitive environment variables', as
         {
           id: 's1',
           type: 'shell',
-          command: 'node -e "process.stdout.write(JSON.stringify(process.env))"',
+          command: 'node -e "process.stdout.write(JSON.stringify({ GITHUB_TOKEN: process.env.GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY }))"',
         },
       ],
     };

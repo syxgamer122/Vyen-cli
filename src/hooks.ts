@@ -405,9 +405,9 @@ export class HookBus {
       child.on('close', code => {
         clearTimeout(timer);
         if (signal) signal.removeEventListener('abort', onAbort);
-        const exitCode = code ?? (timedOut ? 124 : (aborted ? 130 : 1));
+        const exitCode = timedOut ? 124 : (code ?? (aborted ? 130 : 1));
         const isPreToolUse = event === 'PreToolUse';
-        const denied = exitCode === 2 || (isPreToolUse && exitCode !== 0);
+        const denied = exitCode === 2 || (isPreToolUse && (exitCode !== 0 || Boolean(timedOut)));
         const injectedContext =
           exitCode === 0 && stdout.trim().length > 0 ? stdout.trim() : undefined;
         let error: string | undefined;
