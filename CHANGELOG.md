@@ -1,0 +1,63 @@
+# Changelog
+
+## 0.4.0
+
+- Ghép đôi thiết bị qua Cloudflared (`/pair`, `--pair`): QR + web UI trên điện thoại, token
+  128-bit, mặc định chỉ localhost; từ xa không bật được auto-approve hay `!cmd`, quyền `always`
+  chỉ có hiệu lực trong phiên.
+- Sửa bảo mật sau review: prompt từ thiết bị ghép đôi không bao giờ đi vào bộ xử lý lệnh `/`
+  cục bộ (`/cd`, `/revert`, `/delete`…); cloudflared chạy với môi trường đã lọc (`VYEN_API_KEY`
+  không bị lộ) và chỉ được tải sau khi người dùng xác nhận; thân request quá lớn/JSON hỏng trả
+  413/400 thay vì 500.
+- Workflow tự định nghĩa (`.vyen/workflows/*.json|*.md`) và 4 workflow tích hợp; bước shell
+  dùng chung approval của `bash` và bị chặn ở readonly/plan. Bước prompt áp dụng `readOnly`/
+  `mode`/`effort`; lệnh `/workflow` và `/network` dùng chung một ngân sách token cho cả lượt.
+- `run_workflow` vẫn khả dụng khi chạy `--no-subagents` (bước network/subagent tự hạ cấp).
+- Agent Network: nhiều persona brainstorm/council tối đa 4 vòng, kèm P2P bus giữa các subagent.
+- `package.json` khai báo `repository` để npm xác minh provenance khi publish.
+
+## 0.3.1
+
+- `vyen upgrade [VERSION]` thay bản cài toàn cục qua npm/pnpm/yarn/bun (tự nhận diện, có
+  `--method` và `--dry-run`). Bản mới khi khởi động TUI được báo một lần mỗi ngày; đặt
+  `update` = `disable`/`notify`/`auto` trong config hoặc `VYEN_UPDATE` để đổi.
+
+## 0.3.0
+
+Giao diện tối giản, vá bảo mật, sửa lỗi và tăng hiệu năng. Chi tiết và cách tái hiện từng lỗi:
+[docs/AUDIT.md](docs/AUDIT.md).
+
+### Giao diện
+- TUI tối giản: bỏ header band, khung viền và nền tô màu; một đường kẻ, dòng nhập và một dòng
+  trạng thái (chế độ, model, effort … workspace (nhánh), todo, ctx %, token). Một màu nhấn duy nhất;
+  màu khác chỉ xuất hiện khi mang trạng thái (diff, lỗi, duyệt quyền, auto-approve).
+- Banner, `/btw`, `/recap`, resume và `vyen setup` là các khối chữ ngắn, tự xuống dòng ở mọi độ rộng.
+- `/resume` có 2 tab **This folder** / **All projects** (←→ hoặc Tab đổi tab, gõ để lọc); resume
+  phiên của dự án khác tự chuyển workspace. `vyen resume` / `vyen --resume ID` chạy được từ mọi thư mục.
+
+### Bảo mật
+- Chuyển từ `auto`/`--yes` về `ask`/`plan` bật lại việc duyệt quyền ngay lập tức.
+- Shift+Tab khi đang có prompt duyệt chỉ duyệt một lần, không còn cấp "always".
+- API key của vyen không còn lọt vào môi trường của `bash`, `!cmd`, `rg`, `git`.
+- Đọc ảnh do model yêu cầu ngoài workspace cần duyệt; tool bị ẩn không gọi được bằng tên.
+- Nhập API key ẩn; cảnh báo base URL `http://` không phải loopback; không xoá phiên mơ hồ/đang mở.
+- Nâng AI SDK, `ajv`, `zod`: `npm audit` 0 lỗ hổng.
+
+### Sửa lỗi
+- `edit_file` không còn làm hỏng nội dung chứa `$&`, `$'`, `` $` ``, `$$`.
+- Ảnh đính kèm không còn làm vượt context hay khiến phiên không resume được (phiên cũ tự được sửa).
+- `apply_patch` hỗ trợ `Move to`, nhiều khối cho một file, newline cuối file.
+- `/revert` không ghi đè file bạn sửa sau lượt của agent (`--force` để ghi đè).
+- `/effort` có hiệu lực ngay; đổi effort khi đang chạy không còn giết MCP/subagent của lượt đó.
+- `!cmd` và `/goal` khi đang chạy không còn làm hỏng thứ tự lịch sử (lỗi 400 từ provider).
+- Lệnh gõ khi đang bận được xếp hàng thật; wizard luôn cho đổi model.
+
+### Hiệu năng
+- Render TUI tăng dần (~80 lần nhanh hơn mỗi frame), `--version`/`--help` ~5 lần nhanh hơn,
+  liệt kê phiên có chỉ mục, MCP khởi động song song và được tái sử dụng, 6 tool đọc chạy song song,
+  retry tôn trọng `Retry-After`.
+
+### Tiện ích cho dev
+- `git diff | vyen -p "review"`, `vyen -p ... < file`, `-o/--output-last-message`.
+- Duyệt theo tiền tố lệnh (`p`), prompt tuỳ biến `/prompts:<tên>`, `/key`, `/provider`,
+  chuông báo khi cần chú ý (`VYEN_NOTIFY=0` để tắt), clipboard cho Termux/Wayland/xsel.

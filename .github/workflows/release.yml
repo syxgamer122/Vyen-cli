@@ -1,0 +1,80 @@
+name: Check and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vyen-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.16.0', '24']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: npm-shrinkwrap.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - name: Test restrictive umasks
+        run: |
+          (umask 027; node --test tests/*.test.mjs)
+          (umask 007; node --test tests/*.test.mjs)
+
+  publish:
+    name: Publish to npm
+    needs: check
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # Trusted publishing (OIDC): the registry authenticates this workflow, so
+      # no long-lived npm token is needed. Provenance needs the same permission.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: npm-shrinkwrap.json
+          registry-url: https://registry.npmjs.org
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify the tag matches the manifest version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "tag $TAG does not match package version $VERSION" >&2
+            exit 1
+          fi
+      - name: Publish
+        run: npm publish --provenance --access public
+        # No NODE_AUTH_TOKEN: npm trusted publishing exchanges the workflow's
+        # OIDC identity for a short-lived credential.
+        # The package must list this workflow as a trusted publisher:
+        # npmjs.com -> vyen -> Settings -> Trusted Publisher -> GitHub Actions.
