@@ -93,7 +93,7 @@ chế độ `auto`). `--read-only` loại bỏ các công cụ ghi/sửa/bash kh
 Cấu hình phân tầng `.vyen/settings.json` cho phép đặt quy tắc `permissions.allow`,
 `permissions.ask`, `permissions.deny` cùng các `hooks` vòng đời (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, v.v.). Cờ `--allowed-tools` và `--disallowed-tools`
 cho phép ghi đè nhanh từ dòng lệnh; quy tắc `deny` luôn chặn ngay cả trong chế độ `auto`.
-Hook command nhận payload JSON qua stdin và có môi trường làm sạch (không lộ API key); mã thoát 2 chặn tool call, mã thoát 0 inject context. Project hooks yêu cầu xác thực Workspace Trust (kích hoạt bằng cờ `--trust-workspace`).
+Hook command nhận payload JSON qua stdin và có môi trường làm sạch (không lộ API key); mã thoát 2 chặn tool call, mã thoát 0 inject context. Trong `.vyen/settings.json`, cả `hooks` lẫn quy tắc `permissions.allow` đều yêu cầu xác thực Workspace Trust (kích hoạt bằng cờ `--trust-workspace`). Mã băm SHA-256 bao phủ cả tệp settings lẫn các tệp script được tham chiếu trong `permissions.allow`.
 Mã thoát: `0` thành công, `1` lỗi, `2` từ chối quyền, `130` Ctrl+C, `143` SIGTERM.
 
 ## Cập nhật phiên bản

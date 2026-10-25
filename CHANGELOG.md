@@ -2,6 +2,15 @@
 
 ## 0.4.0
 
+- Cấu hình phân tầng (`.vyen/settings.json`) với chính sách kiểm soát quyền `permissions.allow`,
+  `permissions.ask`, `permissions.deny` và cờ ghi đè nhanh `--allowed-tools` / `--disallowed-tools`.
+- Hệ thống Hook vòng đời (Lifecycle Hooks) lấy cảm hứng từ Claude Code: 8 sự kiện (`SessionStart`,
+  `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PreCompact`,
+  `Stop`), payload JSON qua stdin trong môi trường làm sạch, cơ chế fail-closed chặn thực thi tool
+  khi mã thoát là 2 hoặc khi hook bị lỗi/quá thời gian (timeout).
+- Cơ chế xác thực Workspace Trust (`--trust-workspace`): mã băm SHA-256 bảo vệ toàn diện tệp settings
+  và các script được tham chiếu trong `permissions.allow`.
+- Cảnh báo một lần khi sử dụng gateway mặc định `DEFAULT_GATEWAY_URL` (`https://api.yuristore.xyz/v1`).
 - Ghép đôi thiết bị qua Cloudflared (`/pair`, `--pair`): QR + web UI trên điện thoại, token
   128-bit, mặc định chỉ localhost; từ xa không bật được auto-approve hay `!cmd`, quyền `always`
   chỉ có hiệu lực trong phiên.
