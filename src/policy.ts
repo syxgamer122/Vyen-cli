@@ -19,8 +19,8 @@ export interface PolicyEvaluationContext {
 }
 
 const CHAINING_PATTERN = /[\r\n;&|`><]|\$\(|\$\{/;
-const COMPOUND_SPLIT_REGEX = /[;\r\n|&]+|\$\(|`/g;
-const WRAPPER_PREFIX_REGEX = /^(?:(?:(?:\/usr)?\/bin\/)?sudo(?:\s+(?:-[a-zA-Z0-9]+(?:\s+[^\s]+)?|--))*\s+|(?:(?:\/usr)?\/bin\/)?(?:env\s+)?(?:[a-zA-Z_][a-zA-Z0-9_]*=[^\s]*\s+)+|(?:(?:\/usr)?\/bin\/)?(?:bash|sh)(?:\s+-[a-zA-Z0-9]+)*\s*)/i;
+const COMPOUND_SPLIT_REGEX = /[;\r\n|&]+|\$\(|[<>]+\(|`/g;
+const WRAPPER_PREFIX_REGEX = /^(?:(?:(?:\/usr)?\/bin\/)?sudo(?:\s+(?:-[a-zA-Z0-9]+(?:\s+[^\s]+)?|--))*\s+|(?:(?:\/usr)?\/bin\/)?(?:env\s+)?(?:[a-zA-Z_][a-zA-Z0-9_]*=[^\s]*\s+)+|(?:(?:\/usr)?\/bin\/)?(?:bash|sh)(?:\s+-[a-zA-Z0-9]+)*\s*|(?:eval|exec)\s+)/i;
 
 function cleanCommandSegment(seg: string): string {
   let cleaned = seg.trim();
@@ -144,9 +144,9 @@ export function matchToolPattern(
 /**
  * Evaluates tool execution policy following strict precedence:
  * 1. CLI disallowed tools -> 'deny'
- * 2. CLI allowed tools -> 'allow'
- * 3. User deny rules -> 'deny' (cannot be widened by project rules)
- * 4. Project deny rules -> 'deny'
+ * 2. User deny rules -> 'deny' (cannot be widened by project rules or CLI allow)
+ * 3. Project deny rules -> 'deny'
+ * 4. CLI allowed tools -> 'allow' (overrides ask and allow, but NOT persistent deny)
  * 5. User ask rules -> 'ask'
  * 6. Project ask rules -> 'ask'
  * 7. Project allow rules -> 'allow'
@@ -164,17 +164,17 @@ export function evaluateToolPolicy(
   if (ctx.cliDisallowed?.some(p => matchToolPattern(p, request, denyOpts))) {
     return 'deny';
   }
-  // 2. CLI allowed
-  if (ctx.cliAllowed?.some(p => matchToolPattern(p, request, allowOpts))) {
-    return 'allow';
-  }
-  // 3. User deny
+  // 2. User deny
   if (ctx.userRules?.deny?.some(p => matchToolPattern(p, request, denyOpts))) {
     return 'deny';
   }
-  // 4. Project deny
+  // 3. Project deny
   if (ctx.projectRules?.deny?.some(p => matchToolPattern(p, request, denyOpts))) {
     return 'deny';
+  }
+  // 4. CLI allowed (overrides ask and allow, but NOT persistent deny)
+  if (ctx.cliAllowed?.some(p => matchToolPattern(p, request, allowOpts))) {
+    return 'allow';
   }
   // 5. User ask
   if (ctx.userRules?.ask?.some(p => matchToolPattern(p, request, denyOpts))) {
