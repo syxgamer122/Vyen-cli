@@ -123,8 +123,8 @@ Project hooks are defined strictly in `.vyen/settings.json` (user configuration 
 | `PreToolUse` | Before tool batch execution | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input` | Ignored | Exit 2 or error/timeout: Denies tool execution (fail-closed) |
 | `PostToolUse` | After tool execution completes | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input`, `output` | Injects stdout as context | Ignored (logged as warning) |
 | `PostToolUseFailure` | After tool failure or permission denial | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input`, `error` | Ignored | Ignored (logged as warning) |
-| `PreCompact` | Before context compaction occurs | `event`, `sessionId`, `timestamp`, `cwd`, `tokens`, `trigger` | Ignored | Ignored (logged as warning) |
-| `Stop` | User requests stop / abort | `event`, `sessionId`, `timestamp`, `cwd`, `stopHookActive` | Ignored | Ignored (logged as warning) |
+| `PreCompact` | Before context compaction occurs | `event`, `sessionId`, `timestamp`, `cwd`, `tokens`, `trigger` (`'manual'` \| `'token_limit'`) | Ignored | Ignored (logged as warning) |
+| `Stop` | User requests stop / abort | `event`, `sessionId`, `timestamp`, `cwd`, `reason` (`'complete'` \| `'permission_denied'` \| `'aborted'` \| `'error'`) | Ignored | Ignored (logged as warning) |
 
 ## Acceptance
 

@@ -113,4 +113,6 @@ test('SPEC documents accurate hook payloads and fail-closed exit codes', async (
   assert.match(spec, /SessionStart.*Injects stdout as system context/);
   assert.match(spec, /UserPromptSubmit.*Injects stdout as prompt context/);
   assert.match(spec, /PostToolUse.*Injects stdout as context/);
+  assert.match(spec, /Stop.*reason/);
+  assert.doesNotMatch(spec, /stopHookActive/);
 });

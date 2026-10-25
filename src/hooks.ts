@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile, mkdir, stat, readdir } from 'node:fs/promises';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, basename } from 'node:path';
 import { normalizeToolName } from './tools.js';
 import { childEnv } from './process.js';
 import { configDir, atomicJson } from './config.js';
@@ -110,7 +110,7 @@ export async function calculateWorkspaceTrustHash(
           const resolvedDir = resolve(normalizedCwd, dirPart);
           try {
             const entries = await readdir(resolvedDir, { withFileTypes: true });
-            const patternPiece = cleanToken.slice(dirPart === '.' ? 0 : dirPart.length + 1);
+            const patternPiece = basename(cleanToken);
             const patRegex = new RegExp('^' + patternPiece.split('*').map(p => p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\?/g, '.')).join('.*') + '$', 'i');
             const matched = entries.filter(e => e.isFile() && patRegex.test(e.name)).map(e => join(dirPart, e.name).replace(/\\/g, '/')).sort();
             candidateFiles = matched.length > 0 ? matched : [];

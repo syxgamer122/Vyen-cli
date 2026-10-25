@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, mkdir, stat } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile, mkdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cli, fixture, provider, sse } from './helpers.mjs';
@@ -758,14 +758,16 @@ test('HookBus dispatch aborts child process when AbortSignal triggers', async ()
 });
 
 test('delete current command triggers activeHarness endSession before store swap', async () => {
-  let endSessionCalled = false;
-  const mockHarness = {
-    endSession: async () => {
-      endSessionCalled = true;
-    },
-  };
-  await mockHarness?.endSession().catch(() => {});
-  assert.equal(endSessionCalled, true);
+  const source = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8');
+  const deleteMarker = "if (input === '/delete' || input.startsWith('/delete '))";
+  const start = source.indexOf(deleteMarker);
+  assert.ok(start > -1, 'missing /delete branch in src/cli.ts');
+  const block = source.slice(start, source.indexOf('rebuildHarness', start));
+  const endCall = block.indexOf('activeHarness?.endSession()');
+  const swap = block.indexOf('store = await SessionStore.open');
+  assert.ok(endCall > -1, '/delete must call activeHarness?.endSession()');
+  assert.ok(swap > -1, '/delete must swap store');
+  assert.ok(endCall < swap, '/delete must end session before opening replacement store');
 });
 
 test('calculateWorkspaceTrustHash handles question mark wildcard for allow scripts', async () => {
@@ -791,6 +793,14 @@ test('calculateWorkspaceTrustHash handles question mark wildcard for allow scrip
     await writeFile(join(scriptsDir, 'run-ab.sh'), '#!/bin/sh\necho ab-modified\n');
     const hash3 = await calculateWorkspaceTrustHash(dir, allowRules);
     assert.equal(hash2, hash3, 'hash must not change when unmatched script changes');
+
+    // Also verify root-relative wildcard path e.g. ./root-?.sh
+    await writeFile(join(dir, 'root-1.sh'), '#!/bin/sh\necho r1\n');
+    const rootAllowRules = ['bash(./root-?.sh)'];
+    const rootHash1 = await calculateWorkspaceTrustHash(dir, rootAllowRules);
+    await writeFile(join(dir, 'root-1.sh'), '#!/bin/sh\necho r1-modified\n');
+    const rootHash2 = await calculateWorkspaceTrustHash(dir, rootAllowRules);
+    assert.notEqual(rootHash1, rootHash2, 'root-relative wildcard must change hash when file modified');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
