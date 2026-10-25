@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, mkdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fixture, provider, sse } from './helpers.mjs';
+import { cli, fixture, provider, sse } from './helpers.mjs';
 import { SessionStore } from '../dist/session.js';
 import { ToolRegistry } from '../dist/tools.js';
 import { Harness } from '../dist/harness.js';
@@ -615,17 +615,48 @@ test('Harness emits SessionStart once on the first turn of a resumed session and
   assert.equal(firstEvents.filter(e => e === 'SessionStart').length, 1);
   assert.equal(firstEvents.filter(e => e === 'SessionEnd').length, 0, 'a run must not end the session by itself');
 
-  // Resumed store: messages already exist, yet the first turn must open a session.
-  const secondEvents = [];
-  const secondBus = new HookBus({ cwd: f.cwd, isTrusted: true, hooks: [] });
-  secondBus.dispatch = async event => { secondEvents.push(event); return []; };
-  const resumed = new Harness(config, store, tools, () => {}, undefined, secondBus);
-  await resumed.run('second', AbortSignal.timeout(10_000));
-  assert.equal(secondEvents.filter(e => e === 'SessionStart').length, 1, 'resumed session must start');
+  // Same store, new Harness: the CLI rebuilds harnesses on /model, /effort, /cd and
+  // /mcp, and a rebuild must not reopen a session that is already open.
+  const rebuiltEvents = [];
+  const rebuiltBus = new HookBus({ cwd: f.cwd, isTrusted: true, hooks: [] });
+  rebuiltBus.dispatch = async event => { rebuiltEvents.push(event); return []; };
+  const rebuilt = new Harness(config, store, tools, () => {}, undefined, rebuiltBus);
+  await rebuilt.run('second', AbortSignal.timeout(10_000));
+  assert.equal(rebuiltEvents.filter(e => e === 'SessionStart').length, 0, 'a rebuild must not restart the session');
 
-  await resumed.endSession();
-  await resumed.endSession();
-  assert.equal(secondEvents.filter(e => e === 'SessionEnd').length, 1, 'SessionEnd must be idempotent');
+  await rebuilt.endSession();
+  await rebuilt.endSession();
+  assert.equal(rebuiltEvents.filter(e => e === 'SessionEnd').length, 1, 'SessionEnd must be idempotent');
+
+  // A new process resumes from disk with a new SessionStore: the first turn must open it.
+  await store.close();
+  const resumedStore = await SessionStore.open(join(f.data, 'sessions'), config, store.session.id);
+  t.after(() => resumedStore.close());
+  const resumedEvents = [];
+  const resumedBus = new HookBus({ cwd: f.cwd, isTrusted: true, hooks: [] });
+  resumedBus.dispatch = async (event, payload) => { resumedEvents.push({ event, payload }); return []; };
+  await new Harness(config, resumedStore, tools, () => {}, undefined, resumedBus)
+    .run('third', AbortSignal.timeout(10_000));
+  const starts = resumedEvents.filter(e => e.event === 'SessionStart');
+  assert.equal(starts.length, 1, 'resumed session must start');
+  assert.equal(starts[0].payload.sessionId, store.session.id);
+});
+
+test('a failing SessionEnd hook reports to stderr before the process exits', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, (req, res) => { sse(res, { text: 'Done.' }); });
+  await mkdir(join(f.cwd, '.vyen'), { recursive: true });
+  await writeFile(
+    join(f.cwd, '.vyen', 'settings.json'),
+    JSON.stringify({ hooks: [{ event: 'SessionEnd', command: 'node -e "process.exit(1)"' }] }),
+    'utf8',
+  );
+
+  const result = await cli(f, p.url, ['--trust-workspace', '--json', '-p', 'hello']).done;
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stderr, /\[Hook warning\]: \[Hook error \(SessionEnd\)\]/);
+  assert.doesNotMatch(result.stdout, /Hook Warning/i, 'shutdown warnings must not go to the closed UI stream');
 });
 
 test('hook payloads carry the session id for prompt, tool, stop and compact events', async t => {

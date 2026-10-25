@@ -3304,6 +3304,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', terminate); process.removeListener('message', onIpcSignal);
       try { tui?.close(); rl?.close(); await pairManager?.stop(); await subagents?.closeAll(); await manager?.close(); }
       finally {
+        // The TUI is closed here, so a failing SessionEnd hook must report to stderr
+        // instead of writing into a dead interface.
+        if (activeHarness?.hookBus) {
+          activeHarness.hookBus.onWarning = warning => stderr.write(`[Hook warning]: ${warning}\n`);
+        }
         await activeHarness?.endSession().catch(() => {});
         await store.close();
         if (process.connected) {

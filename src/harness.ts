@@ -253,6 +253,12 @@ function callSignature(call: ToolCall): string {
   return `${call.toolName}:${JSON.stringify(canonicalize(call.input))}`;
 }
 
+// Lifecycle state belongs to the session store, not to one Harness instance: the CLI
+// rebuilds harnesses over the same store (model, effort, cwd, MCP) and a fresh
+// instance must neither emit a second SessionStart nor lose the SessionEnd.
+const startedSessions = new WeakSet<SessionStore>();
+const endedSessions = new WeakSet<SessionStore>();
+
 export class Harness {
   /**
    * Set for prompts written by a model (subagent tasks). Such prompts may only attach images from
@@ -264,8 +270,6 @@ export class Harness {
    * emit global SessionStart/SessionEnd events for their ephemeral sessions.
    */
   sessionLifecycle = true;
-  private sessionStarted = false;
-  private sessionEnded = false;
   private running = false;
   private pendingContext: ModelMessage[] = [];
   private readonly model: LanguageModel;
@@ -333,8 +337,13 @@ export class Harness {
   }
 
   async endSession(): Promise<void> {
-    if (!this.hookBus || !this.sessionLifecycle || !this.sessionStarted || this.sessionEnded) return;
-    this.sessionEnded = true;
+    if (
+      !this.hookBus ||
+      !this.sessionLifecycle ||
+      !startedSessions.has(this.store) ||
+      endedSessions.has(this.store)
+    ) return;
+    endedSessions.add(this.store);
     await this.hookBus.dispatch('SessionEnd', { sessionId: this.store.session.id });
   }
 
@@ -503,8 +512,8 @@ export class Harness {
     try {
       signal.throwIfAborted();
       if (this.hookBus) {
-        if (!this.sessionStarted && this.sessionLifecycle) {
-          this.sessionStarted = true;
+        if (this.sessionLifecycle && !startedSessions.has(this.store)) {
+          startedSessions.add(this.store);
           const startHooks = await this.hookBus.dispatch('SessionStart', { sessionId: session.id });
           for (const h of startHooks) {
             if (h.injectedContext) {

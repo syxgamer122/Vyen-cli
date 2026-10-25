@@ -22,6 +22,9 @@
 - No lowering of the gate: the final task runs `npm run typecheck`, `npm run lint`, `npm test`.
 - Source and test files stay BOM-free and ASCII.
 - Ephemeral nested runners inherit tool hooks but never emit global `SessionStart` / `SessionEnd`.
+- Item 15 ruling (2026-10-25): `HookBus.dispatch` stays signal-less in this phase; failing hooks
+  during shutdown are now reported on stderr. Abortable hook processes are deferred to Phase 4,
+  alongside the other Minor audit items.
 
 ## Review Focus
 
@@ -162,9 +165,9 @@ Expected: FAIL on the new assertions (missing `sessionId`, resumed session start
 
 - [ ] **Step 3: Implement in `src/harness.ts`**
 
-- Add `sessionLifecycle = true`, `private sessionStarted = false`, `private sessionEnded = false`.
-- `endSession()` returns early unless a hook bus exists, `sessionLifecycle` is on, the session started, and it has not ended; set `sessionEnded = true` before dispatch.
-- Open the session on the first `run()` when `!sessionStarted && sessionLifecycle`, regardless of `messages.length`; set `sessionStarted = true`.
+- Add `sessionLifecycle = true` and track started/ended state in module-level `WeakSet<SessionStore>` values, so a CLI rebuild over the same store neither restarts nor loses the session (a resumed process has a new store and does start).
+- `endSession()` returns early unless a hook bus exists, `sessionLifecycle` is on, the store started, and it has not ended; mark the store ended before dispatch.
+- Open the session on the first `run()` when `sessionLifecycle` is on and the store has not started, regardless of `messages.length`.
 - Add `sessionId` to `UserPromptSubmit`, `PreCompact` (manual and token limit), `Stop` (all three reasons), `PreToolUse`, `PostToolUse`, and both `PostToolUseFailure` paths.
 
 - [ ] **Step 4: Run the tests to verify GREEN**
