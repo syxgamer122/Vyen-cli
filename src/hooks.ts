@@ -238,9 +238,11 @@ export function matchesHook(
   }
 
   if (event === 'PreToolUse' || event === 'PostToolUse' || event === 'PostToolUseFailure') {
-    const toolName = typeof payload.tool === 'string' ? payload.tool : '';
-    if (matcher === toolName || normalizeToolName(matcher) === toolName) return true;
-    if (matcher.endsWith('*') && toolName.startsWith(matcher.slice(0, -1))) return true;
+    const rawTool = typeof payload.tool === 'string' ? payload.tool : '';
+    const toolName = rawTool.toLowerCase();
+    const m = matcher.toLowerCase();
+    if (m === toolName || normalizeToolName(m) === toolName) return true;
+    if (m.endsWith('*') && toolName.startsWith(m.slice(0, -1))) return true;
     return false;
   }
 
@@ -270,8 +272,9 @@ export class HookBus {
   async dispatch(
     event: HookEvent,
     payload: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<HookExecutionResult[]> {
-    if (!this.isTrusted) {
+    if (!this.isTrusted || signal?.aborted) {
       return [];
     }
 
@@ -291,8 +294,9 @@ export class HookBus {
     const inputJson = `${JSON.stringify(basePayload)}\n`;
 
     for (const hook of matching) {
+      if (signal?.aborted) break;
       const timeoutMs = hook.timeoutMs ?? this.defaultTimeoutMs;
-      const result = await this.executeCommand(hook.command, inputJson, sanitizedEnv, timeoutMs);
+      const result = await this.executeCommand(hook.command, inputJson, sanitizedEnv, timeoutMs, signal);
       if (result.error && this.onWarning) {
         this.onWarning(`[Hook error (${hook.event})]: ${result.error}`);
       }
@@ -307,11 +311,13 @@ export class HookBus {
     inputJson: string,
     env: NodeJS.ProcessEnv,
     timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<HookExecutionResult> {
     return new Promise<HookExecutionResult>(resolvePromise => {
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      let aborted = false;
       const MAX_OUTPUT = 1024 * 1024; // 1MB buffer ceiling
 
       const child = spawn(command, {
@@ -327,8 +333,7 @@ export class HookBus {
         // Prevent unhandled stream error (e.g. EPIPE) if child exits before reading stdin
       });
 
-      const timer = setTimeout(() => {
-        timedOut = true;
+      const killChild = () => {
         if (!child.pid) return;
         if (process.platform === 'win32') {
           try {
@@ -340,6 +345,9 @@ export class HookBus {
               try { child.kill('SIGKILL'); } catch { /* ignore */ }
             });
             child.kill('SIGKILL');
+            try { child.stdout?.destroy(); } catch { /* ignore */ }
+            try { child.stderr?.destroy(); } catch { /* ignore */ }
+            try { child.stdin?.destroy(); } catch { /* ignore */ }
           } catch {
             try { child.kill('SIGKILL'); } catch { /* ignore */ }
           }
@@ -352,6 +360,24 @@ export class HookBus {
             }
           }
         }
+      };
+
+      const onAbort = () => {
+        aborted = true;
+        killChild();
+      };
+
+      if (signal) {
+        if (signal.aborted) {
+          onAbort();
+        } else {
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      }
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        killChild();
       }, timeoutMs);
 
       child.stdout.on('data', chunk => {
@@ -364,6 +390,7 @@ export class HookBus {
 
       child.on('error', err => {
         clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
         resolvePromise({
           executed: false,
           exitCode: 1,
@@ -376,7 +403,8 @@ export class HookBus {
 
       child.on('close', code => {
         clearTimeout(timer);
-        const exitCode = code ?? (timedOut ? 124 : 1);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        const exitCode = code ?? (timedOut ? 124 : (aborted ? 130 : 1));
         const denied = exitCode === 2;
         const injectedContext =
           exitCode === 0 && stdout.trim().length > 0 ? stdout.trim() : undefined;
@@ -384,6 +412,8 @@ export class HookBus {
 
         if (timedOut) {
           error = `Hook timed out after ${timeoutMs}ms`;
+        } else if (aborted) {
+          error = 'Hook execution aborted';
         } else if (exitCode !== 0 && exitCode !== 2) {
           error = stderr.trim() || `Hook exited with code ${exitCode}`;
         }

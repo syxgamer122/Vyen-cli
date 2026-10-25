@@ -13,6 +13,7 @@ import {
   recordWorkspaceTrust,
   HookBus,
   sanitizeEnvironment,
+  matchesHook,
 } from '../dist/hooks.js';
 
 test('project hooks require workspace trust and hash changes invalidate trust', async () => {
@@ -726,4 +727,32 @@ test('PostToolUseFailure payloads carry the session id for denied and thrown too
   const thrown = thrownEvents.find(e => e.event === 'PostToolUseFailure');
   assert.ok(thrown, 'thrown tool must dispatch PostToolUseFailure');
   assert.equal(thrown.payload.sessionId, thrownStore.session.id);
+});
+
+test('matchesHook matches tool names case-insensitively', () => {
+  assert.equal(matchesHook('Bash', 'PreToolUse', { tool: 'bash' }), true);
+  assert.equal(matchesHook('BASH', 'PreToolUse', { tool: 'bash' }), true);
+  assert.equal(matchesHook('write_FILE', 'PreToolUse', { tool: 'write_file' }), true);
+  assert.equal(matchesHook('Bash*', 'PreToolUse', { tool: 'bash' }), true);
+});
+
+test('HookBus dispatch aborts child process when AbortSignal triggers', async () => {
+  const bus = new HookBus({
+    cwd: process.cwd(),
+    isTrusted: true,
+    timeoutMs: 10000,
+    hooks: [
+      { event: 'PreToolUse', matcher: 'bash', command: 'node -e "setTimeout(() => {}, 5000)"' },
+    ],
+  });
+
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 100);
+  const start = Date.now();
+  const results = await bus.dispatch('PreToolUse', { tool: 'bash', input: {} }, controller.signal);
+  const elapsed = Date.now() - start;
+
+  assert.ok(elapsed < 2500, `aborted hook must return quickly, took ${elapsed}ms`);
+  assert.equal(results.length, 1);
+  assert.ok(results[0].error?.includes('abort') || results[0].exitCode !== 0);
 });
