@@ -806,3 +806,39 @@ test('calculateWorkspaceTrustHash handles question mark wildcard for allow scrip
   }
 });
 
+test('PreToolUse hook spawn error marks execution result as denied', async () => {
+  const bus = new HookBus({
+    cwd: process.cwd(),
+    isTrusted: true,
+    hooks: [{ event: 'PreToolUse', matcher: 'bash', command: 'non_existent_command_12345' }],
+  });
+  const results = await bus.dispatch('PreToolUse', { tool: 'bash', input: {} });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].denied, true, 'PreToolUse spawn error must fail-closed with denied: true');
+});
+
+test('PreToolUse hook timeout marks execution result as denied', async () => {
+  const bus = new HookBus({
+    cwd: process.cwd(),
+    isTrusted: true,
+    timeoutMs: 100,
+    hooks: [{ event: 'PreToolUse', matcher: 'bash', command: 'node -e "setTimeout(() => {}, 5000)"' }],
+  });
+  const results = await bus.dispatch('PreToolUse', { tool: 'bash', input: {} });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].timedOut, true);
+  assert.equal(results[0].denied, true, 'PreToolUse timeout must fail-closed with denied: true');
+});
+
+test('Non-PreToolUse hook timeout or error preserves denied false', async () => {
+  const bus = new HookBus({
+    cwd: process.cwd(),
+    isTrusted: true,
+    hooks: [{ event: 'SessionStart', command: 'non_existent_command_12345' }],
+  });
+  const results = await bus.dispatch('SessionStart', {});
+  assert.equal(results.length, 1);
+  assert.equal(results[0].denied, false, 'Non-PreToolUse spawn error must not mark denied: true');
+});
+
+

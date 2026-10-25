@@ -296,7 +296,7 @@ export class HookBus {
     for (const hook of matching) {
       if (signal?.aborted) break;
       const timeoutMs = hook.timeoutMs ?? this.defaultTimeoutMs;
-      const result = await this.executeCommand(hook.command, inputJson, sanitizedEnv, timeoutMs, signal);
+      const result = await this.executeCommand(event, hook.command, inputJson, sanitizedEnv, timeoutMs, signal);
       if (result.error && this.onWarning) {
         this.onWarning(`[Hook error (${hook.event})]: ${result.error}`);
       }
@@ -307,6 +307,7 @@ export class HookBus {
   }
 
   private executeCommand(
+    event: HookEvent,
     command: string,
     inputJson: string,
     env: NodeJS.ProcessEnv,
@@ -396,7 +397,7 @@ export class HookBus {
           exitCode: 1,
           stdout,
           stderr,
-          denied: false,
+          denied: event === 'PreToolUse',
           error: err.message,
         });
       });
@@ -405,7 +406,8 @@ export class HookBus {
         clearTimeout(timer);
         if (signal) signal.removeEventListener('abort', onAbort);
         const exitCode = code ?? (timedOut ? 124 : (aborted ? 130 : 1));
-        const denied = exitCode === 2;
+        const isPreToolUse = event === 'PreToolUse';
+        const denied = exitCode === 2 || (isPreToolUse && exitCode !== 0);
         const injectedContext =
           exitCode === 0 && stdout.trim().length > 0 ? stdout.trim() : undefined;
         let error: string | undefined;
