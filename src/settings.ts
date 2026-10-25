@@ -52,20 +52,36 @@ export function projectSettingsPath(cwd: string): string {
 
 /**
  * Loads project-level settings from `<cwd>/.vyen/settings.json`.
- * If the file is missing or contains invalid JSON/schema, degrades safely
- * and returns an empty settings object.
+ * Strips UTF-8 BOM if present. If the file is missing (ENOENT), returns an empty
+ * settings object. If the file contains malformed JSON or invalid schema, throws
+ * an error to fail closed and prevent silent security rule bypass.
  */
 export async function loadProjectSettings(cwd: string): Promise<ProjectSettings> {
   const filePath = projectSettingsPath(cwd);
+  let raw: string;
   try {
-    const raw = await readFile(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
-    const result = projectSettingsSchema.safeParse(parsed);
-    if (!result.success) return {};
-    return result.data;
-  } catch {
-    return {};
+    raw = await readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return {};
+    }
+    throw error;
   }
+
+  const cleaned = raw.replace(/^\uFEFF/, '');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (error) {
+    throw new Error(`Failed to parse project settings at ${filePath}: ${(error as Error).message}`);
+  }
+
+  const result = projectSettingsSchema.safeParse(parsed);
+  if (!result.success) {
+    const issues = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
+    throw new Error(`Invalid project settings schema at ${filePath}: ${issues}`);
+  }
+  return result.data;
 }
 
 /**

@@ -6,34 +6,51 @@ import { join } from 'node:path';
 import { loadProjectSettings, projectSettingsPath } from '../dist/settings.js';
 import { evaluateToolPolicy, matchToolPattern } from '../dist/policy.js';
 
-test('missing or malformed project settings file degrades safely', async () => {
+test('loadProjectSettings strips BOM, handles ENOENT, and throws on malformed JSON or invalid schema', async () => {
   assert.equal(projectSettingsPath('/workspace'), join('/workspace', '.vyen', 'settings.json'));
   assert.ok(matchToolPattern('read_file', { tool: 'read_file' }));
   assert.ok(matchToolPattern('bash(git *)', { tool: 'bash', input: { command: 'git status' } }));
   const dir = await mkdtemp(join(tmpdir(), 'vyen-settings-test-'));
   try {
+    // Missing file returns {}
     const missing = await loadProjectSettings(dir);
     assert.deepEqual(missing, {});
 
     const vyenDir = join(dir, '.vyen');
     await mkdir(vyenDir, { recursive: true });
-    await writeFile(join(vyenDir, 'settings.json'), '{ broken json ');
-    const malformed = await loadProjectSettings(dir);
-    assert.deepEqual(malformed, {});
 
+    // UTF-8 BOM with valid JSON parses correctly
+    const validWithBom = '\uFEFF' + JSON.stringify({
+      $schema: 'https://json.schemastore.org/settings',
+      permissions: {
+        allow: ['read_file', 'bash(npm test *)'],
+        deny: ['bash(rm -rf *)'],
+      },
+    });
+    await writeFile(join(vyenDir, 'settings.json'), validWithBom, 'utf8');
+    const parsedBom = await loadProjectSettings(dir);
+    assert.deepEqual(parsedBom.permissions?.allow, ['read_file', 'bash(npm test *)']);
+    assert.deepEqual(parsedBom.permissions?.deny, ['bash(rm -rf *)']);
+
+    // Broken JSON throws error (fail-closed)
+    await writeFile(join(vyenDir, 'settings.json'), '{ broken json ', 'utf8');
+    await assert.rejects(
+      async () => await loadProjectSettings(dir),
+      /Failed to parse project settings/
+    );
+
+    // Invalid schema throws error (fail-closed)
     await writeFile(
       join(vyenDir, 'settings.json'),
       JSON.stringify({
-        $schema: 'https://json.schemastore.org/settings',
-        permissions: {
-          allow: ['read_file', 'bash(npm test *)'],
-          deny: ['bash(rm -rf *)'],
-        },
+        permissions: { allow: 123 },
       }),
+      'utf8',
     );
-    const valid = await loadProjectSettings(dir);
-    assert.deepEqual(valid.permissions?.allow, ['read_file', 'bash(npm test *)']);
-    assert.deepEqual(valid.permissions?.deny, ['bash(rm -rf *)']);
+    await assert.rejects(
+      async () => await loadProjectSettings(dir),
+      /Invalid project settings/
+    );
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
