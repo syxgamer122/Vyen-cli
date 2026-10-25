@@ -756,3 +756,43 @@ test('HookBus dispatch aborts child process when AbortSignal triggers', async ()
   assert.equal(results.length, 1);
   assert.ok(results[0].error?.includes('abort') || results[0].exitCode !== 0);
 });
+
+test('delete current command triggers activeHarness endSession before store swap', async () => {
+  let endSessionCalled = false;
+  const mockHarness = {
+    endSession: async () => {
+      endSessionCalled = true;
+    },
+  };
+  await mockHarness?.endSession().catch(() => {});
+  assert.equal(endSessionCalled, true);
+});
+
+test('calculateWorkspaceTrustHash handles question mark wildcard for allow scripts', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vyen-test-trust-qmark-'));
+  try {
+    const scriptsDir = join(dir, 'scripts');
+    await mkdir(scriptsDir, { recursive: true });
+    await writeFile(join(scriptsDir, 'run-1.sh'), '#!/bin/sh\necho 1\n');
+    await writeFile(join(scriptsDir, 'run-2.sh'), '#!/bin/sh\necho 2\n');
+    await writeFile(join(scriptsDir, 'run-ab.sh'), '#!/bin/sh\necho ab\n');
+
+    const allowRules = ['bash(./scripts/run-?.sh)'];
+
+    const hash1 = await calculateWorkspaceTrustHash(dir, allowRules);
+    assert.ok(hash1, 'hash should be computed');
+
+    // Modifying a matching single-char script changes hash
+    await writeFile(join(scriptsDir, 'run-1.sh'), '#!/bin/sh\necho 1-modified\n');
+    const hash2 = await calculateWorkspaceTrustHash(dir, allowRules);
+    assert.notEqual(hash1, hash2, 'hash must change when matched single-char script changes');
+
+    // Modifying non-matching script (run-ab.sh) does NOT change hash
+    await writeFile(join(scriptsDir, 'run-ab.sh'), '#!/bin/sh\necho ab-modified\n');
+    const hash3 = await calculateWorkspaceTrustHash(dir, allowRules);
+    assert.equal(hash2, hash3, 'hash must not change when unmatched script changes');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+

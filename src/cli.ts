@@ -2961,6 +2961,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             const sessionsRoot = join(runtime.dataDir, 'sessions');
             if (!target || target.toLowerCase() === 'current') {
               const oldId = store.session.id;
+              await activeHarness?.endSession().catch(() => {});
               const oldStore = store;
               store = await SessionStore.open(sessionsRoot, runtime);
               await oldStore.close();
