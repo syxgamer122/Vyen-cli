@@ -191,9 +191,20 @@ export async function recordWorkspaceTrust(
 
 import { spawn } from 'node:child_process';
 
+const PRESERVED_ENV_KEYS = new Set([
+  'SSH_AUTH_SOCK',
+  'GIT_AUTHOR_NAME',
+  'GIT_AUTHOR_EMAIL',
+  'GIT_AUTHOR_DATE',
+  'GIT_COMMITTER_NAME',
+  'GIT_COMMITTER_EMAIL',
+  'GIT_COMMITTER_DATE',
+]);
+
 /**
  * Creates a sanitized environment object that strips API keys and credentials
- * so child hook processes cannot accidentally or maliciously access them.
+ * so child hook processes cannot accidentally or maliciously access them,
+ * while preserving essential Git identity and SSH authentication sockets.
  */
 export function sanitizeEnvironment(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const protectedBase = childEnv(baseEnv);
@@ -201,7 +212,12 @@ export function sanitizeEnvironment(baseEnv: NodeJS.ProcessEnv = process.env): N
   const sensitivePattern = /KEY|TOKEN|SECRET|AUTH|PASS|CREDENTIAL|PRIVATE/i;
 
   for (const [key, value] of Object.entries(protectedBase)) {
-    if (!key || sensitivePattern.test(key) || key === 'VYEN_API_KEY') {
+    if (!key) continue;
+    if (PRESERVED_ENV_KEYS.has(key)) {
+      clean[key] = value;
+      continue;
+    }
+    if (sensitivePattern.test(key) || key === 'VYEN_API_KEY') {
       continue;
     }
     clean[key] = value;

@@ -17,42 +17,48 @@ import {
 
 test('project hooks require workspace trust and hash changes invalidate trust', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vyen-trust-test-'));
-  const vyenDir = join(dir, '.vyen');
-  await mkdir(vyenDir, { recursive: true });
+  const oldXdg = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = join(dir, '.config');
+  try {
+    const vyenDir = join(dir, '.vyen');
+    await mkdir(vyenDir, { recursive: true });
 
-  const settingsFile = join(vyenDir, 'settings.json');
-  const scriptFile = join(dir, 'script.sh');
+    const settingsFile = join(vyenDir, 'settings.json');
+    const scriptFile = join(dir, 'script.sh');
 
-  await writeFile(settingsFile, JSON.stringify({
-    hooks: [
-      { event: 'PreToolUse', matcher: 'bash', command: 'bash ./script.sh' },
-    ],
-  }), 'utf8');
-  await writeFile(scriptFile, 'echo "ok"', 'utf8');
+    await writeFile(settingsFile, JSON.stringify({
+      hooks: [
+        { event: 'PreToolUse', matcher: 'bash', command: 'bash ./script.sh' },
+      ],
+    }), 'utf8');
+    await writeFile(scriptFile, 'echo "ok"', 'utf8');
 
-  // Compute initial hash
-  const hash1 = await calculateWorkspaceTrustHash(dir, ['bash ./script.sh']);
-  assert.ok(typeof hash1 === 'string' && hash1.length === 64, 'hash must be 64-char sha256 hex');
+    // Compute initial hash
+    const hash1 = await calculateWorkspaceTrustHash(dir, ['bash ./script.sh']);
+    assert.ok(typeof hash1 === 'string' && hash1.length === 64, 'hash must be 64-char sha256 hex');
 
-  // Initially untrusted
-  const untrusted = await isWorkspaceTrusted(dir, hash1);
-  assert.equal(untrusted, false, 'initially untrusted');
+    // Initially untrusted
+    const untrusted = await isWorkspaceTrusted(dir, hash1);
+    assert.equal(untrusted, false, 'initially untrusted');
 
-  // Record trust
-  await recordWorkspaceTrust(dir, hash1);
-  const trusted = await isWorkspaceTrusted(dir, hash1);
-  assert.equal(trusted, true, 'trusted after recording');
+    // Record trust
+    await recordWorkspaceTrust(dir, hash1);
+    const trusted = await isWorkspaceTrusted(dir, hash1);
+    assert.equal(trusted, true, 'trusted after recording');
 
-  // Modify the script file
-  await writeFile(scriptFile, 'echo "malicious modification"', 'utf8');
-  const hash2 = await calculateWorkspaceTrustHash(dir, ['bash ./script.sh']);
-  assert.notEqual(hash1, hash2, 'modifying script must change trust hash');
+    // Modify the script file
+    await writeFile(scriptFile, 'echo "malicious modification"', 'utf8');
+    const hash2 = await calculateWorkspaceTrustHash(dir, ['bash ./script.sh']);
+    assert.notEqual(hash1, hash2, 'modifying script must change trust hash');
 
-  // Now checking trust with new hash2 should be false
-  const trustedAfterTamper = await isWorkspaceTrusted(dir, hash2);
-  assert.equal(trustedAfterTamper, false, 'tampered script must invalidate trust');
-
-  await rm(dir, { recursive: true, force: true });
+    // Now checking trust with new hash2 should be false
+    const trustedAfterTamper = await isWorkspaceTrusted(dir, hash2);
+    assert.equal(trustedAfterTamper, false, 'tampered script must invalidate trust');
+  } finally {
+    if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = oldXdg;
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('hook bus executes PreToolUse command and exit 2 denies execution', async () => {
@@ -562,4 +568,29 @@ test('Harness blocks tool execution when PreToolUse hook times out or fails', as
 
   const exists = await stat(join(f.cwd, 'timed_out_blocked.txt')).then(() => true, () => false);
   assert.equal(exists, false, 'file must not be created when hook times out');
+});
+
+test('sanitizeEnvironment preserves SSH_AUTH_SOCK and Git identity while stripping secret keys', () => {
+  const env = {
+    SSH_AUTH_SOCK: '/tmp/ssh-agent.sock',
+    GIT_AUTHOR_NAME: 'Alice',
+    GIT_AUTHOR_EMAIL: 'alice@example.com',
+    GIT_COMMITTER_NAME: 'Bob',
+    GIT_COMMITTER_EMAIL: 'bob@example.com',
+    OPENAI_API_KEY: 'sk-secret123',
+    GITHUB_TOKEN: 'ghp_secret456',
+    AUTH_SECRET: 'supersecret',
+    CUSTOM_PASSWORD: 'password123',
+    PATH: '/usr/bin:/bin',
+  };
+
+  const clean = sanitizeEnvironment(env);
+  assert.equal(clean.SSH_AUTH_SOCK, '/tmp/ssh-agent.sock', 'SSH_AUTH_SOCK must be preserved');
+  assert.equal(clean.GIT_AUTHOR_NAME, 'Alice', 'GIT_AUTHOR_NAME must be preserved');
+  assert.equal(clean.GIT_COMMITTER_EMAIL, 'bob@example.com', 'GIT_COMMITTER_EMAIL must be preserved');
+  assert.equal(clean.PATH, '/usr/bin:/bin');
+  assert.equal(clean.OPENAI_API_KEY, undefined);
+  assert.equal(clean.GITHUB_TOKEN, undefined);
+  assert.equal(clean.AUTH_SECRET, undefined);
+  assert.equal(clean.CUSTOM_PASSWORD, undefined);
 });
