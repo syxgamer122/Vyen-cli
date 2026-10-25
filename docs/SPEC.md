@@ -115,16 +115,16 @@ The Hook system is inspired by Claude Code's lifecycle and hook architecture, ad
 
 Project hooks are defined strictly in `.vyen/settings.json` (user configuration `config.json` holds only global permissions). Project hooks and allow rules require explicit workspace trust via `--trust-workspace` (which computes and re-records the SHA-256 trust hash over settings and allow script targets).
 
-| Event | Trigger | Payload Fields | Exit 2 Behavior | Exit 0 Behavior |
+| Event | Trigger | Payload Fields | Exit 0 Behavior | Non-Zero / Timeout |
 |---|---|---|---|---|
-| `SessionStart` | Session startup or first turn of resumed session | `event`, `sessionId`, `timestamp`, `cwd`, `resumed?` | Ignored | Injects stdout as system context |
-| `SessionEnd` | Process shutdown, `/new`, `/resume`, or subagent cleanup | `event`, `sessionId`, `timestamp`, `cwd`, `reason` | Ignored | Flushes warnings to stderr |
-| `UserPromptSubmit` | User submits prompt | `event`, `sessionId`, `timestamp`, `cwd`, `prompt` | Ignored | Injects stdout as prompt context |
-| `PreToolUse` | Before tool batch execution | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input` | **Denies tool execution** (`denied: true`) | Injects stdout as context |
-| `PostToolUse` | After tool execution completes | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input`, `output` | Ignored | Injects stdout as context |
-| `PostToolUseFailure` | After tool failure or permission denial | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input`, `error` | Ignored | Injects stdout as context |
-| `PreCompact` | Before context compaction occurs | `event`, `sessionId`, `timestamp`, `cwd`, `tokensBefore` | Ignored | Injects stdout as context |
-| `Stop` | Run stops or completes | `event`, `sessionId`, `timestamp`, `cwd`, `reason` | Ignored | Injects stdout as context |
+| `SessionStart` | Session startup or first turn of resumed session | `event`, `sessionId`, `timestamp`, `cwd` | Injects stdout as system context | Ignored (logged as warning) |
+| `SessionEnd` | Process shutdown, `/new`, `/resume`, `/delete`, or subagent cleanup | `event`, `sessionId`, `timestamp`, `cwd` | Ignored | Ignored (logged as warning) |
+| `UserPromptSubmit` | User submits prompt | `event`, `sessionId`, `timestamp`, `cwd`, `prompt` | Injects stdout as prompt context | Ignored (logged as warning) |
+| `PreToolUse` | Before tool batch execution | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input` | Ignored | Exit 2 or error/timeout: Denies tool execution (fail-closed) |
+| `PostToolUse` | After tool execution completes | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input`, `output` | Injects stdout as context | Ignored (logged as warning) |
+| `PostToolUseFailure` | After tool failure or permission denial | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input`, `error` | Ignored | Ignored (logged as warning) |
+| `PreCompact` | Before context compaction occurs | `event`, `sessionId`, `timestamp`, `cwd`, `tokens`, `trigger` | Ignored | Ignored (logged as warning) |
+| `Stop` | User requests stop / abort | `event`, `sessionId`, `timestamp`, `cwd`, `stopHookActive` | Ignored | Ignored (logged as warning) |
 
 ## Acceptance
 

@@ -105,3 +105,12 @@ test('SPEC documents the 8 hook events table and Claude Code inspiration', async
   assert.match(help, /--trust-workspace/);
   assert.match(readme, /--trust-workspace/);
 });
+
+test('SPEC documents accurate hook payloads and fail-closed exit codes', async () => {
+  const spec = await readFile('docs/SPEC.md', 'utf8');
+  assert.match(spec, /tokens.*trigger/);
+  assert.match(spec, /Exit 2 or error\/timeout: Denies tool execution \(fail-closed\)/);
+  assert.match(spec, /SessionStart.*Injects stdout as system context/);
+  assert.match(spec, /UserPromptSubmit.*Injects stdout as prompt context/);
+  assert.match(spec, /PostToolUse.*Injects stdout as context/);
+});
