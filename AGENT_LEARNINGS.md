@@ -10,6 +10,7 @@ Loaded by `loadProjectInstructions` in `src/context.ts`. When an agent makes a m
   2. `src/subagents.ts` (child harness inherits policy & hookBus)
   3. `src/network.ts` (peer network ToolRegistry attaches policy; Harness receives hookBus)
   4. `src/workflow.ts` (step harnesses inherit policy & hookBus)
+- **"Attach" means live:** a policy captured at construction (`AgentNetwork` snapshots `registry.policy`) ignores later changes. Pass the evaluator, not a snapshot, and test a policy changed after construction.
 
 ## 2. Shell Security: Segment-Aware Matching vs. Start-Anchored Regexes
 - **Anti-Pattern (Anchored Regex):** Using `^base(?:\\s+.*)?$` for `bash` deny matching (`bash(rm *)`).
@@ -29,9 +30,15 @@ Loaded by `loadProjectInstructions` in `src/context.ts`. When an agent makes a m
 ## 5. Lifecycle Synchronization: Process vs. Session Lifetime
 - **Anti-Pattern (CLI-Exit Hook):** Dispatching `SessionEnd` only on CLI exit and `SessionStart` only on `messages.length === 0`, or storing started/ended flags on the `Harness` instance.
 - **Consequence:** `/new` and `/resume` drop old `SessionEnd`; resumed sessions miss `SessionStart`; a rebuild (`/model`, `/effort`, `/cd`) over the same store restarts the session or loses its end.
-- **Rule:** Key lifecycle state to the `SessionStore` (module-level `WeakSet`), never to the harness that happens to be running. Trigger `activeHarness.endSession()` before store swaps in `/new` and `/resume`, and in subagent cleanup. Nested runners inherit tool hooks but do not spam global session lifecycle hooks.
+- **Rule:** Key lifecycle state to the `SessionStore` (module-level `WeakSet`), never to the harness that happens to be running. Trigger `activeHarness.endSession()` before every store swap (`/new`, `/resume`, `/delete`), and in subagent cleanup. Nested runners inherit tool hooks but do not spam global session lifecycle hooks.
 - **Guard:** tests/hooks.test.mjs › "Harness emits SessionStart once on the first turn of a resumed session and SessionEnd at most once"
 
 ## 6. Testing Rigor: Negative Baselines & Adversarial Tests
 - **Anti-Pattern (Happy-Path Mocks):** Testing only positive rule triggers without negative baselines (e.g. testing `ask: ['read_file']` without testing empty `{}` baseline).
 - **Rule:** Always test negative baseline (unconfigured tools execute without prompt). Always test adversarial vectors (chaining, missing files, subshells, quotes).
+- **Payload tests:** replacing `dispatch` proves the shape, not that a real hook process receives `sessionId`. At least one test must spawn the hook.
+
+## 7. Review Findings Become Rules, Not TODOs
+- **Anti-Pattern:** Filing a review finding as deferred work and leaving the rule that should have prevented it untouched.
+- **Rule:** Every confirmed finding (red test, review verdict, user correction) lands as a rule in the section that owns it before the turn ends. Deferred code is still a captured lesson.
+
