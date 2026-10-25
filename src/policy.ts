@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import type { PermissionRules } from './settings.js';
-import { type PermissionMode, normalizeToolName } from './tools.js';
+import { normalizeToolName } from './tools.js';
 
 export type PolicyDecision = 'allow' | 'ask' | 'deny' | 'default';
 
@@ -14,8 +14,8 @@ export interface PolicyEvaluationContext {
   cliDisallowed?: string[];
   userRules?: PermissionRules;
   projectRules?: PermissionRules;
-  mode?: PermissionMode;
   cwd?: string;
+  platform?: NodeJS.Platform;
 }
 
 const CHAINING_PATTERN = /[\r\n;&|`><]|\$\(|\$\{/;
@@ -39,12 +39,12 @@ function cleanCommandSegment(seg: string): string {
   return cleaned;
 }
 
-function normalizePathForMatching(raw: string, cwd = process.cwd()): string {
+function normalizePathForMatching(raw: string, cwd = process.cwd(), platform = process.platform): string {
   const clean = raw.trim().replace(/\\/g, '/');
   if (!clean) return '';
   const normalizedCwd = resolve(cwd).replace(/\\/g, '/');
   const resolved = resolve(cwd, clean).replace(/\\/g, '/');
-  const isWin = process.platform === 'win32';
+  const isWin = platform === 'win32';
   if (isWin ? resolved.toLowerCase() === normalizedCwd.toLowerCase() : resolved === normalizedCwd) {
     return '.';
   }
@@ -58,28 +58,29 @@ function normalizePathForMatching(raw: string, cwd = process.cwd()): string {
   return resolved;
 }
 
-function extractToolArgumentString(tool: string, input: unknown, cwd?: string): string {
-  if (typeof input === 'string') return tool === 'bash' ? input.trim() : normalizePathForMatching(input, cwd);
+function extractToolArgumentString(tool: string, input: unknown, cwd?: string, platform = process.platform): string {
+  if (typeof input === 'string') return tool === 'bash' ? input.trim() : normalizePathForMatching(input, cwd, platform);
   if (!input || typeof input !== 'object') return '';
   const obj = input as Record<string, unknown>;
   if (typeof obj.command === 'string') return obj.command.trim();
-  if (typeof obj.path === 'string') return normalizePathForMatching(obj.path, cwd);
-  if (typeof obj.file_path === 'string') return normalizePathForMatching(obj.file_path, cwd);
+  if (typeof obj.path === 'string') return normalizePathForMatching(obj.path, cwd, platform);
+  if (typeof obj.file_path === 'string') return normalizePathForMatching(obj.file_path, cwd, platform);
   return JSON.stringify(input);
 }
 
-function matchSimplePattern(pattern: string, text: string): boolean {
+function matchSimplePattern(pattern: string, text: string, caseSensitive = false): boolean {
   const p = pattern.trim();
   if (p === '*' || p === '') return true;
   if (!p.includes('*')) {
-    return p.toLowerCase() === text.toLowerCase();
+    return caseSensitive ? p === text : p.toLowerCase() === text.toLowerCase();
   }
   const pieces = p.split('*').map(piece => piece.replace(/[.+?^${}()|[\]\\]/g, '\\$&'));
+  const flags = caseSensitive ? '' : 'i';
   if (pieces.length === 2 && pieces[0].endsWith(' ') && pieces[1] === '') {
     const base = pieces[0].trimEnd();
-    return new RegExp(`^${base}(?:\\s+.*)?$`, 'i').test(text);
+    return new RegExp(`^${base}(?:\\s+.*)?$`, flags).test(text);
   }
-  return new RegExp(`^${pieces.join('.*')}$`, 'i').test(text);
+  return new RegExp(`^${pieces.join('.*')}$`, flags).test(text);
 }
 
 /**
@@ -93,18 +94,19 @@ function matchSimplePattern(pattern: string, text: string): boolean {
 export function matchToolPattern(
   pattern: string,
   request: ToolRequest,
-  options: { isAllow?: boolean; cwd?: string } = {},
+  options: { isAllow?: boolean; cwd?: string; platform?: NodeJS.Platform } = {},
 ): boolean {
   const trimmed = pattern.trim();
   if (!trimmed) return false;
   const parenIdx = trimmed.indexOf('(');
   const canonicalRequestTool = normalizeToolName(request.tool);
+  const platform = options.platform ?? process.platform;
   if (parenIdx > 0 && trimmed.endsWith(')')) {
     const toolName = trimmed.slice(0, parenIdx).trim();
     const canonicalTool = normalizeToolName(toolName);
     if (!matchSimplePattern(canonicalTool, canonicalRequestTool)) return false;
     const rawArgPattern = trimmed.slice(parenIdx + 1, -1).trim();
-    const argStr = extractToolArgumentString(canonicalRequestTool, request.input, options.cwd);
+    const argStr = extractToolArgumentString(canonicalRequestTool, request.input, options.cwd, platform);
     if (canonicalRequestTool === 'bash') {
       if (options.isAllow) {
         // Security: In allow rules, wildcard patterns must never match compound or chained commands
@@ -124,13 +126,14 @@ export function matchToolPattern(
       }
       return false;
     }
-    const normalizedPattern = normalizePathForMatching(rawArgPattern, options.cwd);
-    return matchSimplePattern(normalizedPattern, argStr);
+    const isPathCaseSensitive = platform !== 'win32';
+    const normalizedPattern = normalizePathForMatching(rawArgPattern, options.cwd, platform);
+    return matchSimplePattern(normalizedPattern, argStr, isPathCaseSensitive);
   }
   const canonicalPatternTool = normalizeToolName(trimmed);
   if (!matchSimplePattern(canonicalPatternTool, canonicalRequestTool)) return false;
   if (canonicalRequestTool === 'bash' && options.isAllow) {
-    const argStr = extractToolArgumentString(canonicalRequestTool, request.input, options.cwd);
+    const argStr = extractToolArgumentString(canonicalRequestTool, request.input, options.cwd, platform);
     if (CHAINING_PATTERN.test(argStr)) {
       return false;
     }
@@ -148,14 +151,14 @@ export function matchToolPattern(
  * 6. Project ask rules -> 'ask'
  * 7. Project allow rules -> 'allow'
  * 8. User allow rules -> 'allow'
- * 9. Default -> 'ask' (falls through to mode / interactive confirmation)
+ * 9. Default -> 'default' (falls through to ToolRegistry permission mode check)
  */
 export function evaluateToolPolicy(
   request: ToolRequest,
   ctx: PolicyEvaluationContext,
 ): PolicyDecision {
-  const allowOpts = { isAllow: true, cwd: ctx.cwd };
-  const denyOpts = { isAllow: false, cwd: ctx.cwd };
+  const allowOpts = { isAllow: true, cwd: ctx.cwd, platform: ctx.platform };
+  const denyOpts = { isAllow: false, cwd: ctx.cwd, platform: ctx.platform };
 
   // 1. CLI disallowed
   if (ctx.cliDisallowed?.some(p => matchToolPattern(p, request, denyOpts))) {

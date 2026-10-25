@@ -336,3 +336,35 @@ test('deny rules with bash patterns block compound, chained, and wrapped command
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'VAR=1 rm -rf /' } }, ctx), 'deny');
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'LC_ALL=C rm -rf /' } }, ctx), 'deny');
 });
+
+test('file path matching is case-sensitive on POSIX systems', () => {
+  const ctxPosix = {
+    platform: 'linux',
+    projectRules: {
+      deny: ['read_file(Secret.txt)'],
+    },
+  };
+
+  assert.equal(
+    evaluateToolPolicy({ tool: 'read_file', input: { path: 'Secret.txt' } }, ctxPosix),
+    'deny',
+    'exact match on POSIX is denied',
+  );
+  assert.equal(
+    evaluateToolPolicy({ tool: 'read_file', input: { path: 'secret.txt' } }, ctxPosix),
+    'default',
+    'different casing on POSIX must not match',
+  );
+
+  const ctxWin = {
+    platform: 'win32',
+    projectRules: {
+      deny: ['read_file(Secret.txt)'],
+    },
+  };
+  assert.equal(
+    evaluateToolPolicy({ tool: 'read_file', input: { path: 'secret.txt' } }, ctxWin),
+    'deny',
+    'Windows remains case-insensitive',
+  );
+});
