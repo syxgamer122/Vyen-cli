@@ -19,6 +19,27 @@ export interface PolicyEvaluationContext {
 }
 
 const CHAINING_PATTERN = /[\r\n;&|`><]|\$\(|\$\{/;
+const COMPOUND_SPLIT_REGEX = /[;\r\n|&]+|\$\(|\`/g;
+const WRAPPER_PREFIX_REGEX = /^(?:sudo(?:\s+-[a-zA-Z0-9]+)*|env(?:\s+[a-zA-Z0-9_]+=[^\s]+)*|sh\s+-c|bash\s+-c)\s+/i;
+
+function cleanCommandSegment(seg: string): string {
+  let cleaned = seg.trim();
+  // Strip trailing parens or quotes from substitutions like $(rm -rf /)
+  cleaned = cleaned.replace(/\)+$/, '').trim();
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  let prev = '';
+  while (prev !== cleaned) {
+    prev = cleaned;
+    cleaned = cleaned.replace(WRAPPER_PREFIX_REGEX, '').trim();
+    if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+      cleaned = cleaned.slice(1, -1).trim();
+    }
+    cleaned = cleaned.replace(/\)+$/, '').trim();
+  }
+  return cleaned;
+}
 
 function normalizePathForMatching(raw: string, cwd = process.cwd()): string {
   const clean = raw.trim().replace(/\\/g, '/');
@@ -87,11 +108,23 @@ export function matchToolPattern(
     const rawArgPattern = trimmed.slice(parenIdx + 1, -1).trim();
     const argStr = extractToolArgumentString(canonicalRequestTool, request.input, options.cwd);
     if (canonicalRequestTool === 'bash') {
-      // Security: In allow rules, wildcard patterns must never match compound or chained commands
-      if (options.isAllow && rawArgPattern.includes('*') && CHAINING_PATTERN.test(argStr)) {
-        return false;
+      if (options.isAllow) {
+        // Security: In allow rules, wildcard patterns must never match compound or chained commands
+        if (rawArgPattern.includes('*') && CHAINING_PATTERN.test(argStr)) {
+          return false;
+        }
+        return matchSimplePattern(rawArgPattern, argStr);
       }
-      return matchSimplePattern(rawArgPattern, argStr);
+      // Security: In deny/ask rules, match if either full command or ANY segment matches
+      if (matchSimplePattern(rawArgPattern, argStr)) return true;
+      const rawSegments = argStr.split(COMPOUND_SPLIT_REGEX);
+      for (const seg of rawSegments) {
+        const cleaned = cleanCommandSegment(seg);
+        if (cleaned && matchSimplePattern(rawArgPattern, cleaned)) {
+          return true;
+        }
+      }
+      return false;
     }
     const normalizedPattern = normalizePathForMatching(rawArgPattern, options.cwd);
     return matchSimplePattern(normalizedPattern, argStr);

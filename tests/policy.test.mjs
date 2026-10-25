@@ -269,3 +269,27 @@ test('read-only tools do not require approval when policy has no matching rules 
 
   assert.equal(approveCalled, false, 'read-only tool should execute without approval when no policy rule matches');
 });
+
+test('deny rules with bash patterns block compound, chained, and wrapped commands', () => {
+  const ctx = {
+    projectRules: {
+      deny: ['bash(rm *)'],
+    },
+  };
+
+  // Direct match is denied
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'rm -rf /' } }, ctx), 'deny');
+
+  // Chained and compound commands MUST be denied
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'echo hi; rm -rf /' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'cd . && rm -rf /' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'npm test || rm -rf /' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'cat file | rm -rf /' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'echo $(rm -rf /)' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'echo `rm -rf /`' } }, ctx), 'deny');
+
+  // Wrappers MUST be denied
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'sudo rm -rf /' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'sh -c "rm -rf /"' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: "bash -c 'rm -rf /'" } }, ctx), 'deny');
+});
