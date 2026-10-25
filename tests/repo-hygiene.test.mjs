@@ -91,6 +91,18 @@ test('AGENTS.md fits under the prompt cap with room to spare', async () => {
     text.length <= limit - 1000,
     `AGENTS.md is ${text.length} characters; the loader truncates at ${limit} and drops the middle, so it must stay at or below ${limit - 1000}`,
   );
+
+  let learnings = '';
+  try {
+    learnings = await readFile(join(ROOT, 'AGENT_LEARNINGS.md'), 'utf8');
+  } catch {
+    // optional
+  }
+  const combined = text.length + (learnings ? learnings.length + 2 : 0);
+  assert.ok(
+    combined <= limit - 1000,
+    `Combined instructions (AGENTS.md + AGENT_LEARNINGS.md) is ${combined} characters; must stay at or below ${limit - 1000} to prevent middle truncation`,
+  );
 });
 
 test('the two guards protect each other', async () => {

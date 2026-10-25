@@ -82,28 +82,16 @@ The gate above only counts if the agent does not lower it.
   are redacted. If `~/.config/vyen/` or credential/memory files are missing, treat them as
   empty and bootstrap on demand; never assume pre-existing files or crash when absent.
 
-> **What is guarded and what is not.** BOM (§8), any `@ts-ignore`, and a
-> reason-less `@ts-expect-error` are **RED** when violated
-> (`tests/repo-hygiene.test.mjs`); deleting either guard file is **RED** too —
-> each guard asserts that the other one exists. A missing `## Scenarios & Tests`
-> table or a `Review Focus` item without a row is **RED**
-> (`tests/plan-traceability.test.mjs`). The rest — `as any`, lint disabling,
-> `--no-verify`, destructive commands, bent evidence — have **no** measurement, so
-> they are self-declared like Laws 2/3/4. Do not demand a test for them, and do
-> not treat them as optional.
->
-> Measured 2026-10-24: 25 files in `src/`, none of them contains `as any`.
-> Two `oxlint-disable` comments in `src/tui.ts` are control-regex exceptions;
-> any new disable needs a reason on the same line.
+> **Guarded vs self-declared.** BOM, `@ts-ignore`, and reason-less `@ts-expect-error`
+> are guarded by `tests/repo-hygiene.test.mjs`. Traceability tables are guarded by
+> `tests/plan-traceability.test.mjs`. The rest (`as any`, `--no-verify`, destructive
+> commands, bent evidence) are self-declared; treat them as non-negotiable.
 
 ### 1.2 Speculative hardening
 
-Before writing code for a race, a security edge case or another unlikely
-failure, say in words a 10-year-old could understand what breaks, how likely it
-is, and how much complexity it adds. Ask and wait for approval; in a subagent
-or a background run, do not ask — leave it out and note it in the report. Never
-widen the task to cover it. Existing security, path and permission invariants
-are not speculative: never weaken or delete one without asking, tested or not.
+Before writing code for an edge case or unlikely failure, explain what breaks,
+its probability, and added complexity. Obtain approval before widening diff scope.
+Never weaken existing security, path, or permission invariants.
 
 ## 2. New tests must be proven RED before the fix
 
@@ -111,54 +99,16 @@ are not speculative: never weaken or delete one without asking, tested or not.
 normal → green · break the code → RED · restore → green
 ```
 
-Three failure modes already seen here — do not repeat them:
-
-1. **A regex that matches more than intended.** `assert.match(text, /VyenMark|VyenLogo/)`
-   also matches the `import` line, so deleting the real call site leaves the test
-   green. Anchor the pattern and assert that the cut point exists
-   (`assert.ok(idx > -1)`).
-2. **A search that returns `-1`.** `slice(text.indexOf(x))` on `-1` is
-   `slice(-1)` — everything after it, so every later assertion is meaningless.
-3. **An edit that silently fails.** PowerShell's `Get-Content`/`Set-Content`
-   mangle UTF-8, so `.Replace()` with a non-ASCII string **does not match and
-   does not error**. Use `[System.IO.File]::ReadAllText/WriteAllText` with
-   `Encoding::UTF8`, then **read the file back** to confirm the change landed.
-   This is about the shell **you** are typing in; the agent's own `bash` tool is
-   POSIX bash (§8) and does not mangle UTF-8.
-
-### 2.1 No promises before the test exists
-
-**A comment that promises behaviour needs a test that goes red when the guard
-is removed. If you cannot write that test, do not write the promise** — or scope
-the promise to what is actually measured. A common mistake: *"the broken line is
-dropped"* (dropped in memory, the file is not truncated) · *"TOCTOU is enabled
-by itself"* (the patch compares the old value against the value it is about to
-write) · *"a trace of every write/delete"* (the write helper does not write to
-any log).
-
-### 2.2 A green mutation is not a good test — tell the cases apart
-
-After writing a test, break what it locks down. If the test is **still green**,
-you have two cases, and they need different answers:
-
-1. **The mutation did not apply** (string mismatch, special characters in
-   PowerShell) — **always confirm the patch landed in the file** before drawing
-   any conclusion.
-2. **The test is empty** — it asserts something else: `assert.ok(true)`; an
-   assertion on a string that only appears in the error branch; a counter
-   incremented **inside the test**.
-
-### 2.3 A test must be able to tell two implementations apart
-
-Two implementations that produce **identical** results cannot be distinguished by
-a test that only checks the result. Do not rely on it; rely on something
-**measurable** (for example, assert on the string as it is loaded).
-
-### 2.4 Zero and empty results are suspicious results
-
-Zero looks plausible, so it is easy to believe. Before concluding "there is
-nothing here", re-check the **measurement**: run it against something that
-certainly exists and see whether it returns something other than zero.
+- **Avoid tautological tests:** Anchor regex patterns; check cut points (`idx > -1`);
+  verify edits actually landed on disk before testing.
+- **No unmeasured promises:** A comment promising behavior requires a test that goes red
+  when the guard is removed (§2.1).
+- **Mutations must change behavior:** If a broken code path remains green, the test is
+  vacuous or the mutation did not apply (§2.2).
+- **Distinguish implementations:** Assert on measurable internal state or loaded strings,
+  not just identical end results (§2.3).
+- **Zero is suspicious:** Re-check measurement against known positive cases before
+  concluding a result is empty (§2.4).
 
 ## 2.5 Plan, test and review — three layers must not drift
 

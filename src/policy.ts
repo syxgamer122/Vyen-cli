@@ -20,23 +20,21 @@ export interface PolicyEvaluationContext {
 
 const CHAINING_PATTERN = /[\r\n;&|`><]|\$\(|\$\{/;
 const COMPOUND_SPLIT_REGEX = /[;\r\n|&]+|\$\(|`/g;
-const WRAPPER_PREFIX_REGEX = /^(?:sudo(?:\s+-[a-zA-Z0-9]+)*|env(?:\s+[a-zA-Z0-9_]+=[^\s]+)*|sh\s+-c|bash\s+-c)\s+/i;
+const WRAPPER_PREFIX_REGEX = /^(?:(?:(?:\/usr)?\/bin\/)?sudo(?:\s+(?:-[a-zA-Z0-9]+(?:\s+[^\s]+)?|--))*\s+|(?:(?:\/usr)?\/bin\/)?(?:env\s+)?(?:[a-zA-Z_][a-zA-Z0-9_]*=[^\s]*\s+)+|(?:(?:\/usr)?\/bin\/)?(?:bash|sh)(?:\s+-[a-zA-Z0-9]+)*\s*)/i;
 
 function cleanCommandSegment(seg: string): string {
   let cleaned = seg.trim();
-  // Strip trailing parens or quotes from substitutions like $(rm -rf /)
-  cleaned = cleaned.replace(/\)+$/, '').trim();
-  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
-    cleaned = cleaned.slice(1, -1).trim();
-  }
   let prev = '';
   while (prev !== cleaned) {
     prev = cleaned;
+    // Strip subshell groupings e.g. (cmd) or { cmd; }
+    cleaned = cleaned.replace(/^[\s({]+|[\s)}]+$/g, '').trim();
+    // Strip leading or trailing quotes from split strings e.g. "cmd or cmd"
+    cleaned = cleaned.replace(/^['"]+|['"]+$/g, '').trim();
+    // Strip wrappers e.g. sudo, env, sh -c, bash -c, flags
     cleaned = cleaned.replace(WRAPPER_PREFIX_REGEX, '').trim();
-    if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
-      cleaned = cleaned.slice(1, -1).trim();
-    }
-    cleaned = cleaned.replace(/\)+$/, '').trim();
+    cleaned = cleaned.replace(/^[\s({]+|[\s)}]+$/g, '').trim();
+    cleaned = cleaned.replace(/^['"]+|['"]+$/g, '').trim();
   }
   return cleaned;
 }

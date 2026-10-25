@@ -486,4 +486,11 @@ test('calculateWorkspaceTrustHash covers executables in project allow rules and 
   await writeFile(missingPath, '#!/bin/sh\necho created\n');
   const hash3 = await calculateWorkspaceTrustHash(f.cwd, allowCommands);
   assert.notEqual(hash2, hash3, 'hash must change when missing allow-referenced script is created');
+
+  // Wildcard allow script rules must discover and hash matching scripts
+  const wildcardCmd = ['bash(./scripts/*.sh)'];
+  const hashWildcard1 = await calculateWorkspaceTrustHash(f.cwd, wildcardCmd);
+  await writeFile(scriptPath, '#!/bin/sh\necho wildcard modified\n');
+  const hashWildcard2 = await calculateWorkspaceTrustHash(f.cwd, wildcardCmd);
+  assert.notEqual(hashWildcard1, hashWildcard2, 'hash must change when script matched by wildcard allow is modified');
 });

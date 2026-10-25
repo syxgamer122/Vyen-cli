@@ -292,4 +292,19 @@ test('deny rules with bash patterns block compound, chained, and wrapped command
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'sudo rm -rf /' } }, ctx), 'deny');
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'sh -c "rm -rf /"' } }, ctx), 'deny');
   assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: "bash -c 'rm -rf /'" } }, ctx), 'deny');
+
+  // Subshells, command grouping, and chained quotes MUST be denied
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: '(rm -rf /)' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: '(rm -rf /; echo done)' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: '{ rm -rf /; }' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'sh -c "rm -rf /; echo done"' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'bash -c "rm -rf /; echo done"' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: "sh -c 'rm -rf / && true'" } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'sudo -u root rm -rf /' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'sudo -- rm -rf /' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: '/usr/bin/sudo rm -rf /' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: '/bin/sh -c "rm -rf /"' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: '/bin/bash -lc "rm -rf /"' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'VAR=1 rm -rf /' } }, ctx), 'deny');
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'LC_ALL=C rm -rf /' } }, ctx), 'deny');
 });

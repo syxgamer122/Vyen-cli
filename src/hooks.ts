@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readFile, mkdir, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { readFile, mkdir, stat, readdir } from 'node:fs/promises';
+import { join, resolve, dirname } from 'node:path';
 import { normalizeToolName } from './tools.js';
 import { childEnv } from './process.js';
 import { configDir, atomicJson } from './config.js';
@@ -100,24 +100,46 @@ export async function calculateWorkspaceTrustHash(
           cleanToken.startsWith('../') ||
           cleanToken.includes('/') ||
           cleanToken.includes('\\') ||
-          /\.(?:sh|bash|js|mjs|cjs|ts|py|rb|pl|exe|bat|cmd)$/i.test(cleanToken);
+          /\.(?:sh|bash|zsh|fish|ps1|js|mjs|cjs|ts|py|rb|pl|exe|bat|cmd)$/i.test(cleanToken);
 
-        const potentialPath = resolve(normalizedCwd, cleanToken);
-        if (checkedFiles.has(potentialPath)) continue;
-        checkedFiles.add(potentialPath);
-
-        try {
-          const fileStat = await stat(potentialPath);
-          if (fileStat.isFile()) {
-            const content = await readFile(potentialPath);
-            hasher.update(`file:${cleanToken}:`);
-            hasher.update(content);
-          }
-        } catch {
-          // If it was an explicit script path that does not exist, hash a missing sentinel
-          // so creating the file later immediately invalidates the trust hash
-          if (isExplicitScriptOrPath) {
+        // Expand wildcards if present in script path e.g. ./scripts/*.sh
+        let candidateFiles = [cleanToken];
+        if (isExplicitScriptOrPath && (cleanToken.includes('*') || cleanToken.includes('?'))) {
+          const dirPart = dirname(cleanToken);
+          const resolvedDir = resolve(normalizedCwd, dirPart);
+          try {
+            const entries = await readdir(resolvedDir, { withFileTypes: true });
+            const patternPiece = cleanToken.slice(dirPart === '.' ? 0 : dirPart.length + 1);
+            const patRegex = new RegExp('^' + patternPiece.split('*').map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$', 'i');
+            const matched = entries.filter(e => e.isFile() && patRegex.test(e.name)).map(e => join(dirPart, e.name).replace(/\\/g, '/')).sort();
+            candidateFiles = matched.length > 0 ? matched : [];
+            if (matched.length === 0) {
+              hasher.update(`file:${cleanToken}:empty`);
+            }
+          } catch {
+            candidateFiles = [];
             hasher.update(`file:${cleanToken}:missing`);
+          }
+        }
+
+        for (const fileCandidate of candidateFiles) {
+          const potentialPath = resolve(normalizedCwd, fileCandidate);
+          if (checkedFiles.has(potentialPath)) continue;
+          checkedFiles.add(potentialPath);
+
+          try {
+            const fileStat = await stat(potentialPath);
+            if (fileStat.isFile()) {
+              const content = await readFile(potentialPath);
+              hasher.update(`file:${fileCandidate}:`);
+              hasher.update(content);
+            }
+          } catch {
+            // If it was an explicit script path that does not exist, hash a missing sentinel
+            // so creating the file later immediately invalidates the trust hash
+            if (isExplicitScriptOrPath) {
+              hasher.update(`file:${fileCandidate}:missing`);
+            }
           }
         }
       }
