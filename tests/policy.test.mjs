@@ -368,3 +368,61 @@ test('file path matching is case-sensitive on POSIX systems', () => {
     'Windows remains case-insensitive',
   );
 });
+
+test('settings fixture and CLI allowed tools flags enforce precedence', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vyen-cli-fixture-'));
+  const vyenDir = join(dir, '.vyen');
+  await mkdir(vyenDir, { recursive: true });
+
+  await writeFile(
+    join(vyenDir, 'settings.json'),
+    JSON.stringify({
+      permissions: {
+        allow: ['read_file(safe.txt)'],
+        deny: ['bash(rm *)', 'read_file(private.txt)'],
+      },
+    }),
+    'utf8',
+  );
+
+  const settings = await loadProjectSettings(dir);
+
+  // Layered settings precedence: project deny strictly beats project allow
+  const ctxNormal = {
+    projectRules: settings.permissions,
+  };
+  assert.equal(
+    evaluateToolPolicy({ tool: 'read_file', input: { path: 'private.txt' } }, ctxNormal),
+    'deny',
+    'project deny beats project allow',
+  );
+  assert.equal(
+    evaluateToolPolicy({ tool: 'read_file', input: { path: 'safe.txt' } }, ctxNormal),
+    'allow',
+    'project allow matches safe file',
+  );
+
+  // CLI disallowed overrides project allow
+  const ctxDisallow = {
+    cliDisallowed: ['read_file'],
+    projectRules: settings.permissions,
+  };
+  assert.equal(
+    evaluateToolPolicy({ tool: 'read_file', input: { path: 'safe.txt' } }, ctxDisallow),
+    'deny',
+  );
+
+  // CLI allowed overrides project ask / default
+  const ctxCliAllow = {
+    cliAllowed: ['read_file'],
+    projectRules: {
+      ask: ['read_file'],
+    },
+  };
+  assert.equal(
+    evaluateToolPolicy({ tool: 'read_file', input: { path: 'other.txt' } }, ctxCliAllow),
+    'allow',
+  );
+
+  await rm(dir, { recursive: true, force: true }).catch(() => {});
+});
