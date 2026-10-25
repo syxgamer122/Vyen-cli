@@ -240,7 +240,7 @@ export class HookBus {
   constructor(options: HookBusOptions) {
     this.hooks = options.hooks;
     this.cwd = resolve(options.cwd);
-    this.isTrusted = options.isTrusted ?? true;
+    this.isTrusted = options.isTrusted ?? false;
     this.defaultTimeoutMs = options.timeoutMs ?? 10_000;
     this.onWarning = options.onWarning;
   }

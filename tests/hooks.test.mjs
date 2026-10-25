@@ -494,3 +494,16 @@ test('calculateWorkspaceTrustHash covers executables in project allow rules and 
   const hashWildcard2 = await calculateWorkspaceTrustHash(f.cwd, wildcardCmd);
   assert.notEqual(hashWildcard1, hashWildcard2, 'hash must change when script matched by wildcard allow is modified');
 });
+
+test('HookBus defaults isTrusted to false when omitted and skips execution', async () => {
+  const bus = new HookBus({
+    cwd: process.cwd(),
+    hooks: [
+      { event: 'PreToolUse', matcher: 'bash', command: 'node -e "console.log(1)"' },
+    ],
+  });
+
+  assert.equal(bus.isTrusted, false, 'isTrusted must default to false when omitted');
+  const results = await bus.dispatch('PreToolUse', { tool: 'bash', input: { command: 'ls' } });
+  assert.deepEqual(results, [], 'untrusted hook bus must dispatch zero hooks');
+});
