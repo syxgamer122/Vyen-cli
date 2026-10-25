@@ -116,3 +116,44 @@ test('SPEC documents accurate hook payloads and fail-closed exit codes', async (
   assert.match(spec, /Stop.*reason/);
   assert.doesNotMatch(spec, /stopHookActive/);
 });
+
+test('SPEC documents version-agnostic title, Base URL /v1 normalization, and subagent session lifecycle distinction', async () => {
+  const spec = await readFile('docs/SPEC.md', 'utf8');
+  assert.match(spec, /^# Vyen CLI\r?\n/, 'SPEC title must be version-agnostic "# Vyen CLI"');
+  assert.doesNotMatch(spec, /^# Vyen CLI 0\.2/, 'SPEC title must not carry legacy 0.2 version');
+  assert.match(spec, /localhost:8000|127\.0\.0\.1:8000/, 'SPEC must document gateway /v1 auto-normalization');
+  assert.match(spec, /child (?:session|SessionStore)|subagents?.*SessionStore/i, 'SPEC must distinguish subagent child SessionStore');
+  assert.match(spec, /\[REFERENCE_REVIEW\.md\]\(docs\/REFERENCE_REVIEW\.md\)/, 'SPEC must use relative path docs/REFERENCE_REVIEW.md');
+});
+
+test('AGENTS.md documents Vietnamese language exception, additional docs, and maintains character budget under 23000', async () => {
+  const agents = await readFile('AGENTS.md', 'utf8');
+  assert.match(agents, /README\.md.*CHANGELOG\.md.*Vietnamese|Vietnamese.*README\.md/i, 'AGENTS.md must permit Vietnamese for README.md and CHANGELOG.md');
+  assert.match(agents, /docs\/MCP\.md/, 'AGENTS.md must list docs/MCP.md');
+  assert.match(agents, /docs\/AUDIT\.md/, 'AGENTS.md must list docs/AUDIT.md');
+  assert.match(agents, /docs\/ROADMAP\.md/, 'AGENTS.md must list docs/ROADMAP.md');
+  assert.match(agents, /sessionLifecycle\s*:\s*false|child `SessionStore`/i, 'AGENTS.md must clarify subagent store vs sessionLifecycle false');
+});
+
+test('README.md documents that --trust-workspace activates both permissions.allow and hooks', async () => {
+  const readme = await readFile('README.md', 'utf8');
+  assert.match(readme, /--trust-workspace/, 'README must document --trust-workspace');
+  assert.match(readme, /permissions\.allow.*hooks|hooks.*permissions\.allow/s, 'README must clarify trust covers both hooks and permissions.allow');
+  assert.match(readme, /SHA-256.*script|script.*SHA-256/i, 'README must mention SHA-256 hash coverage over scripts');
+});
+
+test('CHANGELOG.md records 0.4.0 release notes for settings, permissions, hooks, and workspace trust', async () => {
+  const changelog = await readFile('CHANGELOG.md', 'utf8');
+  const section040 = changelog.slice(changelog.indexOf('## 0.4.0'), changelog.indexOf('## 0.3.1'));
+  assert.match(section040, /\.vyen\/settings\.json|permissions\.(?:allow|ask|deny)/, 'CHANGELOG 0.4.0 must note layered settings/permissions');
+  assert.match(section040, /PreToolUse|PostToolUse|HookBus|vòng đời/i, 'CHANGELOG 0.4.0 must note lifecycle hooks');
+  assert.match(section040, /--trust-workspace/, 'CHANGELOG 0.4.0 must note --trust-workspace');
+});
+
+test('ROADMAP.md reflects completed Phase 1, 28 modules, and 5 Windows platform skips with zero test failures', async () => {
+  const roadmap = await readFile('docs/ROADMAP.md', 'utf8');
+  assert.match(roadmap, /28 modules/, 'ROADMAP.md must reflect 28 modules in src/');
+  assert.match(roadmap, /Phase 1.*(?:completed|done)|R1\.1.*completed/i, 'ROADMAP.md must mark Phase 1 as completed');
+  assert.match(roadmap, /0 failures|cleanly skipped|cleanly skips/i, 'ROADMAP.md must record 0 failures with platform skips on Windows');
+});
+
