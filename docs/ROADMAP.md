@@ -303,9 +303,8 @@ Design constraints:
   scripts, prompt templates, local MCP commands), not only the JSON file; a
   checkout that swaps `scripts/hook.sh` while leaving `.vyen/settings.json`
   untouched must trigger a new prompt.
-- The hook contract should accept the Claude Code subset where the shapes match
-  (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`), and say so. This
-  lowers migration friction without promising full compatibility.
+- The hook contract is inspired by Claude Code's specification, accepting the standard
+  event shapes with exact parameter schemas and exit code behaviors documented in docs/SPEC.md.
 
 Exit criteria: a project can define rules, hooks and MCP servers; a headless
 consumer can parse a versioned stream; `cli.ts` did not absorb the new logic.

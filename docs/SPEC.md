@@ -109,6 +109,23 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   and capacity is released on cleanup failures as well as successful runs.
   See REFERENCE_REVIEW.md for exact source references and NDJSON migration.
 
+## Hook Events & Lifecycle
+
+The Hook system is inspired by Claude Code's lifecycle and hook architecture, adapted for Vyen's POSIX and Windows terminal environment. Hooks execute via stdin/stdout JSON streaming in a sanitized environment that preserves SSH and Git authentication while stripping credentials.
+
+Project hooks are defined strictly in `.vyen/settings.json` (user configuration `config.json` holds only global permissions). Project hooks and allow rules require explicit workspace trust via `--trust-workspace` (which computes and re-records the SHA-256 trust hash over settings and allow script targets).
+
+| Event | Trigger | Payload Fields | Exit 2 Behavior | Exit 0 Behavior |
+|---|---|---|---|---|
+| `SessionStart` | Session startup or first turn of resumed session | `event`, `sessionId`, `timestamp`, `cwd`, `resumed?` | Ignored | Injects stdout as system context |
+| `SessionEnd` | Process shutdown, `/new`, `/resume`, or subagent cleanup | `event`, `sessionId`, `timestamp`, `cwd`, `reason` | Ignored | Flushes warnings to stderr |
+| `UserPromptSubmit` | User submits prompt | `event`, `sessionId`, `timestamp`, `cwd`, `prompt` | Ignored | Injects stdout as prompt context |
+| `PreToolUse` | Before tool batch execution | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input` | **Denies tool execution** (`denied: true`) | Injects stdout as context |
+| `PostToolUse` | After tool execution completes | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input`, `output` | Ignored | Injects stdout as context |
+| `PostToolUseFailure` | After tool failure or permission denial | `event`, `sessionId`, `timestamp`, `cwd`, `tool`, `input`, `error` | Ignored | Injects stdout as context |
+| `PreCompact` | Before context compaction occurs | `event`, `sessionId`, `timestamp`, `cwd`, `tokensBefore` | Ignored | Injects stdout as context |
+| `Stop` | Run stops or completes | `event`, `sessionId`, `timestamp`, `cwd`, `reason` | Ignored | Injects stdout as context |
+
 ## Acceptance
 
 Run against a local mock HTTP provider through the actual CLI: streaming tool

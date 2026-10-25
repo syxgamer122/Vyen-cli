@@ -79,3 +79,29 @@ test('SPEC matches the implemented retry, budget and MCP-resource contract, and 
   assert.doesNotMatch(roadmap, /Fix the six document drifts/);
   assert.match(roadmap, /six document drifts and module tests landed on 2026-10-24/);
 });
+
+test('SPEC documents the 8 hook events table and Claude Code inspiration', async () => {
+  const [spec, readme, roadmap, help] = await Promise.all([
+    readFile('docs/SPEC.md', 'utf8'),
+    readFile('README.md', 'utf8'),
+    readFile('docs/ROADMAP.md', 'utf8'),
+    readFile('src/help.ts', 'utf8'),
+  ]);
+
+  // Hook event matrix in SPEC
+  for (const event of [
+    'SessionStart', 'SessionEnd', 'UserPromptSubmit',
+    'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
+    'PreCompact', 'Stop',
+  ]) {
+    assert.match(spec, new RegExp(`\\|\\s*\`?${event}\`?\\s*\\|`));
+  }
+
+  // Claude Code disclosure
+  assert.match(spec, /Claude Code/i);
+  assert.match(roadmap, /Claude Code/i);
+
+  // --trust-workspace documented
+  assert.match(help, /--trust-workspace/);
+  assert.match(readme, /--trust-workspace/);
+});
