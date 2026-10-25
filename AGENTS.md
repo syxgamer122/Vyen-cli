@@ -10,12 +10,12 @@ short: it is loaded into the prompt of every model call (`loadProjectInstruction
 in `src/context.ts`, truncated at 24 000 characters), so a rule that nobody follows
 is worse than no rule.
 
-**Budget: stay under 24 000 characters, with at least 1 000 to spare.**
-`loadProjectInstructions` truncates at 24 000 and drops the **middle** of the
-file, not the end — a file that grows past the cap silently loses its middle
-section. When it needs more room, fold a lesson into a rule and delete the dated
-line (§ Lessons), or move the rule into `docs/SPEC.md` and keep only the pointer
-here.
+**Budget: stay under 24 000 characters combined, with at least 1 000 to spare.**
+`loadProjectInstructions` truncates the combined instructions (`AGENTS.md` +
+`AGENT_LEARNINGS.md`) at 24 000 and drops the **middle**, not the end — a total
+that grows past the cap silently loses the middle section. When it needs more
+room, fold a lesson into a rule, move historical background to `AGENT_LEARNINGS.md`,
+or move the rule into `docs/SPEC.md` and keep only the pointer here.
 
 **Read only what this turn needs.** This repository holds long plans and ledgers
 under `docs/superpowers/plans/`; they are **history**, not input. A turn needs:
@@ -152,6 +152,11 @@ Invoke `requesting-code-review`. Re-reading your own diff cannot replace review:
 self-review re-reads intent, not behavior. The reviewer must be asked to run an
 end-to-end probe. Cite reviewer subagent verdict in completion reports.
 
+**Review findings become rules, not TODOs:** Every confirmed finding (red test,
+review verdict, user correction) lands as a rule in the section that owns it
+before the turn ends. Never defer review findings as TODOs while leaving the rule
+untouched.
+
 **Laws 2/3/4 have NO automated test guard** (only Law 1 is guarded by
 `tests/plan-traceability.test.mjs`). Cite their observable proof in every report.
 
@@ -206,6 +211,15 @@ user deny rules or audit hooks.
 - **Trust coverage:** `calculateWorkspaceTrustHash` must cover all local scripts
   and executables referenced in `permissions.allow`, hashing non-existent targets
   as `file:<path>:missing`.
+
+### 3.4 Session lifecycle touches the store, not transient harnesses
+
+Session lifecycle synchronization (`SessionStart`/`SessionEnd`):
+- Key lifecycle state to the `SessionStore` (module-level `WeakSet`), never to
+  transient `Harness` instances.
+- Trigger `activeHarness.endSession()` before store swaps (`/new`, `/resume`,
+  `/delete`) and in subagent cleanup.
+- Nested runners inherit tool hooks but do not spam global session lifecycle hooks.
 
 ## 4. Docs
 
@@ -343,19 +357,10 @@ Run the §1 checklist. In addition:
 - [ ] `git status` shows only the files this task touched — every new file was
       read before it was staged (§6)
 
-## Lessons — append here
+## 11. Empirical learnings & failure patterns
 
-Active tripwires and tactical lessons. Detailed failure patterns, anti-patterns,
-and security mistake analyses are maintained in `AGENT_LEARNINGS.md` (loaded
-automatically alongside this file by `src/context.ts`). When a lesson has been
-folded into a rule above (§3.2, §3.3), delete the dated line to preserve prompt room.
-
-- [pitfall] (2026-10-22) Tests import from `dist/` — compile with `node node_modules/typescript/bin/tsc`
-  directly before running individual test files (`execFile`/`spawn` cannot run `npm.cmd` without a shell on Windows).
-- [mistake] (2026-10-22) A file nothing loads is dead — grep the loader first.
-  `loadProjectInstructions` loads `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`, and `AGENT_LEARNINGS.md`.
-- [pitfall] (2026-10-22) A guard that contains the literal it searches for
-  reports itself — spell the pattern in pieces and check its own file is clean
-  (guard: tests/repo-hygiene.test.mjs).
-- [mistake] (2026-10-22) `git add -A` swept in an untracked file without
-  reading it — run `git status` and read every new file before committing it.
+Detailed failure patterns, anti-patterns, active tripwires, and security mistake
+analyses are maintained exclusively in `AGENT_LEARNINGS.md` (loaded automatically
+alongside this file by `src/context.ts`). When a mistake is confirmed (red test,
+review verdict, user correction), append the evidence there — never a second copy
+of a rule that already lives in `AGENTS.md`.
