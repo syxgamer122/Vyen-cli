@@ -272,11 +272,22 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   let apiKey: string | undefined;
   let jsonOutput = false;
   try {
-    if (argv[0] === 'mcp' && argv[1] === 'add') {
-      const { loadMcpConfig, saveMcpConfig, mcpServerSchema } = await import('./mcp.js');
-      const rest = argv.slice(2);
+    // Early pass for `vyen mcp add`: parse this before loadConfig so the command
+    // that configures an MCP server doesn't fail when the config file itself is missing
+    // or invalid.
+    const mcpAddIdx = argv.findIndex((arg, i) => arg === 'mcp' && argv[i + 1] === 'add');
+    if (mcpAddIdx >= 0) {
+      const {
+        loadMcpConfig,
+        saveMcpConfig,
+        loadProjectMcpConfig,
+        saveProjectMcpConfig,
+        mcpServerSchema,
+      } = await import('./mcp.js');
+      const preArgs = argv.slice(0, mcpAddIdx);
+      const rest = argv.slice(mcpAddIdx + 2);
       const dashDashIdx = rest.indexOf('--');
-      const flagPart = dashDashIdx >= 0 ? rest.slice(0, dashDashIdx) : rest;
+      const flagPart = [...preArgs, ...(dashDashIdx >= 0 ? rest.slice(0, dashDashIdx) : rest)];
       const cmdPart = dashDashIdx >= 0 ? rest.slice(dashDashIdx + 1) : [];
       const addParsed = parseArgs({
         args: flagPart,
@@ -289,11 +300,23 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           env: { type: 'string', multiple: true },
           trust: { type: 'boolean' },
           'timeout-ms': { type: 'string' },
+          scope: { type: 'string' },
+          project: { type: 'boolean' },
+          cwd: { type: 'string', short: 'C' },
+          'base-url': { type: 'string' },
+          model: { type: 'string' },
         },
       });
       const name = addParsed.positionals[0];
       if (!name) {
         throw new Error('Usage: vyen mcp add <name> (--url <URL> [--bearer-env ENV] | -- <command> [args...])');
+      }
+      if (addParsed.values.scope && addParsed.values.scope !== 'user' && addParsed.values.scope !== 'project') {
+        throw new Error(`Invalid MCP scope "${addParsed.values.scope}". Expected "user" or "project".`);
+      }
+      const isProjectScope = addParsed.values.scope === 'project' || addParsed.values.project === true;
+      if (isProjectScope && addParsed.values.trust === true) {
+        throw new Error('Project MCP servers may not set trust: true.');
       }
       const envMap: Record<string, string> = {};
       for (const pair of (addParsed.values.env as string[] | undefined) ?? []) {
@@ -328,6 +351,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               ...(timeoutMs ? { timeoutMs } : {}),
             },
       );
+      const targetCwd = resolve((addParsed.values.cwd as string | undefined) ?? '.');
+      if (isProjectScope) {
+        const projConfig = await loadProjectMcpConfig(targetCwd);
+        projConfig.servers[name] = serverEntry;
+        await saveProjectMcpConfig(targetCwd, projConfig);
+        stdout.write(`Added MCP server "${name}" (${serverEntry.transport}).\n`);
+        return;
+      }
       const mcpConfig = await loadMcpConfig();
       mcpConfig.servers[name] = serverEntry;
       await saveMcpConfig(mcpConfig);
@@ -350,6 +381,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'output-last-message': { type: 'string', short: 'o' },
       'allowed-tools': { type: 'string', multiple: true }, 'disallowed-tools': { type: 'string', multiple: true },
       'trust-workspace': { type: 'boolean' },
+      scope: { type: 'string' }, project: { type: 'boolean' },
       method: { type: 'string' }, 'dry-run': { type: 'boolean' },
     } });
     const collectToolList = (raw: unknown): string[] | undefined => {
@@ -408,25 +440,104 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     }
     let config: Config = await loadConfig(overrides);
     if (positionals[0] === 'mcp') {
-      const { loadMcpConfig, saveMcpConfig, mcpConfigPath, McpManager, importCodexMcpServers } = await import('./mcp.js');
-      const mcpConfig = await loadMcpConfig();
+      const {
+        loadMcpConfig,
+        saveMcpConfig,
+        loadProjectMcpConfig,
+        saveProjectMcpConfig,
+        loadMergedMcpConfig,
+        McpManager,
+        importCodexMcpServers,
+      } = await import('./mcp.js');
+      const { evaluateWorkspaceTrust } = await import('./hooks.js');
+      const runtimeCwd = resolve(values.cwd ?? '.');
+      const isProjectScope = values.scope === 'project' || values.project === true;
+      if (values.scope && values.scope !== 'user' && values.scope !== 'project') {
+        throw new Error(`Invalid MCP scope "${values.scope}". Expected "user" or "project".`);
+      }
+
+      const loadView = async () => {
+        let userConfig: import('./mcp.js').McpConfig = { servers: {} };
+        let projectConfig: import('./mcp.js').McpConfig = { servers: {} };
+        let projectError: string | undefined;
+        try {
+          userConfig = await loadMcpConfig();
+        } catch (error) {
+          throw error;
+        }
+        try {
+          projectConfig = await loadProjectMcpConfig(runtimeCwd);
+        } catch (error) {
+          projectError = (error as Error).message;
+        }
+        const trust = await evaluateWorkspaceTrust(runtimeCwd, {
+          userPermissions: config.permissions,
+          projectMcpServers: projectConfig.servers,
+          projectMcpError: Boolean(projectError),
+          includeProjectMcp: true,
+          trustWorkspace: values['trust-workspace'] === true,
+        });
+        const merged = await loadMergedMcpConfig(runtimeCwd, {
+          isTrusted: trust.isTrusted,
+          userConfig,
+          projectConfig,
+        });
+        return { userConfig, projectConfig, projectError, trust, merged };
+      };
+
       const sub = positionals[1];
       if (sub === 'list') {
-        stdout.write(JSON.stringify({ path: mcpConfigPath(), servers: Object.entries(mcpConfig.servers).map(([name, server]) =>
-          ({ name, transport: server.transport, disabled: server.disabled, trust: server.trust, readOnlyTools: server.readOnlyTools })) }, null, 2) + '\n');
+        const view = await loadView();
+        stdout.write(JSON.stringify({
+          path: view.merged.userPath,
+          userPath: view.merged.userPath,
+          projectPath: view.merged.projectPath,
+          trusted: view.trust.isTrusted,
+          trustRequired: view.trust.trustRequired,
+          ...(view.projectError ? { projectError: view.projectError } : {}),
+          ignoredProject: view.merged.ignoredProject,
+          servers: Object.entries(view.merged.servers).map(([name, server]) => ({
+            name,
+            transport: server.transport,
+            disabled: server.disabled,
+            trust: server.trust,
+            readOnlyTools: server.readOnlyTools,
+            source: view.merged.sources[name] ?? 'user',
+            ...(view.merged.untrusted.includes(name) ? { untrusted: true } : {}),
+          })),
+        }, null, 2) + '\n');
+        if (view.projectError) process.exitCode = 1;
         return;
       }
       if (sub === 'get') {
         const target = positionals[2];
-        if (!target || !mcpConfig.servers[target]) throw new Error(`MCP server "${target ?? ''}" not found.`);
-        stdout.write(JSON.stringify({ name: target, ...mcpConfig.servers[target] }, null, 2) + '\n');
+        const view = await loadView();
+        if (view.projectError) throw new Error(view.projectError);
+        if (!target || !view.merged.servers[target]) throw new Error(`MCP server "${target ?? ''}" not found.`);
+        const server = view.merged.servers[target];
+        stdout.write(JSON.stringify({
+          name: target,
+          ...server,
+          source: view.merged.sources[target] ?? 'user',
+          ...(view.merged.untrusted.includes(target) ? { untrusted: true } : {}),
+        }, null, 2) + '\n');
         return;
       }
       if (sub === 'remove' || sub === 'rm') {
         const target = positionals[2];
-        if (!target || !mcpConfig.servers[target]) throw new Error(`MCP server "${target ?? ''}" not found.`);
-        delete mcpConfig.servers[target];
-        await saveMcpConfig(mcpConfig);
+        if (!target) throw new Error('Usage: vyen mcp remove <name> [--scope=user|project] [--project]');
+        if (isProjectScope) {
+          const projConfig = await loadProjectMcpConfig(runtimeCwd);
+          if (!projConfig.servers[target]) throw new Error(`MCP server "${target}" not found.`);
+          delete projConfig.servers[target];
+          await saveProjectMcpConfig(runtimeCwd, projConfig);
+          stdout.write(`Removed MCP server "${target}".\n`);
+          return;
+        }
+        const userConfig = await loadMcpConfig();
+        if (!userConfig.servers[target]) throw new Error(`MCP server "${target}" not found.`);
+        delete userConfig.servers[target];
+        await saveMcpConfig(userConfig);
         stdout.write(`Removed MCP server "${target}".\n`);
         return;
       }
@@ -440,14 +551,24 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         throw new Error('Usage: vyen mcp list | check [name] | get <name> | add <name> ... | remove <name> | import-codex [name...]');
       }
       const targetFilter = positionals[2];
-      const filteredConfig = targetFilter
-        ? {
-            servers: Object.fromEntries(
-              Object.entries(mcpConfig.servers).filter(([k]) => k === targetFilter),
-            ),
-          }
-        : mcpConfig;
-      const manager = new McpManager(filteredConfig, resolve(values.cwd ?? '.'));
+      const view = await loadView();
+      if (view.projectError) throw new Error(view.projectError);
+      if (targetFilter && view.merged.untrusted.includes(targetFilter)) {
+        throw new Error(`MCP server "${targetFilter}" is untrusted. Run with --trust-workspace to enable.`);
+      }
+      const filteredServers = targetFilter
+        ? Object.fromEntries(
+            Object.entries(view.merged.servers).filter(([k]) => k === targetFilter),
+          )
+        : view.merged.servers;
+      if (targetFilter && Object.keys(filteredServers).length === 0) {
+        throw new Error(`MCP server "${targetFilter}" not found.`);
+      }
+      const filteredConfig = {
+        ...view.merged,
+        servers: filteredServers,
+      };
+      const manager = new McpManager(filteredConfig, runtimeCwd);
       const controller = new AbortController();
       const cancel = (signal: NodeJS.Signals) => { process.exitCode = signal === 'SIGTERM' ? 143 : 130; controller.abort(); };
       process.on('SIGINT', cancel); process.on('SIGTERM', cancel);
@@ -2109,26 +2230,31 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           return true;
         }
         if (cmdInput === '/mcp' || cmdInput === '/mcp list') {
-          const { loadMcpConfig, mcpConfigPath } = await import('./mcp.js');
-          const cfg = await loadMcpConfig();
-          const entries = Object.entries(cfg.servers);
-          const statusMap = new Map((manager?.statuses ?? []).map(s => [s.name, s]));
-          if (!entries.length) {
-            display(`No MCP servers configured in ${mcpConfigPath()}.\nTip: Run "/mcp import-codex" or "vyen mcp add <name> -- <cmd> [args...]"\n`);
+          if (mergedMcp) {
+            const { formatMcpList } = await import('./mcp.js');
+            display(formatMcpList(mergedMcp, manager?.statuses ?? []));
           } else {
-            const lines = entries.map(([name, s]) => {
-              const target = s.transport === 'stdio' ? `${s.command}${s.args.length ? ' ' + s.args.join(' ') : ''}` : s.url;
-              const st = statusMap.get(name);
-              const badge = s.disabled
-                ? 'disabled'
-                : st?.status === 'ok'
-                  ? `connected (${st.toolCount} tools)`
-                  : st?.status === 'error'
-                    ? `error: ${st.error}`
-                    : 'configured';
-              return `  ${name}  [${s.transport}]  (${badge})  ${target}`;
-            });
-            display(`MCP Servers (${entries.length}):\n${lines.join('\n')}\nActive MCP tools: ${manager?.tools.length ?? 0}\n`);
+            const { loadMcpConfig, mcpConfigPath } = await import('./mcp.js');
+            const cfg = await loadMcpConfig();
+            const entries = Object.entries(cfg.servers);
+            const statusMap = new Map((manager?.statuses ?? []).map(s => [s.name, s]));
+            if (!entries.length) {
+              display(`No MCP servers configured in ${mcpConfigPath()}.\nTip: Run "/mcp import-codex" or "vyen mcp add <name> -- <cmd> [args...]"\n`);
+            } else {
+              const lines = entries.map(([name, s]) => {
+                const target = s.transport === 'stdio' ? `${s.command}${s.args.length ? ' ' + s.args.join(' ') : ''}` : s.url;
+                const st = statusMap.get(name);
+                const badge = s.disabled
+                  ? 'disabled'
+                  : st?.status === 'ok'
+                    ? `connected (${st.toolCount} tools)`
+                    : st?.status === 'error'
+                      ? `error: ${st.error}`
+                      : 'configured';
+                return `  ${name}  [${s.transport}]  (${badge})  ${target}`;
+              });
+              display(`MCP Servers (${entries.length}):\n${lines.join('\n')}\nActive MCP tools: ${manager?.tools.length ?? 0}\n`);
+            }
           }
           return true;
         }
@@ -3297,8 +3423,22 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             }
             if (sub === 'remove' || sub === 'rm') {
               const target = subArgs[1];
+              const isProject = subArgs.includes('--project') || subArgs.some(a => a.startsWith('--scope=project'));
               if (!target) {
-                display('Usage: /mcp remove <name>\n');
+                display('Usage: /mcp remove <name> [--project]\n');
+                continue;
+              }
+              if (isProject) {
+                const { loadProjectMcpConfig, saveProjectMcpConfig } = await import('./mcp.js');
+                const cfg = await loadProjectMcpConfig(runtime.cwd);
+                if (!cfg.servers[target]) {
+                  display(`MCP server "${target}" not found in project config.\n`);
+                  continue;
+                }
+                delete cfg.servers[target];
+                await saveProjectMcpConfig(runtime.cwd, cfg);
+                await rebuildHarness({ reconnectMcp: true });
+                display(`Removed project MCP server "${target}" (${manager?.tools.length ?? 0} MCP tools active).\n`);
                 continue;
               }
               const cfg = await loadMcpConfig();

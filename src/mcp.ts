@@ -865,6 +865,7 @@ export class McpManager {
       let transport: Transport;
       if (config.transport === 'stdio') {
         const env = sdk.getDefaultEnvironment();
+        if (process.env.ELECTRON_RUN_AS_NODE) env.ELECTRON_RUN_AS_NODE = process.env.ELECTRON_RUN_AS_NODE;
         for (const [k, rawVal] of Object.entries(config.env)) {
           const placeholder = parseEnvPlaceholder(rawVal);
           if (placeholder) {

@@ -496,4 +496,56 @@ test('project MCP server starts when the workspace is explicitly trusted', async
   assert.equal(result.code, 0, result.stderr);
 });
 
+test('mcp project scope commands write and remove only the project config and list reports source', async t => {
+  const f = await fixture(t);
+  const userMcpPath = join(f.config, 'vyen', 'mcp.json');
+  const projectMcpPath = join(f.cwd, '.vyen', 'mcp.json');
+
+  const addProject = await cli(f, false, ['mcp', 'add', 'proj', '--scope=project', '--', process.execPath, 'proj.mjs'], { baseUrl: false }).done;
+  assert.equal(addProject.code, 0, addProject.stderr);
+  assert.match(addProject.stdout, /Added MCP server "proj"/);
+
+  const projRaw = await readFile(projectMcpPath, 'utf8');
+  const projJson = JSON.parse(projRaw);
+  assert.equal(projJson.servers.proj.command, process.execPath);
+  assert.deepEqual(projJson.servers.proj.args, ['proj.mjs']);
+
+  let userExists = true;
+  try { await readFile(userMcpPath); } catch { userExists = false; }
+  assert.equal(userExists, false, 'user mcp.json must not be created when adding to project scope');
+
+  const rejectTrust = await cli(f, false, ['mcp', 'add', 'evil', '--scope=project', '--trust', '--', process.execPath, 'evil.mjs'], { baseUrl: false }).done;
+  assert.equal(rejectTrust.code, 1);
+  assert.match(rejectTrust.stderr, /trust/i);
+
+  const listRes = await cli(f, false, ['mcp', 'list'], { baseUrl: false }).done;
+  assert.equal(listRes.code, 0, listRes.stderr);
+  const listJson = JSON.parse(listRes.stdout);
+  assert.equal(listJson.userPath, userMcpPath);
+  assert.equal(listJson.projectPath, projectMcpPath);
+  assert.equal(listJson.path, userMcpPath);
+  assert.equal(listJson.trusted, false);
+  assert.equal(listJson.trustRequired, true);
+  const projEntry = listJson.servers.find(s => s.name === 'proj');
+  assert.ok(projEntry);
+  assert.equal(projEntry.source, 'project');
+  assert.equal(projEntry.untrusted, true);
+  assert.equal(projEntry.disabled, true);
+
+  const getRes = await cli(f, false, ['mcp', 'get', 'proj'], { baseUrl: false }).done;
+  assert.equal(getRes.code, 0, getRes.stderr);
+  const getJson = JSON.parse(getRes.stdout);
+  assert.equal(getJson.name, 'proj');
+  assert.equal(getJson.source, 'project');
+  assert.equal(getJson.untrusted, true);
+
+  const rmRes = await cli(f, false, ['mcp', 'remove', 'proj', '--project'], { baseUrl: false }).done;
+  assert.equal(rmRes.code, 0, rmRes.stderr);
+  assert.match(rmRes.stdout, /Removed.*proj/);
+
+  const afterRmRaw = await readFile(projectMcpPath, 'utf8');
+  const afterRmJson = JSON.parse(afterRmRaw);
+  assert.equal(afterRmJson.servers.proj, undefined);
+});
+
 
