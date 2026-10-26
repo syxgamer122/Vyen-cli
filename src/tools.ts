@@ -31,6 +31,7 @@ const COLLAB_TOOLS = new Set([
   'update_plan', 'get_goal', 'create_goal', 'update_goal', 'request_user_input', 'view_image',
   'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource',
   'list_mcp_prompts', 'get_mcp_prompt',
+  'mcp_create_entities', 'mcp_create_relations', 'mcp_add_observations', 'mcp_read_graph', 'mcp_search_nodes',
 ]);
 interface RegisteredTool {
   description: string; schema: FlexibleSchema<unknown>; readOnly: boolean;

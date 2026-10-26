@@ -1184,6 +1184,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           subagents.register();
         }
         {
+          const { KnowledgeGraphManager } = await import('./memory.js');
+          const kg = new KnowledgeGraphManager({
+            projectGraphPath: join(runtime.cwd, '.vyen', 'knowledge-graph.jsonl'),
+          });
+          kg.registerTools(reg);
+        }
+        {
           // Workflows run prompts and shell steps themselves; subagent and network steps degrade
           // to a prompt when --no-subagents removed those features, so the tool stays available.
           const { discoverWorkflows, executeWorkflow, runWorkflowToolSchema } = await import('./workflow.js');

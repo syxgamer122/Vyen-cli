@@ -173,6 +173,12 @@ function buildToolMeta(toolName: string, rawInput: unknown): ToolEventMeta {
   if (canonical === 'get_mcp_prompt') {
     return { kind: 'read', summary: `${typeof rec.server === 'string' ? rec.server : ''}:${typeof rec.name === 'string' ? rec.name : ''}` };
   }
+  if (canonical === 'mcp_create_entities' || canonical === 'mcp_create_relations' || canonical === 'mcp_add_observations') {
+    return { kind: 'edit', summary: `knowledge graph ${typeof rec.scope === 'string' ? rec.scope : 'user'}` };
+  }
+  if (canonical === 'mcp_read_graph' || canonical === 'mcp_search_nodes') {
+    return { kind: 'read', summary: `knowledge graph ${typeof rec.query === 'string' ? rec.query : typeof rec.scope === 'string' ? rec.scope : ''}` };
+  }
   if (canonical === 'spawn_agent') {
     const role = typeof rec.agent_type === 'string' ? rec.agent_type : typeof rec.role === 'string' ? rec.role : 'default';
     const msg = typeof rec.message === 'string' ? rec.message : typeof rec.prompt === 'string' ? rec.prompt : typeof rec.task === 'string' ? rec.task : '';
