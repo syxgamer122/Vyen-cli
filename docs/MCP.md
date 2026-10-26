@@ -1,9 +1,27 @@
 # MCP tools
 
 Vyen is an MCP client, using `@modelcontextprotocol/sdk` 1.32.1. It supports
-stdio processes and Streamable HTTP endpoints. Servers are configured only in
-`$XDG_CONFIG_HOME/vyen/mcp.json` (default `~/.config/vyen/mcp.json`). Provider
-`vyen init` does not change this file. Project-local MCP config is not loaded.
+stdio processes and Streamable HTTP endpoints. Servers are configured globally in
+`$XDG_CONFIG_HOME/vyen/mcp.json` (default `~/.config/vyen/mcp.json`) and per-project in
+`<cwd>/.vyen/mcp.json`. Provider `vyen init` does not change these files.
+
+## Project MCP & Workspace Trust
+
+Project-scoped MCP servers can be defined directly in `.vyen/mcp.json` so repository
+collaborators share identical tooling. However, stdio MCP servers execute local processes,
+so project MCP servers are **disabled by default** until the workspace is explicitly
+trusted with `--trust-workspace`. Trusting a workspace permits repository-defined
+commands to run and cryptographically hashes the project MCP configuration and local script targets.
+
+Precedence & safety rules:
+- **User definitions win:** If a project server defines the same name as a user server,
+  the project entry is ignored and user configuration takes precedence.
+- **No approval grants:** A project server cannot auto-approve tools via `trust: true`
+  (rejected on load) or `readOnlyTools` (ignored). Project MCP tools always require approval.
+- **Fail-closed:** Malformed `.vyen/mcp.json` files emit an actionable warning and skip
+  project servers without blocking user MCP servers.
+- **Scoping:** `vyen mcp add/remove` support `--scope=project` (or `--project`). Default
+  is `--scope=user`.
 
 ## Example
 
@@ -76,8 +94,8 @@ termination (bounded to two seconds per server), then closes all transports;
 stdio shutdown uses the SDK's child-process cleanup. Server stderr is discarded
 to keep terminal/NDJSON output clean. Inspect server logs separately for debugging.
 
-Limits: 16 servers, 128 total tools, 16 continuation pages, 16k characters per
-input schema, 2 MiB stdio message buffer, 100–600000 ms configurable request
+Limits: 64 servers, 1024 tools default / 2048 hard cap, 32 continuation pages, 16k characters per
+input schema, 32 MiB stdio message buffer, 100–600000 ms configurable request
 timeout (default 30000). Startup fails on duplicates or invalid/excessive schemas
 rather than silently dropping tools. In interactive TUI sessions, `/mcp` reloads
 server connections in place; MCP resources (`list_mcp_resources`,

@@ -157,3 +157,21 @@ test('ROADMAP.md reflects completed Phase 1, 28 modules, and 5 Windows platform 
   assert.match(roadmap, /0 failures|cleanly skipped|cleanly skips/i, 'ROADMAP.md must record 0 failures with platform skips on Windows');
 });
 
+test('docs contract covers project MCP trust and scope', async () => {
+  const [mcp, spec, readme, help, roadmap] = await Promise.all([
+    readFile('docs/MCP.md', 'utf8'),
+    readFile('docs/SPEC.md', 'utf8'),
+    readFile('README.md', 'utf8'),
+    readFile('src/help.ts', 'utf8'),
+    readFile('docs/ROADMAP.md', 'utf8'),
+  ]);
+
+  assert.match(mcp, /\.vyen\/mcp\.json/, 'docs/MCP.md must document .vyen/mcp.json');
+  assert.match(mcp, /--trust-workspace/, 'docs/MCP.md must document --trust-workspace');
+  assert.match(mcp, /--scope=project|--scope/, 'docs/MCP.md must document --scope=project');
+  assert.match(spec, /project MCP.*(?:trust|workspace)|workspace trust.*project MCP/i, 'docs/SPEC.md must mention project MCP trust');
+  assert.match(readme, /\.vyen\/mcp\.json/, 'README.md must mention .vyen/mcp.json');
+  assert.match(help, /--scope/, 'src/help.ts must document --scope');
+  assert.match(roadmap, /R1\.3.*(?:completed|done)/i, 'docs/ROADMAP.md must mark R1.3 completed');
+});
+

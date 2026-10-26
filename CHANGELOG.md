@@ -10,6 +10,7 @@
   khi mã thoát là 2 hoặc khi hook bị lỗi/quá thời gian (timeout).
 - Cơ chế xác thực Workspace Trust (`--trust-workspace`): mã băm SHA-256 bảo vệ toàn diện tệp settings
   và các script được tham chiếu trong `permissions.allow`.
+- Hỗ trợ Project MCP (`.vyen/mcp.json`): nạp MCP server theo dự án sau khi xác thực Workspace Trust (`--trust-workspace`), quy tắc "User Deny Wins" (cấu hình user luôn có quyền ưu tiên cao nhất, cấm project server tự cấp `trust: true`), hiển thị phân biệt `[user]` / `[project]` trong danh sách và hỗ trợ cờ `--scope=project` / `--project` cho các lệnh CLI `mcp add/remove`.
 - Cảnh báo một lần khi sử dụng gateway mặc định `DEFAULT_GATEWAY_URL` (`https://api.yuristore.xyz/v1`).
 - Ghép đôi thiết bị qua Cloudflared (`/pair`, `--pair`): QR + web UI trên điện thoại, token
   128-bit, mặc định chỉ localhost; từ xa không bật được auto-approve hay `!cmd`, quyền `always`

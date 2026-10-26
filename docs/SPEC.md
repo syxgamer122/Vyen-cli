@@ -6,8 +6,8 @@ tools and persistence. No ZCode runtime source is copied or loaded.
 ## Owners and boundaries
 
 - CLI owns terminal input, flags and lifetime. Provider configuration comes
-  only from user config, environment and flags. MCP has a separate user-only
-  mcp.json. Priority: flags > VYEN_* environment > user config > defaults.
+  only from user config, environment and flags. MCP supports global user configuration
+  in `mcp.json` and project MCP in `.vyen/mcp.json` subject to workspace trust. Priority: flags > VYEN_* environment > user config > defaults.
   Credentials are resolved at runtime through keyEnv and are never saved by init.
   If baseUrl is absent, Provider uses the built-in default
   `https://api.yuristore.xyz/v1`; this is a third-party destination and README
@@ -58,11 +58,13 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   tool-result groups enter a compact summary. Default run token budget: 0 (unlimited);
   a positive value caps the run. Output/tool budgets and command deadlines are bounded.
 - MCP owns clients and transport cleanup. SDK stdio and Streamable HTTP tools
-  are namespaced, schema-validated and bounded. Only user readOnlyTools entries
-  bypass approvals; remote annotations do not grant privileges. Stdio inherits
-  the SDK default environment plus explicit envFrom mappings. HTTP bearer keys
-  come from env variables. No sampling, OAuth, prompts or legacy SSE; tools and
-  resources are supported.
+  are namespaced, schema-validated and bounded. Project MCP servers in `.vyen/mcp.json`
+  require workspace trust via `--trust-workspace`; untrusted project servers stay disabled.
+  User server definitions win on name collisions, and project MCP servers cannot grant
+  trust or bypass approvals. Only user readOnlyTools entries bypass approvals; remote
+  annotations do not grant privileges. Stdio inherits the SDK default environment plus
+  explicit envFrom mappings. HTTP bearer keys come from env variables. No sampling,
+  OAuth, prompts or legacy SSE; tools and resources are supported.
 - Subagents own separate transcripts under subagents/PARENT_UUID. Research uses
   at most two concurrent children globally per manager; editing tasks are serial
   mutation barriers. Children share the parent's approval callback and run budget,
@@ -116,7 +118,7 @@ tools and persistence. No ZCode runtime source is copied or loaded.
 
 The Hook system is inspired by Claude Code's lifecycle and hook architecture, adapted for Vyen's POSIX and Windows terminal environment. Hooks execute via stdin/stdout JSON streaming in a sanitized environment that preserves SSH and Git authentication while stripping credentials.
 
-Project hooks are defined strictly in `.vyen/settings.json` (user configuration `config.json` holds only global permissions). Project hooks and allow rules require explicit workspace trust via `--trust-workspace` (which computes and re-records the SHA-256 trust hash over settings and allow script targets).
+Project hooks are defined strictly in `.vyen/settings.json` (user configuration `config.json` holds only global permissions). Project hooks, allow rules and project MCP servers require explicit workspace trust via `--trust-workspace` (which computes and re-records the SHA-256 trust hash over settings, allow script targets, and project MCP configuration `.vyen/mcp.json`). Project MCP servers defined in `.vyen/mcp.json` are disabled until workspace trust is granted, and user server definitions always take precedence.
 
 | Event | Trigger | Payload Fields | Exit 0 Behavior | Non-Zero / Timeout |
 |---|---|---|---|---|

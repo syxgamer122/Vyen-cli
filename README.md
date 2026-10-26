@@ -264,7 +264,10 @@ vyen --inline-reasoning off -p 'Trả tài liệu XML bắt đầu bằng <think
 ## MCP (Model Context Protocol)
 
 Vyen dùng MCP SDK chính thức, hỗ trợ **tools và resources qua stdio và Streamable HTTP**.
-Tạo `~/.config/vyen/mcp.json` (hoặc `$XDG_CONFIG_HOME/vyen/mcp.json`):
+Hỗ trợ cấu hình toàn cục tại `~/.config/vyen/mcp.json` (hoặc `$XDG_CONFIG_HOME/vyen/mcp.json`) và cấu hình theo dự án tại `.vyen/mcp.json`.
+Server MCP của dự án mặc định bị vô hiệu hoá để đảm bảo an toàn cho đến khi workspace được tin cậy bằng `--trust-workspace`.
+
+Tạo `~/.config/vyen/mcp.json`:
 
 ```json
 {
@@ -280,11 +283,14 @@ Tạo `~/.config/vyen/mcp.json` (hoặc `$XDG_CONFIG_HOME/vyen/mcp.json`):
 ```
 
 ```bash
-vyen mcp list           # xem cấu hình, không kết nối
-vyen mcp check          # kết nối và in tên tool gốc/tên namespaced
-vyen mcp import-codex   # nhập nhanh các MCP server từ ~/.codex/config.toml
-vyen                    # tự nạp các server đã bật
-vyen --no-mcp           # bỏ qua MCP trong lượt này
+vyen mcp list                      # xem cấu hình hợp nhất (user & project), không kết nối
+vyen mcp check                     # kết nối và in tên tool gốc/tên namespaced
+vyen mcp add my-tool --scope=project -- node server.mjs  # thêm MCP server vào .vyen/mcp.json
+vyen mcp remove my-tool --project  # gỡ MCP server khỏi .vyen/mcp.json
+vyen mcp import-codex              # nhập nhanh các MCP server từ ~/.codex/config.toml
+vyen --trust-workspace             # tin cậy workspace và bật project MCP servers
+vyen                               # tự nạp các server đã bật
+vyen --no-mcp                      # bỏ qua MCP trong lượt này
 ```
 
 Xem [docs/MCP.md](docs/MCP.md) để biết chi tiết cấu hình stdio, biến môi trường và giới hạn.

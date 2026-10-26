@@ -457,14 +457,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       }
 
       const loadView = async () => {
-        let userConfig: import('./mcp.js').McpConfig = { servers: {} };
+        const userConfig = await loadMcpConfig();
         let projectConfig: import('./mcp.js').McpConfig = { servers: {} };
         let projectError: string | undefined;
-        try {
-          userConfig = await loadMcpConfig();
-        } catch (error) {
-          throw error;
-        }
         try {
           projectConfig = await loadProjectMcpConfig(runtimeCwd);
         } catch (error) {

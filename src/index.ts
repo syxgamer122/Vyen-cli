@@ -19,6 +19,12 @@ export {
   McpManager,
   loadMcpConfig,
   saveMcpConfig,
+  projectMcpConfigPath,
+  loadProjectMcpConfig,
+  saveProjectMcpConfig,
+  loadMergedMcpConfig,
+  projectMcpCommandCandidates,
+  formatMcpList,
   mcpConfigSchema,
   mcpServerSchema,
   mcpConfigPath,
@@ -30,7 +36,7 @@ export {
   DEFAULT_MCP_MAX_BUFFER_SIZE,
   DEFAULT_MAX_MCP_TOOLS,
 } from './mcp.js';
-export type { McpConfig, McpServerConfig } from './mcp.js';
+export type { McpConfig, McpServerConfig, MergedMcpConfig } from './mcp.js';
 export { Subagents } from './subagents.js';
 export type { SubagentEvent, SubagentProgress } from './subagents.js';
 export { AnswerProjection, visibleAnswer, lastAssistantAnswer } from './reasoning.js';
