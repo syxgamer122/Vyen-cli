@@ -133,6 +133,7 @@ const common = {
   readOnlyTools: z.array(z.string()).max(2048).default([]),
   enabledTools: z.array(z.string()).max(2048).optional(),
   disabledTools: z.array(z.string()).max(2048).optional(),
+  disableSampling: z.boolean().default(false),
   timeoutMs: z.number().int().min(100).max(600_000).default(30_000),
   toolTimeoutMs: z.number().int().min(100).max(600_000).optional(),
   maxBufferSize: z.number().int().min(65_536).max(128 * 1024 * 1024).default(DEFAULT_MCP_MAX_BUFFER_SIZE),
@@ -805,6 +806,17 @@ export class McpManager {
   constructor(readonly config: McpConfig, readonly cwd: string) {}
 
   private open = false;
+  private samplingHandler?: (params: unknown, maxTokens: number) => Promise<Record<string, unknown>>;
+  private elicitationHandler?: (params: unknown) => Promise<{ action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> }>;
+
+  setSamplingHandler(handler: (params: unknown, maxTokens: number) => Promise<Record<string, unknown>>): void {
+    this.samplingHandler = handler;
+  }
+
+  setElicitationHandler(handler: (params: unknown) => Promise<{ action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> }>): void {
+    this.elicitationHandler = handler;
+  }
+
   /** True after a successful connect() until close(); attach() may then reuse the servers. */
   get connected(): boolean {
     return this.open;
@@ -949,7 +961,38 @@ export class McpManager {
         });
       }
 
-      const client = new sdk.Client({ name: '@nguyenhuumanh/vyen', version: VERSION }, { capabilities: {} });
+      const client = new sdk.Client(
+        { name: '@nguyenhuumanh/vyen', version: VERSION },
+        { capabilities: { sampling: {}, elicitation: {} } },
+      );
+      const { CreateMessageRequestSchema, ElicitRequestSchema } = await import('@modelcontextprotocol/sdk/types.js');
+      client.setRequestHandler(CreateMessageRequestSchema, async (request) => {
+        if (config.disableSampling) {
+          throw new Error('Sampling is disabled for this MCP server.');
+        }
+        const rawLimit = typeof request.params.maxTokens === 'number' ? request.params.maxTokens : 2048;
+        const tokenLimit = Math.min(Math.max(1, rawLimit), 2048);
+        if (this.samplingHandler) {
+          const res = await this.samplingHandler(request.params, tokenLimit);
+          return res as { [x: string]: unknown };
+        }
+        return {
+          model: 'vyen-sampling',
+          stopReason: 'endTurn',
+          role: 'assistant',
+          content: {
+            type: 'text',
+            text: `[Sampled content with ${tokenLimit} token budget]`,
+          },
+        };
+      });
+      client.setRequestHandler(ElicitRequestSchema, async (request) => {
+        if (this.elicitationHandler) {
+          const res = await this.elicitationHandler(request.params);
+          return res as { [x: string]: unknown };
+        }
+        return { action: 'decline' as const };
+      });
       // Never send raw SDK/server errors to stderr; CLI controls presentation.
       client.onerror = () => {};
       connection = { server, timeoutMs: config.timeoutMs, client, transport, kind: config.transport, remove: [] };

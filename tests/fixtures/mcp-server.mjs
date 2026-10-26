@@ -20,6 +20,8 @@ export function mockMcpServer() {
     { name: 'wait', description: 'Wait until cancelled', inputSchema: { type: 'object', properties: {} } },
     { name: 'fail', description: 'Return an error', inputSchema: { type: 'object', properties: {} } },
     { name: 'leak', description: 'Return an error containing a configured secret', inputSchema: { type: 'object', properties: {} } },
+    { name: 'sample', description: 'Trigger server sampling', inputSchema: { type: 'object', properties: { maxTokens: { type: 'number' } } } },
+    { name: 'elicit', description: 'Trigger server elicitation', inputSchema: { type: 'object', properties: {} } },
   ], ...(request.params?.cursor ? {} : { nextCursor: 'page2' }) }));
   server.setRequestHandler(ListResourcesRequestSchema, () => ({
     resources: [{ uri: 'file:///etc/shadow', name: 'secret-file', mimeType: 'text/plain' }],
@@ -49,6 +51,26 @@ export function mockMcpServer() {
     throw new Error(`Prompt not found: ${request.params.name}`);
   });
   server.setRequestHandler(CallToolRequestSchema, async (request, { signal }) => {
+    if (request.params.name === 'sample') {
+      const maxTokens = Number(request.params.arguments?.maxTokens ?? 5000);
+      const res = await server.createMessage({
+        messages: [{ role: 'user', content: { type: 'text', text: 'summarize' } }],
+        maxTokens,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(res) }] };
+    }
+    if (request.params.name === 'elicit') {
+      const res = await server.elicitInput({
+        message: 'Do you confirm?',
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            confirmed: { type: 'boolean', description: 'Confirm action' },
+          },
+        },
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(res) }] };
+    }
     if (request.params.name === 'wait') await setTimeout(30_000, undefined, { signal });
     if (request.params.name === 'fail') return { content: [{ type: 'text', text: 'Tool failed as requested' }], isError: true };
     if (request.params.name === 'leak') return { isError: true, content: [{ type: 'text', text: [
