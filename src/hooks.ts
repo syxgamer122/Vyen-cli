@@ -4,12 +4,16 @@ import { join, resolve, dirname, basename } from 'node:path';
 import { normalizeToolName } from './tools.js';
 import { childEnv } from './process.js';
 import { configDir, atomicJson } from './config.js';
+import { projectMcpCommandCandidates, projectMcpConfigPath, type McpServerConfig } from './mcp.js';
 import {
   type HookEvent,
   type HookDefinition,
+  type LayeredSettings,
+  type PermissionRules,
   hookEventSchema,
   hookDefinitionSchema,
   projectSettingsPath,
+  loadLayeredSettings,
 } from './settings.js';
 
 export {
@@ -55,13 +59,19 @@ function normalizeWorkspaceDir(cwd: string): string {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
+export interface WorkspaceTrustHashOptions {
+  includeProjectMcp?: boolean;
+}
+
 /**
- * Computes a SHA-256 trust hash covering `<cwd>/.vyen/settings.json` and any local
- * files/scripts directly referenced in hook commands.
+ * Computes a SHA-256 trust hash covering `<cwd>/.vyen/settings.json`,
+ * `<cwd>/.vyen/mcp.json` (unless disabled), and any local files/scripts directly
+ * referenced in hook commands, allow rules or project MCP servers.
  */
 export async function calculateWorkspaceTrustHash(
   cwd: string,
   hookCommands: string[],
+  options: WorkspaceTrustHashOptions = {},
 ): Promise<string> {
   const hasher = createHash('sha256');
   const normalizedCwd = resolve(cwd);
@@ -76,7 +86,21 @@ export async function calculateWorkspaceTrustHash(
     hasher.update('settings:none');
   }
 
-  // 2. Discover and hash any local files referenced in hook commands or allow rules
+  // 2. Hash the raw project MCP file. An absent file adds nothing, so workspaces
+  // trusted before project MCP existed keep the same hash. A file that exists but
+  // cannot be read still invalidates trust instead of being mistaken for absent.
+  if (options.includeProjectMcp !== false) {
+    const mcpFile = projectMcpConfigPath(normalizedCwd);
+    try {
+      const mcpData = await readFile(mcpFile);
+      hasher.update('mcp:');
+      hasher.update(mcpData);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') hasher.update('mcp:unreadable');
+    }
+  }
+
+  // 3. Discover and hash any local files referenced in hook commands or allow rules
   const checkedFiles = new Set<string>();
   for (const rawCmd of hookCommands) {
     const cmdStr = rawCmd.trim();
@@ -187,6 +211,66 @@ export async function recordWorkspaceTrust(
   records[normalizeWorkspaceDir(cwd)] = hash;
   await mkdir(configDir(), { recursive: true, mode: 0o700 });
   await atomicJson(storePath, records);
+}
+
+export interface WorkspaceTrustOptions {
+  userPermissions?: PermissionRules;
+  projectMcpServers?: Record<string, McpServerConfig>;
+  projectMcpError?: boolean;
+  includeProjectMcp?: boolean;
+  trustWorkspace?: boolean;
+}
+
+export interface WorkspaceTrustState {
+  layered: LayeredSettings;
+  isTrusted: boolean;
+  trustRequired: boolean;
+  hash: string;
+  reasons: string[];
+}
+
+/**
+ * Loads layered settings and decides whether repository-controlled features
+ * (hooks, allow rules, project MCP servers) may run. Project features are gated by
+ * one hash so editing any of them, or a script they reference, revokes trust.
+ */
+export async function evaluateWorkspaceTrust(
+  cwd: string,
+  options: WorkspaceTrustOptions = {},
+): Promise<WorkspaceTrustState> {
+  const layered = await loadLayeredSettings(cwd, options.userPermissions);
+  const includeProjectMcp = options.includeProjectMcp !== false;
+  const projectMcpServers = includeProjectMcp ? options.projectMcpServers ?? {} : {};
+  const projectMcpError = includeProjectMcp && Boolean(options.projectMcpError);
+  const hooks = layered.hooks ?? [];
+  const allowCommands = layered.projectPermissions.allow ?? [];
+  const mcpCount = Object.keys(projectMcpServers).length;
+
+  const reasons: string[] = [];
+  if (hooks.length) reasons.push(`${hooks.length} project hook(s)`);
+  if (allowCommands.length) reasons.push('project permission allow rules');
+  if (mcpCount) reasons.push(`${mcpCount} project MCP server(s)`);
+
+  const trustRequired = reasons.length > 0 || projectMcpError;
+  if (!trustRequired) {
+    return { layered, isTrusted: false, trustRequired: false, hash: '', reasons: [] };
+  }
+
+  const hash = await calculateWorkspaceTrustHash(
+    cwd,
+    [
+      ...hooks.map(hook => hook.command),
+      ...allowCommands,
+      ...(includeProjectMcp ? projectMcpCommandCandidates(projectMcpServers) : []),
+    ],
+    { includeProjectMcp },
+  );
+  let isTrusted = await isWorkspaceTrusted(cwd, hash);
+  if (!isTrusted && options.trustWorkspace) {
+    await recordWorkspaceTrust(cwd, hash);
+    isTrusted = true;
+  }
+  return { layered, isTrusted, trustRequired: true, hash, reasons };
 }
 
 import { spawn } from 'node:child_process';

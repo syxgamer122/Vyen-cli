@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile, readFile, mkdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,8 +8,10 @@ import { cli, fixture, provider, sse } from './helpers.mjs';
 import { SessionStore } from '../dist/session.js';
 import { ToolRegistry } from '../dist/tools.js';
 import { Harness } from '../dist/harness.js';
+import { mcpConfigSchema } from '../dist/mcp.js';
 import {
   calculateWorkspaceTrustHash,
+  evaluateWorkspaceTrust,
   isWorkspaceTrusted,
   recordWorkspaceTrust,
   HookBus,
@@ -851,5 +854,92 @@ test('Non-PreToolUse hook timeout or error preserves denied false', async () => 
   assert.equal(timeoutResults[0].timedOut, true);
   assert.equal(timeoutResults[0].denied, false, 'Non-PreToolUse timeout must not mark denied: true');
 });
+
+test('workspace trust hash covers project MCP config and referenced scripts', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vyen-trust-mcp-'));
+  const oldXdg = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = join(dir, '.config');
+  try {
+    await mkdir(join(dir, '.vyen'), { recursive: true });
+    const mcpFile = join(dir, '.vyen', 'mcp.json');
+
+    const emptyHash = await calculateWorkspaceTrustHash(dir, []);
+    const expected = createHash('sha256').update('settings:none').digest('hex');
+    assert.equal(emptyHash, expected, 'absent mcp.json must not change the legacy hash');
+    assert.equal(
+      await calculateWorkspaceTrustHash(dir, [], { includeProjectMcp: false }),
+      expected,
+      'includeProjectMcp: false must leave the legacy hash unchanged',
+    );
+
+    await writeFile(mcpFile, JSON.stringify({ servers: { proj: { command: 'node', args: ['./server.mjs'] } } }));
+    const withMcp = await calculateWorkspaceTrustHash(dir, ['node ./server.mjs']);
+    assert.notEqual(withMcp, emptyHash, 'adding .vyen/mcp.json must change the trust hash');
+
+    await writeFile(mcpFile, JSON.stringify({ servers: { proj: { command: 'node', args: ['./other.mjs'] } } }));
+    assert.notEqual(
+      await calculateWorkspaceTrustHash(dir, ['node ./server.mjs']),
+      withMcp,
+      'editing .vyen/mcp.json must change the trust hash',
+    );
+
+    await writeFile(mcpFile, JSON.stringify({ servers: { proj: { command: 'node', args: ['./server.mjs'] } } }));
+    const missingScript = await calculateWorkspaceTrustHash(dir, ['node ./server.mjs']);
+    await writeFile(join(dir, 'server.mjs'), 'console.log(1)');
+    const before = await calculateWorkspaceTrustHash(dir, ['node ./server.mjs']);
+    assert.notEqual(before, missingScript, 'creating a referenced script must change the trust hash');
+    await writeFile(join(dir, 'server.mjs'), 'console.log(2)');
+    assert.notEqual(
+      await calculateWorkspaceTrustHash(dir, ['node ./server.mjs']),
+      before,
+      'editing a referenced script must change the trust hash',
+    );
+
+    await writeFile(mcpFile, '{broken');
+    await assert.doesNotReject(calculateWorkspaceTrustHash(dir, []), 'corrupt project MCP JSON must still hash');
+  } finally {
+    if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = oldXdg;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('evaluateWorkspaceTrust requires trust for project MCP servers and records it on request', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vyen-trust-eval-'));
+  const oldXdg = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = join(dir, '.config');
+  try {
+    await mkdir(join(dir, '.vyen'), { recursive: true });
+    const mcpFile = join(dir, '.vyen', 'mcp.json');
+    await writeFile(mcpFile, JSON.stringify({ servers: { proj: { command: process.execPath, args: ['./server.mjs'] } } }));
+    await writeFile(join(dir, 'server.mjs'), 'console.log(1)');
+    const projectMcpServers = mcpConfigSchema.parse(JSON.parse(await readFile(mcpFile, 'utf8'))).servers;
+
+    const untrusted = await evaluateWorkspaceTrust(dir, { projectMcpServers });
+    assert.equal(untrusted.isTrusted, false);
+    assert.equal(untrusted.trustRequired, true);
+    assert.match(untrusted.reasons.join(' '), /project MCP server/);
+    assert.equal(untrusted.hash.length, 64);
+    assert.ok(untrusted.layered, 'evaluateWorkspaceTrust returns the layered settings it loaded');
+
+    const trusted = await evaluateWorkspaceTrust(dir, { projectMcpServers, trustWorkspace: true });
+    assert.equal(trusted.isTrusted, true);
+    const remembered = await evaluateWorkspaceTrust(dir, { projectMcpServers });
+    assert.equal(remembered.isTrusted, true, 'trust is remembered for the same config');
+
+    await writeFile(join(dir, 'server.mjs'), 'console.log(2)');
+    const tampered = await evaluateWorkspaceTrust(dir, { projectMcpServers });
+    assert.equal(tampered.isTrusted, false, 'editing a referenced script revokes trust');
+
+    const errored = await evaluateWorkspaceTrust(dir, { projectMcpError: true });
+    assert.equal(errored.trustRequired, true, 'a corrupt project MCP file still requires a trust decision');
+    assert.equal(errored.isTrusted, false);
+  } finally {
+    if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = oldXdg;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 
 
