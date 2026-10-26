@@ -150,7 +150,7 @@ test('CHANGELOG.md records 0.4.0 release notes for settings, permissions, hooks,
   assert.match(section040, /--trust-workspace/, 'CHANGELOG 0.4.0 must note --trust-workspace');
 });
 
-test('ROADMAP.md reflects completed Phase 1, 30 modules, and 5 Windows platform skips with zero test failures', async () => {
+test('ROADMAP.md reflects completed Phase 1, 28 modules, and 5 Windows platform skips with zero test failures', async () => {
   const roadmap = await readFile('docs/ROADMAP.md', 'utf8');
   assert.match(roadmap, /30 modules/, 'ROADMAP.md must reflect 30 modules in src/');
   assert.match(roadmap, /Phase 1.*(?:completed|done)|R1\.1.*completed/i, 'ROADMAP.md must mark Phase 1 as completed');
