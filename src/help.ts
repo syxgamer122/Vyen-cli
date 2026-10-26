@@ -11,7 +11,7 @@ Usage: vyen [options] [prompt]
        vyen setup
        vyen init --provider openai-compatible --base-url URL --model MODEL [--effort LEVEL]
        vyen doctor | sessions
-       vyen mcp list | check [name] | get <name> | add <name> ... [--scope=user|project] [--project] | remove <name> [--scope=user|project] [--project] | import-codex [name...]
+       vyen mcp list | check [name] | get <name> | add [name] [--preset <preset>] ... [--scope=user|project] [--project] | remove <name> [--scope=user|project] [--project] | import-codex [name...]
        vyen upgrade [VERSION] [--method npm|pnpm|yarn|bun] [--dry-run]
 
 Options:
@@ -40,6 +40,7 @@ Options:
       --disallowed-tools LIST Comma-separated tools/patterns to deny
       --trust-workspace     Trust and re-record hash for project hooks, allow rules, and project MCP servers
       --scope SCOPE         Scope for MCP commands: user (default) | project
+      --preset PRESET       Add official MCP server preset (memory, sequentialthinking, fetch, git, etc.)
       --project             Shorthand for --scope=project
   -o, --output-last-message FILE  Also write the final answer of a -p run to FILE
       --method NAME         Package manager for vyen upgrade: npm | pnpm | yarn | bun

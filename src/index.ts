@@ -83,6 +83,20 @@ export type {
   WorkflowRunResult,
   WorkflowExecutionHooks,
 } from './workflow.js';
+export {
+  KnowledgeGraphManager,
+  loadGraph,
+  saveGraph,
+  EntitySchema,
+  RelationSchema,
+} from './memory.js';
+export type { Entity, Relation, KnowledgeGraph } from './memory.js';
+export {
+  resolvePreset,
+  listPresets,
+  OFFICIAL_PRESETS,
+} from './mcp-presets.js';
+export type { PresetDefinition } from './mcp-presets.js';
 
 
 

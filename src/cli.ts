@@ -295,6 +295,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         strict: false,
         options: {
           url: { type: 'string' },
+          preset: { type: 'string' },
           'bearer-env': { type: 'string' },
           'bearer-token-env-var': { type: 'string' },
           env: { type: 'string', multiple: true },
@@ -307,9 +308,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           model: { type: 'string' },
         },
       });
-      const name = addParsed.positionals[0];
+      const presetVal = typeof addParsed.values.preset === 'string' ? addParsed.values.preset : undefined;
+      const name = addParsed.positionals[0] ?? presetVal;
       if (!name) {
-        throw new Error('Usage: vyen mcp add <name> (--url <URL> [--bearer-env ENV] | -- <command> [args...])');
+        throw new Error('Usage: vyen mcp add <name> (--preset <name> | --url <URL> [--bearer-env ENV] | -- <command> [args...])');
       }
       if (addParsed.values.scope && addParsed.values.scope !== 'user' && addParsed.values.scope !== 'project') {
         throw new Error(`Invalid MCP scope "${addParsed.values.scope}". Expected "user" or "project".`);
@@ -325,32 +327,43 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       }
       const urlVal = typeof addParsed.values.url === 'string' ? addParsed.values.url : undefined;
       const commandTokens = cmdPart.length ? cmdPart : addParsed.positionals.slice(1);
-      if (!urlVal && !commandTokens.length) {
-        throw new Error('Specify either --url <URL> or -- <command> [args...] when adding an MCP server.');
+      if (!urlVal && !commandTokens.length && !presetVal) {
+        throw new Error('Specify either --preset <name>, --url <URL>, or -- <command> [args...] when adding an MCP server.');
       }
       const bearerEnv =
         (typeof addParsed.values['bearer-env'] === 'string' ? addParsed.values['bearer-env'] : undefined) ??
         (typeof addParsed.values['bearer-token-env-var'] === 'string' ? addParsed.values['bearer-token-env-var'] : undefined);
       const timeoutMs =
         typeof addParsed.values['timeout-ms'] === 'string' ? Number(addParsed.values['timeout-ms']) : undefined;
-      const serverEntry = mcpServerSchema.parse(
-        urlVal
-          ? {
-              transport: 'http',
-              url: urlVal,
-              ...(bearerEnv ? { bearerEnv } : {}),
-              ...(addParsed.values.trust === true ? { trust: true } : {}),
-              ...(timeoutMs ? { timeoutMs } : {}),
-            }
-          : {
-              transport: 'stdio',
-              command: commandTokens[0],
-              args: commandTokens.slice(1),
-              ...(Object.keys(envMap).length ? { env: envMap } : {}),
-              ...(addParsed.values.trust === true ? { trust: true } : {}),
-              ...(timeoutMs ? { timeoutMs } : {}),
-            },
-      );
+      let serverEntry;
+      if (presetVal) {
+        const { resolvePreset } = await import('./mcp-presets.js');
+        const resolved = resolvePreset(presetVal);
+        serverEntry = mcpServerSchema.parse({
+          ...resolved,
+          ...(Object.keys(envMap).length ? { env: envMap } : {}),
+          ...(timeoutMs ? { timeoutMs } : {}),
+        });
+      } else {
+        serverEntry = mcpServerSchema.parse(
+          urlVal
+            ? {
+                transport: 'http',
+                url: urlVal,
+                ...(bearerEnv ? { bearerEnv } : {}),
+                ...(addParsed.values.trust === true ? { trust: true } : {}),
+                ...(timeoutMs ? { timeoutMs } : {}),
+              }
+            : {
+                transport: 'stdio',
+                command: commandTokens[0],
+                args: commandTokens.slice(1),
+                ...(Object.keys(envMap).length ? { env: envMap } : {}),
+                ...(addParsed.values.trust === true ? { trust: true } : {}),
+                ...(timeoutMs ? { timeoutMs } : {}),
+              },
+        );
+      }
       const targetCwd = resolve((addParsed.values.cwd as string | undefined) ?? '.');
       if (isProjectScope) {
         const projConfig = await loadProjectMcpConfig(targetCwd);

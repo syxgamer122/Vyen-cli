@@ -285,6 +285,8 @@ Tạo `~/.config/vyen/mcp.json`:
 ```bash
 vyen mcp list                      # xem cấu hình hợp nhất (user & project), không kết nối
 vyen mcp check                     # kết nối và in tên tool gốc/tên namespaced
+vyen mcp add --preset memory       # cài nhanh server memory chuẩn chính thức
+vyen mcp add --preset fetch        # cài nhanh server fetch chuẩn
 vyen mcp add my-tool --scope=project -- node server.mjs  # thêm MCP server vào .vyen/mcp.json
 vyen mcp remove my-tool --project  # gỡ MCP server khỏi .vyen/mcp.json
 vyen mcp import-codex              # nhập nhanh các MCP server từ ~/.codex/config.toml
@@ -292,6 +294,12 @@ vyen --trust-workspace             # tin cậy workspace và bật project MCP s
 vyen                               # tự nạp các server đã bật
 vyen --no-mcp                      # bỏ qua MCP trong lượt này
 ```
+
+Hệ sinh thái MCP của Vyen hỗ trợ toàn diện:
+- **3 trụ cột MCP chuẩn:** Tools, Resources (`read_mcp_resource`), và Prompts (`list_mcp_prompts`, `get_mcp_prompt`, `/mcp prompts`).
+- **Giao thức 2 chiều:** Tương tác người dùng qua Elicitation và sinh text có kiểm soát qua Bounded Sampling (trần 2.048 tokens).
+- **Bộ nhớ đồ thị Knowledge Graph:** Tự động lưu trữ thực thể và quan hệ trong `knowledge-graph.jsonl`.
+- **Tư duy tuần tự (Sequential Thinking):** Công cụ phân tích lập luận nhiều bước, sửa đổi giả thuyết và rẽ nhánh.
 
 Xem [docs/MCP.md](docs/MCP.md) để biết chi tiết cấu hình stdio, biến môi trường và giới hạn.
 

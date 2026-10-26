@@ -23,6 +23,28 @@ Precedence & safety rules:
 - **Scoping:** `vyen mcp add/remove` support `--scope=project` (or `--project`). Default
   is `--scope=user`.
 
+## Official Server Presets & Cognitive Tools
+
+Vyen provides 1-click installation for official reference servers from `modelcontextprotocol/servers`:
+
+```bash
+vyen mcp add --preset memory [--scope=user|project]
+vyen mcp add --preset sequentialthinking
+vyen mcp add --preset fetch
+vyen mcp add --preset git
+vyen mcp add --preset filesystem
+vyen mcp add --preset time
+```
+
+### Full MCP Protocol Capabilities:
+- **Tools**: Dynamic tool discovery, input schema validation, and execution.
+- **Resources**: `list_mcp_resources` and `read_mcp_resource` tools to read structured context via URI.
+- **Prompts**: `list_mcp_prompts` and `get_mcp_prompt` tools, plus TUI `/mcp prompts`.
+- **Elicitation**: Server-initiated interactive user inquiries supported with fail-closed default in headless mode.
+- **Bounded Sampling**: Server-initiated LLM completions routed through `src/provider.ts` with strict 2,048 token hard cap and 30s timeout guard.
+- **Knowledge Graph Memory**: Persistent entity-relation graph in `~/.config/vyen/knowledge-graph.jsonl` and `.vyen/knowledge-graph.jsonl`.
+- **Sequential Thinking**: Built-in multi-step reasoning tool (`sequential_thinking`) for deep problem analysis, revision, and branching.
+
 ## Example
 
 Create the file with permissions 0600. Replace paths/URLs and enable only the
