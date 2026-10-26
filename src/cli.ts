@@ -342,6 +342,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         serverEntry = mcpServerSchema.parse({
           ...resolved,
           ...(Object.keys(envMap).length ? { env: envMap } : {}),
+          ...(addParsed.values.trust === true ? { trust: true } : {}),
           ...(timeoutMs ? { timeoutMs } : {}),
         });
       } else {
@@ -556,7 +557,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         return;
       }
       if (sub !== 'check') {
-        throw new Error('Usage: vyen mcp list | check [name] | get <name> | add <name> ... | remove <name> | import-codex [name...]');
+        throw new Error('Usage: vyen mcp list | check [name] | get <name> | add [name] [--preset <preset>] ... | remove <name> | import-codex [name...]');
       }
       const targetFilter = positionals[2];
       const view = await loadView();
@@ -1699,7 +1700,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             '  /export [filename.md]             Export session transcript to a Markdown file\n' +
             '  /init                             Generate or update AGENTS.md for this project\n' +
             '  /status, /debug-config, /warnings Show session status, config layers, or runtime warnings\n' +
-            '  /mcp [list|check|import-codex|reload] Inspect, check, reload, or import Codex MCP servers\n' +
+            '  /mcp [list|check|prompts|import-codex|reload] Inspect, check, list prompts, reload, or import Codex MCP servers\n' +
             '  /subagents [list|show <id>|<task>] List spawned subagents, view transcript, or run a subagent\n' +
             '  /tools                            List active tools in current mode\n' +
             '  /sessions                         List saved workspace sessions\n' +
@@ -3475,6 +3476,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               const promptsObj = await manager.listPrompts();
               let found = 0;
               for (const [srv, res] of Object.entries(promptsObj)) {
+                const err = (res as { error?: string })?.error;
+                if (err) {
+                  display(`  [${srv}] error: ${err}\n`);
+                  continue;
+                }
                 const list = (res as { prompts?: Array<{ name: string; description?: string }> })?.prompts ?? [];
                 if (list.length > 0) {
                   found += list.length;
@@ -3494,7 +3500,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               }
               continue;
             }
-            display('Usage: /mcp [list | check | reload | import-codex [names...] | remove <name>]\n');
+            display('Usage: /mcp [list | check | prompts | reload | import-codex [names...] | remove <name>]\n');
             continue;
           }
           if (input === '/subagents' || input === '/agents' || input === '/agent' || input.startsWith('/subagents ') || input.startsWith('/agents ') || input.startsWith('/agent ')) {

@@ -166,7 +166,7 @@ const SLASH_DESCRIPTIONS: Record<string, string> = {
   '/council': 'convene Agent Network council debate (/network alias)',
   '/cd': 'change active workspace directory',
   '/pwd': 'show active workspace directory',
-  '/mcp': 'list, check, add, remove, reload, or import-codex MCP servers',
+  '/mcp': 'list, check, prompts, add, remove, reload, or import-codex MCP servers',
   '/subagents': 'list spawned subagents, inspect transcripts, or run a subagent task',
   '/agent': 'spawn a subagent task or inspect subagents (/subagents)',
   '/plan': 'toggle read-only Plan Mode',

@@ -64,3 +64,27 @@ test('headless elicitation fails closed with declined response', async t => {
   const parsed = JSON.parse(res.text);
   assert.equal(parsed.action, 'decline', 'Headless elicitation must decline by default');
 });
+
+test('sampling request rejects on timeout when handler hangs', async t => {
+  const f = await fixture(t);
+  const registry = new ToolRegistry(f.cwd);
+  const manager = new McpManager(stdio({ timeoutMs: 5000, toolTimeoutMs: 200 }), f.cwd);
+  t.after(() => manager.close());
+
+  manager.setSamplingHandler(async () => {
+    await new Promise(r => setTimeout(r, 1000));
+    return {
+      model: 'test-model',
+      stopReason: 'endTurn',
+      role: 'assistant',
+      content: { type: 'text', text: 'too-late' },
+    };
+  });
+
+  await manager.connect(registry);
+
+  await assert.rejects(
+    () => registry.execute(call(mcpToolName('local', 'sample'), {}), signal()),
+    /timed out/i,
+  );
+});

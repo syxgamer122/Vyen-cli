@@ -973,8 +973,20 @@ export class McpManager {
         const rawLimit = typeof request.params.maxTokens === 'number' ? request.params.maxTokens : 2048;
         const tokenLimit = Math.min(Math.max(1, rawLimit), 2048);
         if (this.samplingHandler) {
-          const res = await this.samplingHandler(request.params, tokenLimit);
-          return res as { [x: string]: unknown };
+          const timeoutMs = config.toolTimeoutMs ?? config.timeoutMs ?? 30_000;
+          let timer: NodeJS.Timeout | undefined;
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('MCP sampling request timed out.')), timeoutMs);
+          });
+          try {
+            const res = await Promise.race([
+              this.samplingHandler(request.params, tokenLimit),
+              timeoutPromise,
+            ]);
+            return res as { [x: string]: unknown };
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
         }
         return {
           model: 'vyen-sampling',

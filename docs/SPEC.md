@@ -63,8 +63,10 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   User server definitions win on name collisions, and project MCP servers cannot grant
   trust or bypass approvals. Only user readOnlyTools entries bypass approvals; remote
   annotations do not grant privileges. Stdio inherits the SDK default environment plus
-  explicit envFrom mappings. HTTP bearer keys come from env variables. No sampling,
-  OAuth, prompts or legacy SSE; tools and resources are supported.
+  explicit envFrom mappings. HTTP bearer keys come from env variables. Prompts,
+  elicitation, and bounded sampling (capped at 2048 tokens with timeout guard)
+  are available; tools and resources are supported; OAuth and legacy SSE are not.
+  Official reference servers installable via `vyen mcp add --preset <name>`.
 - Subagents own separate transcripts under subagents/PARENT_UUID. Research uses
   at most two concurrent children globally per manager; editing tasks are serial
   mutation barriers. Children share the parent's approval callback and run budget,

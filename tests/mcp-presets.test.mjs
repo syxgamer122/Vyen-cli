@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { resolvePreset, listPresets } from '../dist/mcp-presets.js';
 import { loadProjectMcpConfig, saveProjectMcpConfig } from '../dist/mcp.js';
-import { fixture } from './helpers.mjs';
+import { fixture, cli } from './helpers.mjs';
 
 test('resolvePreset returns valid stdio server configuration for official servers', () => {
   const memoryConfig = resolvePreset('memory');
@@ -43,4 +45,16 @@ test('preset can be saved to project MCP configuration', async t => {
   const reloaded = await loadProjectMcpConfig(f.cwd);
   assert.ok(reloaded.servers['memory']);
   assert.equal(reloaded.servers['memory'].transport, 'stdio');
+});
+
+test('preset CLI honours --trust flag for user servers', async t => {
+  const f = await fixture(t);
+  const userMcpPath = join(f.config, 'vyen', 'mcp.json');
+  const res = await cli(f, false, ['mcp', 'add', '--preset', 'memory', '--trust'], { baseUrl: false }).done;
+  assert.equal(res.code, 0, res.stderr);
+
+  const raw = await readFile(userMcpPath, 'utf8');
+  const json = JSON.parse(raw);
+  assert.ok(json.servers.memory);
+  assert.equal(json.servers.memory.trust, true);
 });
