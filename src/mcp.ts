@@ -1175,7 +1175,76 @@ export class McpManager {
           }
         },
       }),
+      registry.register('list_mcp_prompts', {
+        description: 'Lists prompt templates provided by connected MCP servers.',
+        schema: z.object({
+          server: z.string().optional().describe('Optional MCP server name filter.'),
+          cursor: z.string().optional().describe('Opaque pagination cursor.'),
+        }),
+        readOnly: true,
+        execute: async (input, callSignal) => {
+          const targets = input.server
+            ? this.connections.filter(c => c.server === input.server)
+            : this.connections;
+          if (!targets.length) return `No active MCP server matching "${input.server ?? ''}".`;
+          const results: Record<string, unknown> = {};
+          await Promise.all(targets.map(async c => {
+            try {
+              results[c.server] = await c.client.listPrompts(
+                input.cursor ? { cursor: input.cursor } : {},
+                { signal: callSignal, timeout: c.timeoutMs },
+              );
+            } catch (err) {
+              results[c.server] = { error: this.error(err).message };
+            }
+          }));
+          return limitText(JSON.stringify(results, null, 2));
+        },
+      }),
+      registry.register('get_mcp_prompt', {
+        description: 'Get and render a prompt template from an MCP server by server name and prompt name.',
+        schema: z.object({
+          server: z.string().min(1).describe('MCP server name.'),
+          name: z.string().min(1).describe('Prompt name to retrieve.'),
+          arguments: z.record(z.string(), z.string()).optional().describe('Arguments for the prompt template.'),
+        }),
+        readOnly: true,
+        execute: async (input, callSignal) => {
+          const conn = this.connections.find(c => c.server === input.server);
+          if (!conn) throw new Error(`Unknown or disconnected MCP server: ${input.server}`);
+          try {
+            const res = await conn.client.getPrompt(
+              { name: input.name, arguments: input.arguments },
+              { signal: callSignal, timeout: conn.timeoutMs },
+            );
+            return limitText(JSON.stringify(res, null, 2));
+          } catch (err) {
+            throw this.error(err);
+          }
+        },
+      }),
     );
+  }
+
+  async listPrompts(server?: string): Promise<Record<string, unknown>> {
+    const targets = server
+      ? this.connections.filter(c => c.server === server)
+      : this.connections;
+    const results: Record<string, unknown> = {};
+    await Promise.all(targets.map(async c => {
+      try {
+        results[c.server] = await c.client.listPrompts({}, { timeout: c.timeoutMs });
+      } catch (err) {
+        results[c.server] = { error: this.error(err).message };
+      }
+    }));
+    return results;
+  }
+
+  async getPrompt(server: string, name: string, args?: Record<string, string>): Promise<unknown> {
+    const conn = this.connections.find(c => c.server === server);
+    if (!conn) throw new Error(`Unknown or disconnected MCP server: ${server}`);
+    return await conn.client.getPrompt({ name, arguments: args }, { timeout: conn.timeoutMs });
   }
 
   private async closeConnection(connection: Connection) {

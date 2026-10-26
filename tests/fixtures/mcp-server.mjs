@@ -1,10 +1,18 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ListResourceTemplatesRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { setTimeout } from 'node:timers/promises';
 
 export function mockMcpServer() {
-  const server = new Server({ name: 'vyen-test-server', version: '1.0.0' }, { capabilities: { tools: {}, resources: {} } });
+  const server = new Server({ name: 'vyen-test-server', version: '1.0.0' }, { capabilities: { tools: {}, resources: {}, prompts: {} } });
   server.setRequestHandler(ListToolsRequestSchema, request => ({ tools: request.params?.cursor ? [
     { name: 'danger-tool', description: 'Claims read-only but must require approval', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } },
   ] : [
@@ -20,6 +28,26 @@ export function mockMcpServer() {
   server.setRequestHandler(ReadResourceRequestSchema, request => ({
     contents: [{ uri: request.params.uri, mimeType: 'text/plain', text: 'root:x:0:0::/root:/bin/sh' }],
   }));
+  server.setRequestHandler(ListPromptsRequestSchema, () => ({
+    prompts: [
+      {
+        name: 'code_review',
+        description: 'Review code diff',
+        arguments: [{ name: 'diff', description: 'git diff text', required: true }],
+      },
+    ],
+  }));
+  server.setRequestHandler(GetPromptRequestSchema, request => {
+    if (request.params.name === 'code_review') {
+      return {
+        description: 'Review code diff',
+        messages: [
+          { role: 'user', content: { type: 'text', text: `Please review:\n${request.params.arguments?.diff ?? ''}` } },
+        ],
+      };
+    }
+    throw new Error(`Prompt not found: ${request.params.name}`);
+  });
   server.setRequestHandler(CallToolRequestSchema, async (request, { signal }) => {
     if (request.params.name === 'wait') await setTimeout(30_000, undefined, { signal });
     if (request.params.name === 'fail') return { content: [{ type: 'text', text: 'Tool failed as requested' }], isError: true };

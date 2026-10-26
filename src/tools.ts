@@ -30,6 +30,7 @@ const COLLAB_TOOLS = new Set([
   'agent_network', 'run_workflow',
   'update_plan', 'get_goal', 'create_goal', 'update_goal', 'request_user_input', 'view_image',
   'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource',
+  'list_mcp_prompts', 'get_mcp_prompt',
 ]);
 interface RegisteredTool {
   description: string; schema: FlexibleSchema<unknown>; readOnly: boolean;

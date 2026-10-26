@@ -164,11 +164,14 @@ function buildToolMeta(toolName: string, rawInput: unknown): ToolEventMeta {
     const count = Array.isArray(rec.questions) ? rec.questions.length : 1;
     return { kind: 'other', summary: `${count} question(s)` };
   }
-  if (canonical === 'list_mcp_resources' || canonical === 'list_mcp_resource_templates') {
+  if (canonical === 'list_mcp_resources' || canonical === 'list_mcp_resource_templates' || canonical === 'list_mcp_prompts') {
     return { kind: 'list', summary: typeof rec.server === 'string' ? rec.server : 'all servers' };
   }
   if (canonical === 'read_mcp_resource') {
     return { kind: 'read', summary: `${typeof rec.server === 'string' ? rec.server : ''}:${typeof rec.uri === 'string' ? rec.uri : ''}` };
+  }
+  if (canonical === 'get_mcp_prompt') {
+    return { kind: 'read', summary: `${typeof rec.server === 'string' ? rec.server : ''}:${typeof rec.name === 'string' ? rec.name : ''}` };
   }
   if (canonical === 'spawn_agent') {
     const role = typeof rec.agent_type === 'string' ? rec.agent_type : typeof rec.role === 'string' ? rec.role : 'default';

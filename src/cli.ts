@@ -3447,6 +3447,26 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               display(`Removed MCP server "${target}" (${manager?.tools.length ?? 0} MCP tools active).\n`);
               continue;
             }
+            if (sub === 'prompts') {
+              if (!manager || !manager.connected) {
+                display('No active MCP connections.\n');
+                continue;
+              }
+              const promptsObj = await manager.listPrompts();
+              let found = 0;
+              for (const [srv, res] of Object.entries(promptsObj)) {
+                const list = (res as { prompts?: Array<{ name: string; description?: string }> })?.prompts ?? [];
+                if (list.length > 0) {
+                  found += list.length;
+                  display(`  [${srv}]\n`);
+                  for (const p of list) {
+                    display(`    - ${p.name}${p.description ? `: ${p.description}` : ''}\n`);
+                  }
+                }
+              }
+              if (!found) display('No prompts exposed by connected MCP servers.\n');
+              continue;
+            }
             if (sub === 'check') {
               await rebuildHarness({ reconnectMcp: true });
               for (const st of manager?.statuses ?? []) {
