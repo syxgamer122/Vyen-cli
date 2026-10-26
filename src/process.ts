@@ -13,6 +13,9 @@ const secretEnvNames = new Set<string>(['VYEN_API_KEY']);
 export function protectSecretEnv(...names: Array<string | undefined>): void {
   for (const name of names) if (name) secretEnvNames.add(name);
 }
+export function isSecretEnv(name: string): boolean {
+  return secretEnvNames.has(name);
+}
 export function childEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env = { ...base };
   for (const name of secretEnvNames) delete env[name];

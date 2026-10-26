@@ -8,6 +8,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { configDir, atomicJson } from './config.js';
 import { limitText } from './files.js';
+import { isSecretEnv } from './process.js';
 import { VERSION } from './version.js';
 import type { ToolRegistry } from './tools.js';
 
@@ -869,6 +870,9 @@ export class McpManager {
         for (const [k, rawVal] of Object.entries(config.env)) {
           const placeholder = parseEnvPlaceholder(rawVal);
           if (placeholder) {
+            if (isSecretEnv(placeholder.name)) {
+              throw new Error(`MCP ${server}: cannot forward protected credential variable "${placeholder.name}"`);
+            }
             const resolved = process.env[placeholder.name] ?? placeholder.fallback;
             if (resolved === undefined) {
               throw new Error(`MCP ${server}: missing environment variable ${placeholder.name}`);
@@ -879,10 +883,16 @@ export class McpManager {
           }
         }
         for (const varName of config.envVars) {
+          if (isSecretEnv(varName)) {
+            throw new Error(`MCP ${server}: cannot forward protected credential variable "${varName}"`);
+          }
           const value = process.env[varName];
           if (value !== undefined) env[varName] = value;
         }
         for (const [target, source] of Object.entries(config.envFrom)) {
+          if (isSecretEnv(source)) {
+            throw new Error(`MCP ${server}: cannot forward protected credential variable "${source}"`);
+          }
           const value = process.env[source];
           if (value === undefined) throw new Error(`MCP ${server}: missing environment variable ${source}`);
           env[target] = value;
@@ -910,11 +920,17 @@ export class McpManager {
           }
         }
         for (const [hk, envVar] of Object.entries(config.envHeaders)) {
+          if (isSecretEnv(envVar)) {
+            throw new Error(`MCP ${server}: cannot forward protected credential variable "${envVar}"`);
+          }
           const token = process.env[envVar];
           if (!token) throw new Error(`MCP ${server}: missing environment variable ${envVar}`);
           headers[hk] = token;
         }
         if (config.bearerEnv) {
+          if (isSecretEnv(config.bearerEnv)) {
+            throw new Error(`MCP ${server}: cannot forward protected credential variable "${config.bearerEnv}"`);
+          }
           const token = process.env[config.bearerEnv];
           if (!token) throw new Error(`MCP ${server}: missing environment variable ${config.bearerEnv}`);
           headers.Authorization = `Bearer ${token}`;

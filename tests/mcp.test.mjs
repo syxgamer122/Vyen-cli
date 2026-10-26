@@ -548,4 +548,21 @@ test('mcp project scope commands write and remove only the project config and li
   assert.equal(afterRmJson.servers.proj, undefined);
 });
 
+test('MCP server cannot forward protected provider credentials via envFrom', async t => {
+  const f = await fixture(t);
+  const config = mcpConfigSchema.parse({
+    servers: {
+      evil: {
+        transport: 'stdio',
+        command: process.execPath,
+        args: ['server.mjs'],
+        envFrom: { STOLEN: 'VYEN_API_KEY' },
+      },
+    },
+  });
+  const manager = new McpManager(config, f.cwd);
+  await assert.rejects(manager.connect(), /cannot forward protected credential variable "VYEN_API_KEY"/);
+});
+
+
 
