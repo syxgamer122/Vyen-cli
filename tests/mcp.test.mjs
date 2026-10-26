@@ -437,3 +437,63 @@ test('formatMcpList marks user and project servers and untrusted state', async t
   assert.match(text, /Ignored project overrides.*shared/);
 });
 
+test('project MCP server does not start without workspace trust and user servers still start', async t => {
+  const f = await fixture(t);
+  await mkdir(join(f.config, 'vyen'), { recursive: true });
+  await writeFile(join(f.config, 'vyen', 'mcp.json'), JSON.stringify({ servers: { user: projectServer() } }));
+  await mkdir(join(f.cwd, '.vyen'), { recursive: true });
+  await writeFile(join(f.cwd, '.vyen', 'mcp.json'), JSON.stringify({ servers: { project: projectServer() } }));
+
+  let requests = 0;
+  const p = await provider(t, (body, response) => {
+    requests++;
+    assert(body.tools.some(tool => tool.function.name === mcpToolName('user', 'echo')), 'user MCP tools must be available');
+    assert(
+      !body.tools.some(tool => tool.function.name === mcpToolName('project', 'echo')),
+      'project MCP tools must stay disabled until the workspace is trusted',
+    );
+    sse(response, { text: 'Done.' });
+  });
+  const result = await cli(f, p.url, ['-p', 'hello']).done;
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(requests, 1);
+  assert.match(result.stderr, /project MCP server.*not trusted|project MCP server.*disabled/);
+});
+
+test('project MCP config errors are reported and do not prevent user MCP servers from starting', async t => {
+  const f = await fixture(t);
+  await mkdir(join(f.config, 'vyen'), { recursive: true });
+  await writeFile(join(f.config, 'vyen', 'mcp.json'), JSON.stringify({ servers: { user: projectServer() } }));
+  await mkdir(join(f.cwd, '.vyen'), { recursive: true });
+  await writeFile(join(f.cwd, '.vyen', 'mcp.json'), '{broken');
+
+  const p = await provider(t, (body, response) => {
+    assert(body.tools.some(tool => tool.function.name === mcpToolName('user', 'echo')), 'user MCP tools must survive a project config error');
+    assert(
+      !body.tools.some(tool => tool.function.name === mcpToolName('project', 'echo')),
+      'no project server may load from a corrupt file',
+    );
+    sse(response, { text: 'Done.' });
+  });
+  const result = await cli(f, p.url, ['-p', 'hello']).done;
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stderr, /MCP warning: could not load project MCP config/);
+});
+
+test('project MCP server starts when the workspace is explicitly trusted', async t => {
+  const f = await fixture(t);
+  await mkdir(join(f.cwd, '.vyen'), { recursive: true });
+  await writeFile(join(f.cwd, '.vyen', 'mcp.json'), JSON.stringify({ servers: { project: projectServer() } }));
+
+  const p = await provider(t, (body, response) => {
+    assert(
+      body.tools.some(tool => tool.function.name === mcpToolName('project', 'echo')),
+      'explicit workspace trust must allow the project server to start',
+    );
+    sse(response, { text: 'Done.' });
+  });
+  const result = await cli(f, p.url, ['--trust-workspace', '-p', 'hello']).done;
+  assert.equal(result.code, 0, result.stderr);
+});
+
+

@@ -26,7 +26,7 @@ import { HELP } from './help.js';
 import type { Harness, HarnessEvent } from './harness.js';
 import type { SubagentEvent } from './subagents.js';
 import { InputCancelledError, terminalText as cleanTerminal, TerminalUI } from './tui.js';
-import type { McpManager } from './mcp.js';
+import type { McpManager, MergedMcpConfig } from './mcp.js';
 import { EFFORT_DESCRIPTIONS, parseEffortInput, runSetupWizard } from './setup.js';
 import { discoverModels, formatModelBadge, resolveModelCapabilities, type DiscoveredModel } from './provider.js';
 import { bashApprovalPrefix, isApprovedBashPrefix } from './approval.js';
@@ -671,6 +671,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     let rl: ReturnType<typeof createInterface> | undefined;
     let tui: TerminalUI | undefined;
     let manager: McpManager | undefined;
+    let mergedMcp: MergedMcpConfig | undefined;
+    let mcpProjectError: string | undefined;
+    let mcpTrusted = false;
+    let mcpFingerprint = '';
     let subagents: import('./subagents.js').Subagents | undefined;
     let pairManager: import('./pair.js').PairManager | undefined;
     let controller: AbortController | undefined;
@@ -803,31 +807,62 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       const { ToolRegistry, formatTodos, applyPermissionMode } = await import('./tools.js');
       const { Subagents } = await import('./subagents.js');
       const { Harness } = await import('./harness.js');
-      const { loadLayeredSettings } = await import('./settings.js');
       const { evaluateToolPolicy } = await import('./policy.js');
-      const { HookBus, calculateWorkspaceTrustHash, isWorkspaceTrusted, recordWorkspaceTrust } = await import('./hooks.js');
+      const { HookBus, evaluateWorkspaceTrust } = await import('./hooks.js');
 
       const buildHarness = async (currentMode: PermissionMode, options: { reconnectMcp?: boolean } = {}) => {
-        const layered = await loadLayeredSettings(runtime.cwd, config.permissions);
-        const hasProjectHooks = Boolean(layered.hooks && layered.hooks.length > 0);
-        const hasProjectAllow = Boolean(layered.projectPermissions?.allow && layered.projectPermissions.allow.length > 0);
-        let isTrusted = false;
+        const {
+          loadMcpConfig,
+          loadProjectMcpConfig,
+          loadMergedMcpConfig,
+          McpManager,
+        } = await import('./mcp.js');
 
-        if (hasProjectHooks || hasProjectAllow) {
-          const hookCommands = (layered.hooks ?? []).map(h => h.command);
-          const allowCommands = layered.projectPermissions?.allow ?? [];
-          const hash = await calculateWorkspaceTrustHash(runtime.cwd, [...hookCommands, ...allowCommands]);
-          isTrusted = await isWorkspaceTrusted(runtime.cwd, hash);
-          if (!isTrusted && values['trust-workspace']) {
-            await recordWorkspaceTrust(runtime.cwd, hash);
-            isTrusted = true;
+        let userMcpConfig: Awaited<ReturnType<typeof loadMcpConfig>> = { servers: {} };
+        let projectMcpConfig: Awaited<ReturnType<typeof loadProjectMcpConfig>> = { servers: {} };
+        let projectMcpError: string | undefined;
+        if (!values['no-mcp']) {
+          try {
+            userMcpConfig = await loadMcpConfig();
+          } catch (error) {
+            if (!interactive) throw error;
+            display(`[MCP warning: could not load user MCP config: ${safeError(error, apiKey)}]\n`);
           }
-          if (!isTrusted) {
-            const reasons: string[] = [];
-            if (hasProjectHooks) reasons.push(`${layered.hooks!.length} project hook(s)`);
-            if (hasProjectAllow) reasons.push('project permission allow rules');
-            display(`\n[Warning: ${reasons.join(' and ')} disabled because workspace is not trusted. Run with --trust-workspace to enable.]\n`);
+          try {
+            projectMcpConfig = await loadProjectMcpConfig(runtime.cwd);
+          } catch (error) {
+            projectMcpError = safeError(error, apiKey);
+            display(`\n[MCP warning: could not load project MCP config: ${projectMcpError}]\n`);
           }
+        }
+
+        const trust = await evaluateWorkspaceTrust(runtime.cwd, {
+          userPermissions: config.permissions,
+          projectMcpServers: projectMcpConfig.servers,
+          projectMcpError: Boolean(projectMcpError),
+          includeProjectMcp: !values['no-mcp'],
+          trustWorkspace: values['trust-workspace'] === true,
+        });
+        const layered = trust.layered;
+        const isTrusted = trust.isTrusted;
+        const hasProjectHooks = Boolean(layered.hooks && layered.hooks.length > 0);
+        if (trust.trustRequired && !isTrusted && trust.reasons.length) {
+          display(`\n[Warning: ${trust.reasons.join(' and ')} disabled because workspace is not trusted. Run with --trust-workspace to enable.]\n`);
+        }
+
+        let merged: MergedMcpConfig | undefined;
+        let fingerprint = '';
+        if (!values['no-mcp']) {
+          merged = await loadMergedMcpConfig(runtime.cwd, {
+            isTrusted,
+            userConfig: userMcpConfig,
+            projectConfig: projectMcpConfig,
+          });
+          fingerprint = JSON.stringify({
+            servers: merged.servers,
+            sources: merged.sources,
+            projectError: projectMcpError ?? '',
+          });
         }
 
         let hookBus: InstanceType<typeof HookBus> | undefined;
@@ -984,20 +1019,29 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             return out;
           };
         }
-        // Running MCP servers are reused across harness rebuilds (effort, model, session switches);
-        // they restart only when asked to (/mcp reload) or when the workspace directory changed.
-        const reuseMcp = !values['no-mcp'] && manager?.connected && !options.reconnectMcp && manager.cwd === runtime.cwd;
+        // Running MCP servers are reused across harness rebuilds (effort, model, session switches).
+        // They restart when asked to (/mcp reload), when the directory changed, when the merged
+        // config changed, or when workspace trust was granted or revoked.
+        mergedMcp = merged;
+        const reuseMcp = !values['no-mcp'] && Boolean(manager?.connected) && !options.reconnectMcp
+          && manager!.cwd === runtime.cwd
+          && mcpTrusted === isTrusted
+          && mcpFingerprint === fingerprint
+          && mcpProjectError === projectMcpError
+          && mergedMcp !== undefined;
+        mcpProjectError = projectMcpError;
+        mcpTrusted = isTrusted;
+        mcpFingerprint = fingerprint;
         if (reuseMcp) {
           manager!.attach(reg);
         } else if (!values['no-mcp'] && manager) {
           await manager.close();
           manager = undefined;
         }
-        if (!values['no-mcp'] && !reuseMcp) {
-          const { loadMcpConfig, McpManager } = await import('./mcp.js');
+        if (!values['no-mcp'] && !reuseMcp && merged) {
           mcpController = new AbortController();
           try {
-            manager = new McpManager(await loadMcpConfig(), runtime.cwd);
+            manager = new McpManager(merged, runtime.cwd);
             const connecting = manager.connect(reg, mcpController.signal);
             // Restores the previous status afterwards so rebuilds (/setup, /model, /cd…) never stick on Working.
             await (tui ? tui.withStatus('Connecting MCP', () => connecting) : connecting);
