@@ -179,6 +179,11 @@ function buildToolMeta(toolName: string, rawInput: unknown): ToolEventMeta {
   if (canonical === 'mcp_read_graph' || canonical === 'mcp_search_nodes') {
     return { kind: 'read', summary: `knowledge graph ${typeof rec.query === 'string' ? rec.query : typeof rec.scope === 'string' ? rec.scope : ''}` };
   }
+  if (canonical === 'sequential_thinking') {
+    const num = typeof rec.thoughtNumber === 'number' ? rec.thoughtNumber : '?';
+    const total = typeof rec.totalThoughts === 'number' ? rec.totalThoughts : '?';
+    return { kind: 'other', summary: `step ${num}/${total}` };
+  }
   if (canonical === 'spawn_agent') {
     const role = typeof rec.agent_type === 'string' ? rec.agent_type : typeof rec.role === 'string' ? rec.role : 'default';
     const msg = typeof rec.message === 'string' ? rec.message : typeof rec.prompt === 'string' ? rec.prompt : typeof rec.task === 'string' ? rec.task : '';

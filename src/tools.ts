@@ -32,6 +32,7 @@ const COLLAB_TOOLS = new Set([
   'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource',
   'list_mcp_prompts', 'get_mcp_prompt',
   'mcp_create_entities', 'mcp_create_relations', 'mcp_add_observations', 'mcp_read_graph', 'mcp_search_nodes',
+  'sequential_thinking',
 ]);
 interface RegisteredTool {
   description: string; schema: FlexibleSchema<unknown>; readOnly: boolean;
@@ -368,6 +369,16 @@ export class ToolRegistry {
   onPlanExit?: (plan: string) => void;
   askUser?: (questions: UserInputQuestion[], signal: AbortSignal) => Promise<Record<string, string[]>>;
   pendingImages: Array<{ path: string; mimeType: string; bytes: Uint8Array }> = [];
+  thoughtHistory: Array<{
+    thought: string;
+    thoughtNumber: number;
+    totalThoughts: number;
+    nextThoughtNeeded: boolean;
+    isRevision?: boolean;
+    revisesThought?: number;
+    branchFromThought?: number;
+    branchId?: string;
+  }> = [];
   policy?: (request: { tool: string; input: unknown }) => 'allow' | 'ask' | 'deny' | 'default';
   private definitions = new Map<string, RegisteredTool>();
   constructor(readonly cwd: string, readonly approve: Approve, public readOnly = false) {
@@ -417,6 +428,35 @@ export class ToolRegistry {
       description: 'Read the current session task checklist.',
       schema: z.object({}), readOnly: true,
       execute: async () => formatTodos(this.todos),
+    });
+    this.register('sequential_thinking', {
+      description: 'A tool for dynamic and reflective problem-solving through sequential thoughts. Helps analyze problems, revise previous insights as understanding deepens, and explore branching alternatives before modifying code.',
+      schema: z.object({
+        thought: z.string().describe('Your current thinking step or analysis.'),
+        thoughtNumber: z.number().int().min(1).describe('The sequence number of this thought.'),
+        totalThoughts: z.number().int().min(1).describe('Estimated total thoughts required, can be dynamically adjusted.'),
+        nextThoughtNeeded: z.boolean().describe('True if more thinking steps are needed to conclude the analysis.'),
+        isRevision: z.boolean().optional().describe('Whether this thought revises a previous thought.'),
+        revisesThought: z.number().int().min(1).optional().describe('Which thought number is being revised.'),
+        branchFromThought: z.number().int().min(1).optional().describe('Thought number from which to branch.'),
+        branchId: z.string().optional().describe('Identifier for this reasoning branch.'),
+      }),
+      readOnly: true,
+      execute: async input => {
+        this.thoughtHistory.push(input);
+        const branches = [...new Set(this.thoughtHistory.map(t => t.branchId).filter((b): b is string => Boolean(b)))];
+        return limitText(JSON.stringify({
+          thoughtNumber: input.thoughtNumber,
+          totalThoughts: input.totalThoughts,
+          nextThoughtNeeded: input.nextThoughtNeeded,
+          isRevision: input.isRevision ?? false,
+          revisesThought: input.revisesThought,
+          branchFromThought: input.branchFromThought,
+          branchId: input.branchId,
+          branches,
+          historyLength: this.thoughtHistory.length,
+        }, null, 2));
+      },
     });
     this.register('update_plan', {
       description: 'Updates the task plan (Codex-compatible). Provide an optional explanation and a list of plan items, each with a step and status (pending, in_progress, completed). At most one step should be in_progress at a time.',
