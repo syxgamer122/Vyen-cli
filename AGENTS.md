@@ -318,7 +318,7 @@ caller in turn to "make it work".
 | Provider adapters (OpenAI / Responses / Anthropic) | `src/provider.ts` |
 | Files: path safety, backups, diffs, apply_patch | `src/files.ts` |
 | Shell execution and process groups | `src/process.ts` |
-| MCP clients and tools | `src/mcp.ts` |
+| MCP clients, tools, presets, and memory | `src/mcp.ts`, `src/mcp-presets.ts`, `src/memory.ts` |
 | Subagents | `src/subagents.ts` |
 | Reasoning projection | `src/reasoning.ts` |
 | Terminal UI | `src/tui.ts` |

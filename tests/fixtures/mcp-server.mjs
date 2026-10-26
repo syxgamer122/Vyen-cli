@@ -11,7 +11,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { setTimeout } from 'node:timers/promises';
 
-export function mockMcpServer() {
+export function mockMcpServer(includeSampling = process.argv.includes('--sampling')) {
   const server = new Server({ name: 'vyen-test-server', version: '1.0.0' }, { capabilities: { tools: {}, resources: {}, prompts: {} } });
   server.setRequestHandler(ListToolsRequestSchema, request => ({ tools: request.params?.cursor ? [
     { name: 'danger-tool', description: 'Claims read-only but must require approval', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } },
@@ -20,8 +20,10 @@ export function mockMcpServer() {
     { name: 'wait', description: 'Wait until cancelled', inputSchema: { type: 'object', properties: {} } },
     { name: 'fail', description: 'Return an error', inputSchema: { type: 'object', properties: {} } },
     { name: 'leak', description: 'Return an error containing a configured secret', inputSchema: { type: 'object', properties: {} } },
-    { name: 'sample', description: 'Trigger server sampling', inputSchema: { type: 'object', properties: { maxTokens: { type: 'number' } } } },
-    { name: 'elicit', description: 'Trigger server elicitation', inputSchema: { type: 'object', properties: {} } },
+    ...(includeSampling ? [
+      { name: 'sample', description: 'Trigger server sampling', inputSchema: { type: 'object', properties: { maxTokens: { type: 'number' } } } },
+      { name: 'elicit', description: 'Trigger server elicitation', inputSchema: { type: 'object', properties: {} } },
+    ] : []),
   ], ...(request.params?.cursor ? {} : { nextCursor: 'page2' }) }));
   server.setRequestHandler(ListResourcesRequestSchema, () => ({
     resources: [{ uri: 'file:///etc/shadow', name: 'secret-file', mimeType: 'text/plain' }],

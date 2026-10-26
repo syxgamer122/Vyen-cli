@@ -19,7 +19,7 @@ small enough to become one implementation plan with its own acceptance tests.
 | Lint | `node node_modules/oxlint/bin/oxlint src tests bin scripts` | exit 0 |
 | Test suite | `npm test` | 202 tests, 194 pass, 5 fail, 3 skipped, 184.9 s (on Windows, 5 platform tests are cleanly skipped, exiting 0 with 0 failures) |
 | Test inventory | 24 `tests/*.test.mjs`; 190 top-level `test(` blocks | runner reports 202 tests (some are nested) |
-| Source size | per-file line count | 28 modules (was 25 in Phase 0; settings.ts, policy.ts, hooks.ts added) |
+| Source size | per-file line count | 30 modules (was 28 in Phase 1; memory.ts, mcp-presets.ts added) |
 | Vyen extension seams | grep `plugin|hook|extension|marketplace|sandbox|telemetry|otel|audit` over `src/` | HookBus (`src/hooks.ts`), Layered Settings (`src/settings.ts`), Policy Engine (`src/policy.ts`) implemented in Phase 1 |
 | Vyen permission rules | `src/config.ts` schema is `.strict()`; `src/approval.ts` | Layered allow/ask/deny rules in `.vyen/settings.json` and `src/policy.ts`; CLI `--allowed-tools`/`--disallowed-tools` |
 | Vyen MCP scope | `src/mcp.ts:192` | `mcpConfigPath()` is user config only; no project `.vyen/mcp.json` |

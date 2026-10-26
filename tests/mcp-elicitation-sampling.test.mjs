@@ -13,7 +13,7 @@ const stdio = extra => mcpConfigSchema.parse({
     local: {
       transport: 'stdio',
       command: process.execPath,
-      args: [fileURLToPath(new URL('./fixtures/mcp-server.mjs', import.meta.url)), '--stdio'],
+      args: [fileURLToPath(new URL('./fixtures/mcp-server.mjs', import.meta.url)), '--stdio', '--sampling'],
       readOnlyTools: ['sample', 'elicit'],
       ...extra,
     },
