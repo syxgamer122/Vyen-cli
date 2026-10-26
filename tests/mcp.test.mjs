@@ -1,11 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdir, writeFile, readdir, readFile } from 'node:fs/promises';
+import { mkdir, writeFile, readdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { McpManager, mcpConfigSchema, mcpToolName } from '../dist/mcp.js';
+import {
+  McpManager,
+  formatMcpList,
+  loadMergedMcpConfig,
+  loadProjectMcpConfig,
+  mcpConfigSchema,
+  mcpConfigPath,
+  mcpToolName,
+  projectMcpCommandCandidates,
+  projectMcpConfigPath,
+  saveProjectMcpConfig,
+} from '../dist/mcp.js';
 import { ToolRegistry } from '../dist/tools.js';
 import { mockMcpServer } from './fixtures/mcp-server.mjs';
 import { fixture, cli, provider, sse } from './helpers.mjs';
@@ -287,3 +298,142 @@ test('an MCP server error never leaks a resolved credential', async t => {
   }
   await manager.close();
 });
+
+const projectServer = extra => ({
+  transport: 'stdio',
+  command: process.execPath,
+  args: [fileURLToPath(new URL('./fixtures/mcp-server.mjs', import.meta.url)), '--stdio'],
+  ...extra,
+});
+
+test('loadProjectMcpConfig strips BOM, rejects corrupt JSON and project trust', async t => {
+  const f = await fixture(t);
+  const projectPath = projectMcpConfigPath(f.cwd);
+  assert.equal(projectPath, join(f.cwd, '.vyen', 'mcp.json'));
+  await mkdir(join(f.cwd, '.vyen'), { recursive: true });
+
+  assert.deepEqual(await loadProjectMcpConfig(f.cwd), { servers: {} });
+
+  await saveProjectMcpConfig(f.cwd, mcpConfigSchema.parse({ servers: { proj: projectServer() } }));
+  assert.equal(JSON.parse(await readFile(projectPath, 'utf8')).servers.proj.command, process.execPath);
+
+  await writeFile(projectPath, '\uFEFF' + JSON.stringify({ servers: { proj: projectServer() } }));
+  assert.equal((await loadProjectMcpConfig(f.cwd)).servers.proj.transport, 'stdio');
+
+  await writeFile(projectPath, '{broken');
+  await assert.rejects(loadProjectMcpConfig(f.cwd), /Failed to parse project MCP config/);
+
+  await writeFile(projectPath, JSON.stringify({ servers: { proj: { command: 'node', args: [], source: 'user' } } }));
+  await assert.rejects(loadProjectMcpConfig(f.cwd), /Invalid project MCP config/);
+
+  await writeFile(projectPath, JSON.stringify({ servers: { proj: { command: 'node', args: [], trust: true } } }));
+  await assert.rejects(loadProjectMcpConfig(f.cwd), /may not set trust/);
+  await assert.rejects(
+    saveProjectMcpConfig(f.cwd, mcpConfigSchema.parse({ servers: { proj: { command: 'node', args: [], trust: true } } })),
+    /may not set trust/,
+  );
+
+  await rm(projectPath);
+  assert.deepEqual(await loadProjectMcpConfig(f.cwd), { servers: {} });
+});
+
+test('loadMergedMcpConfig keeps the user server when a project entry has the same name', async t => {
+  const f = await fixture(t);
+  const userConfig = mcpConfigSchema.parse({ servers: {
+    shared: { command: process.execPath, args: ['user.mjs'], readOnlyTools: ['echo'], trust: true },
+  } });
+  const projectConfig = mcpConfigSchema.parse({ servers: {
+    shared: { command: process.execPath, args: ['project.mjs'] },
+    projectOnly: { command: process.execPath, args: ['project.mjs'], trust: true, readOnlyTools: ['echo'] },
+  } });
+
+  const merged = await loadMergedMcpConfig(f.cwd, { isTrusted: true, userConfig, projectConfig });
+
+  assert.equal(merged.servers.shared.command, process.execPath);
+  assert.deepEqual(merged.servers.shared.args, ['user.mjs']);
+  assert.equal(merged.servers.shared.trust, true);
+  assert.deepEqual(merged.servers.shared.readOnlyTools, ['echo']);
+  assert.equal(merged.sources.shared, 'user');
+  assert.deepEqual(merged.ignoredProject, ['shared']);
+  assert.equal(merged.servers.projectOnly.disabled, false);
+  assert.equal(merged.servers.projectOnly.trust, false);
+  assert.deepEqual(merged.servers.projectOnly.readOnlyTools, []);
+  assert.equal(merged.sources.projectOnly, 'project');
+  assert.equal(merged.projectPresent, true);
+  assert.equal(merged.userPath, mcpConfigPath());
+  assert.equal(merged.projectPath, projectMcpConfigPath(f.cwd));
+  assert.deepEqual(projectMcpCommandCandidates(projectConfig.servers), [
+    process.execPath, 'project.mjs',
+    process.execPath, 'project.mjs',
+  ]);
+});
+
+test('project MCP servers cannot grant trust or read-only approvals', async t => {
+  const f = await fixture(t);
+  const projectConfig = mcpConfigSchema.parse({ servers: {
+    projectOnly: projectServer({ trust: true, readOnlyTools: ['echo'] }),
+  } });
+  const merged = await loadMergedMcpConfig(f.cwd, {
+    isTrusted: true,
+    userConfig: mcpConfigSchema.parse({ servers: {} }),
+    projectConfig,
+  });
+  assert.equal(merged.servers.projectOnly.trust, false);
+  assert.deepEqual(merged.servers.projectOnly.readOnlyTools, []);
+
+  let approvals = 0;
+  const registry = new ToolRegistry(f.cwd, async () => { approvals++; return false; });
+  const manager = new McpManager(merged, f.cwd);
+  t.after(() => manager.close());
+  await manager.connect(registry);
+  const result = await registry.execute(call(mcpToolName('projectOnly', 'echo'), { text: 'x' }), signal());
+  assert.equal(result.denied, true);
+  assert.equal(approvals, 1, 'project config cannot exempt its tools from approval');
+  await manager.close();
+});
+
+test('untrusted project MCP servers are listed as disabled with project source', async t => {
+  const f = await fixture(t);
+  const userConfig = mcpConfigSchema.parse({ servers: {
+    shared: { command: process.execPath, args: ['user.mjs'] },
+  } });
+  const projectConfig = mcpConfigSchema.parse({ servers: {
+    shared: { command: process.execPath, args: ['project.mjs'] },
+    projectOnly: projectServer({ readOnlyTools: ['echo'] }),
+    optedOut: projectServer({ disabled: true }),
+  } });
+
+  const merged = await loadMergedMcpConfig(f.cwd, { isTrusted: false, userConfig, projectConfig });
+
+  assert.equal(merged.servers.shared.disabled, false);
+  assert.equal(merged.servers.shared.trust, false);
+  assert.equal(merged.servers.projectOnly.disabled, true);
+  assert.equal(merged.servers.projectOnly.trust, false);
+  assert.deepEqual(merged.servers.projectOnly.readOnlyTools, []);
+  assert.equal(merged.sources.projectOnly, 'project');
+  assert.deepEqual(merged.untrusted, ['projectOnly']);
+  assert.deepEqual(merged.ignoredProject, ['shared']);
+  assert.equal(merged.servers.optedOut.disabled, true);
+  assert.ok(!merged.untrusted.includes('optedOut'), 'an already-disabled server is not reported as trust-blocked');
+});
+
+test('formatMcpList marks user and project servers and untrusted state', async t => {
+  const f = await fixture(t);
+  const userConfig = mcpConfigSchema.parse({ servers: {
+    shared: { command: process.execPath, args: ['user.mjs'] },
+  } });
+  const projectConfig = mcpConfigSchema.parse({ servers: {
+    shared: { command: process.execPath, args: ['project.mjs'] },
+    projectOnly: projectServer(),
+    optedOut: projectServer({ disabled: true }),
+  } });
+  const merged = await loadMergedMcpConfig(f.cwd, { isTrusted: false, userConfig, projectConfig });
+
+  const text = formatMcpList(merged, [{ name: 'shared', status: 'ok', toolCount: 3 }]);
+  assert.match(text, /MCP Servers \(3\)/);
+  assert.match(text, /shared\s+\[stdio\] \[user\] \(connected, 3 tools\)/);
+  assert.match(text, /projectOnly\s+\[stdio\] \[project\] \(disabled, untrusted\)/);
+  assert.match(text, /optedOut\s+\[stdio\] \[project\] \(disabled\)/);
+  assert.match(text, /Ignored project overrides.*shared/);
+});
+

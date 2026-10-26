@@ -205,6 +205,173 @@ export async function saveMcpConfig(config: McpConfig): Promise<void> {
   await atomicJson(mcpConfigPath(), mcpConfigSchema.parse(config));
 }
 
+/** The project-scoped MCP config lives beside `.vyen/settings.json`. */
+export function projectMcpConfigPath(cwd: string): string {
+  return join(resolve(cwd), '.vyen', 'mcp.json');
+}
+
+function assertNoProjectTrust(config: McpConfig, filePath: string): void {
+  for (const [name, server] of Object.entries(config.servers)) {
+    if (server.trust) {
+      throw new Error(`Invalid project MCP config at ${filePath}: server "${name}" may not set trust`);
+    }
+  }
+}
+
+/**
+ * Loads `<cwd>/.vyen/mcp.json` for project-scoped servers. A missing file is empty;
+ * malformed JSON and schema errors are reported instead of being swallowed, and a
+ * project entry may never grant itself approval through `trust`.
+ */
+export async function loadProjectMcpConfig(cwd: string): Promise<McpConfig> {
+  const filePath = projectMcpConfigPath(cwd);
+  let raw: string;
+  try {
+    raw = await readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { servers: {} };
+    throw error;
+  }
+
+  const cleaned = raw.replace(/^\uFEFF/, '');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (error) {
+    throw new Error(`Failed to parse project MCP config at ${filePath}: ${(error as Error).message}`);
+  }
+
+  const result = mcpConfigSchema.safeParse(parsed);
+  if (!result.success) {
+    const issues = result.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ');
+    throw new Error(`Invalid project MCP config at ${filePath}: ${issues}`);
+  }
+  assertNoProjectTrust(result.data, filePath);
+  return result.data;
+}
+
+/** Writes the project config atomically under a private `.vyen` directory. */
+export async function saveProjectMcpConfig(cwd: string, config: McpConfig): Promise<void> {
+  const filePath = projectMcpConfigPath(cwd);
+  const parsed = mcpConfigSchema.parse(config);
+  assertNoProjectTrust(parsed, filePath);
+  await mkdir(join(resolve(cwd), '.vyen'), { recursive: true, mode: 0o700 });
+  await atomicJson(filePath, parsed);
+}
+
+export interface MergedMcpConfig extends McpConfig {
+  sources: Record<string, 'user' | 'project'>;
+  userPath: string;
+  projectPath: string;
+  projectServers: Record<string, McpServerConfig>;
+  projectPresent: boolean;
+  untrusted: string[];
+  ignoredProject: string[];
+}
+
+export interface LoadMergedMcpOptions {
+  isTrusted?: boolean;
+  userConfig?: McpConfig;
+  projectConfig?: McpConfig;
+}
+
+/**
+ * Merges user and project servers. The user definition wins on a name collision; a
+ * project-only server is disabled until the workspace is trusted and never carries
+ * `trust` or `readOnlyTools` into execution, so project config cannot widen approvals.
+ */
+export async function loadMergedMcpConfig(
+  cwd: string,
+  options: LoadMergedMcpOptions = {},
+): Promise<MergedMcpConfig> {
+  const userConfig = options.userConfig ?? await loadMcpConfig();
+  const projectConfig = options.projectConfig ?? await loadProjectMcpConfig(cwd);
+  const userPath = mcpConfigPath();
+  const projectPath = projectMcpConfigPath(cwd);
+  const isTrusted = options.isTrusted ?? false;
+  const servers: Record<string, McpServerConfig> = {};
+  const sources: Record<string, 'user' | 'project'> = {};
+  const untrusted: string[] = [];
+  const ignoredProject: string[] = [];
+
+  for (const [name, server] of Object.entries(userConfig.servers)) {
+    servers[name] = { ...server };
+    sources[name] = 'user';
+  }
+
+  for (const [name, server] of Object.entries(projectConfig.servers)) {
+    if (userConfig.servers[name]) {
+      ignoredProject.push(name);
+      continue;
+    }
+    const blockedByTrust = !isTrusted && !server.disabled;
+    servers[name] = {
+      ...server,
+      disabled: !isTrusted || server.disabled,
+      trust: false,
+      readOnlyTools: [],
+    };
+    sources[name] = 'project';
+    if (blockedByTrust) untrusted.push(name);
+  }
+
+  const projectPresent = options.projectConfig !== undefined
+    ? Object.keys(projectConfig.servers).length > 0
+    : existsSync(projectPath);
+
+  return {
+    servers,
+    sources,
+    userPath,
+    projectPath,
+    projectServers: { ...projectConfig.servers },
+    projectPresent,
+    untrusted,
+    ignoredProject,
+  };
+}
+
+/** Command words and arguments of every stdio project server, for trust hashing. */
+export function projectMcpCommandCandidates(servers: Record<string, McpServerConfig>): string[] {
+  const candidates: string[] = [];
+  for (const server of Object.values(servers)) {
+    if (server.transport !== 'stdio') continue;
+    candidates.push(server.command, ...server.args);
+  }
+  return candidates;
+}
+
+/** Human-readable `mcp list` / `/mcp list` output with origin and trust badges. */
+export function formatMcpList(config: MergedMcpConfig, statuses: McpServerStatus[]): string {
+  const statusMap = new Map(statuses.map(status => [status.name, status]));
+  const entries = Object.entries(config.servers);
+  const lines = entries.map(([name, server]) => {
+    const source = config.sources[name] ?? 'user';
+    const status = statusMap.get(name);
+    const untrusted = config.untrusted.includes(name);
+    const badge = server.disabled
+      ? untrusted ? 'disabled, untrusted' : 'disabled'
+      : status?.status === 'ok'
+        ? `connected, ${status.toolCount} tools`
+        : status?.status === 'error'
+          ? `error: ${status.error ?? 'unknown error'}`
+          : 'configured';
+    const target = server.transport === 'stdio'
+      ? `${server.command}${server.args.length ? ' ' + server.args.join(' ') : ''}`
+      : server.url;
+    return `  ${name}  [${server.transport}] [${source}] (${badge})  ${target}`;
+  });
+  const active = statuses.filter(status => status.status === 'ok').reduce((sum, status) => sum + status.toolCount, 0);
+  const parts = [`MCP Servers (${entries.length}):`, ...lines, `Active MCP tools: ${active}`];
+  if (config.ignoredProject.length) {
+    parts.push(`Ignored project overrides (user definition wins): ${config.ignoredProject.join(', ')}`);
+  }
+  if (config.untrusted.length) {
+    parts.push(`Untrusted project servers are disabled: ${config.untrusted.join(', ')}. Run with --trust-workspace to enable.`);
+  }
+  return `${parts.join('\n')}\n`;
+}
+
 export function mcpToolName(server: string, tool: string): string {
   const suffix = createHash('sha256').update(`${server}\0${tool}`).digest('hex').slice(0, 10);
   const cleanServer = server.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^[^a-z]+/, 's_').slice(0, 16);
