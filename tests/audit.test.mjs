@@ -544,6 +544,56 @@ test('TUI picker: tabs switch with ←/→ and Tab, ↑/↓ select, typing filte
   assert.equal(ui.isPicking(), false);
 });
 
+test('TUI picker: onDelete handler enables item deletion via Delete key and Ctrl+D with real-time list update', async t => {
+  const { stripVTControlCharacters } = await import('node:util');
+  const input = new PassThrough(), output = new PassThrough();
+  input.isRaw = false; input.setRawMode = value => { input.isRaw = value; };
+  output.columns = 90; output.rows = 24; output.on('data', () => {});
+  const ui = new TerminalUI('m', () => {}, input, output);
+  t.after(() => ui.close());
+  const key = (text, name, extra = {}) => input.emit('keypress', text, { name, ...extra });
+  const deletedIds = [];
+  const tabs = [
+    { label: 'This folder', items: [{ id: 's1', label: 'session one', meta: '1h' }, { id: 's2', label: 'session two', meta: '2h' }] },
+    { label: 'All projects', items: [{ id: 's1', label: 'session one', meta: '1h' }, { id: 's3', label: 'session three', meta: '3h' }] },
+  ];
+  const picking = ui.pick('Sessions', tabs, {
+    action: 'switch',
+    onDelete: (item) => {
+      deletedIds.push(item.id);
+      return true;
+    },
+  });
+  await delay(20);
+  let frame = stripVTControlCharacters(ui.renderedFrame());
+  assert.match(frame, /enter switch {3}del delete {3}esc cancel/, 'footer hints include del delete when onDelete is passed');
+  assert.match(frame, /› session one/);
+
+  // Press delete on first item (s1)
+  key('', 'delete');
+  await delay(20);
+  assert.deepEqual(deletedIds, ['s1'], 'onDelete callback was invoked with s1');
+
+  frame = stripVTControlCharacters(ui.renderedFrame());
+  assert(!frame.includes('session one'), 'deleted item is removed from view');
+  assert.match(frame, /› session two/, 'selection advances to remaining item');
+
+  // Switch to tab 2 (All projects), verify s1 was removed there as well and s3 remains
+  key('', 'right');
+  await delay(20);
+  frame = stripVTControlCharacters(ui.renderedFrame());
+  assert(!frame.includes('session one'), 'item is removed across tabs');
+  assert.match(frame, /› session three/);
+
+  // Press Ctrl+D on s3
+  key('', 'd', { ctrl: true });
+  await delay(20);
+  assert.deepEqual(deletedIds, ['s1', 's3'], 'Ctrl+D also triggers onDelete');
+
+  key('', 'escape');
+  assert.equal(await picking, undefined);
+});
+
 test('resuming a session by ID or with `vyen resume` from another folder switches to its workspace', async t => {
   const { spawn } = await import('node:child_process');
   const { realpath } = await import('node:fs/promises');

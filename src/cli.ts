@@ -1753,7 +1753,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             '  /mcp [list|check|prompts|presets|import-codex|reload] Inspect, check, list prompts/presets, reload, or import Codex MCP servers\n' +
             '  /subagents [list|show <id>|<task>] List spawned subagents, view transcript, or run a subagent\n' +
             '  /tools                            List active tools in current mode\n' +
-            '  /sessions                         List saved workspace sessions\n' +
+            '  /sessions [list|<id>]             Interactive session manager (switch, filter, del delete)\n' +
             '  /doctor                           Check environment health\n' +
             '  /clear                            Clear screen (or press Ctrl+L)\n' +
             '  /exit                             Exit vyen (or press Ctrl+D on empty input)\n' +
@@ -2350,7 +2350,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           display(names.map(n => `  ${tools.isReadOnly(n) ? '● [read]' : '◆ [exec]'} ${n}`).join('\n') + '\n');
           return true;
         }
-        if (cmdInput === '/sessions') {
+        if (cmdInput === '/sessions list' || cmdInput.startsWith('/sessions list ')) {
           const list = await SessionStore.list(join(runtime.dataDir, 'sessions'));
           display((list.length ? list.map(s => {
             const cur = s.id === store.session.id ? ' [current]' : '';
@@ -2358,6 +2358,33 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             return `  ${s.id.slice(0, 8)}${cur}  (${s.messagesCount ?? 0} msgs)  ${s.updatedAt}  ${s.model}${label}  ${s.cwd}`;
           }).join('\n') : '  No saved sessions.') + '\n');
           return true;
+        }
+        if (cmdInput.startsWith('/sessions delete ') || cmdInput.startsWith('/sessions rm ')) {
+          const target = cmdInput.replace(/^\/sessions\s+(?:delete|rm)\s+/, '').trim();
+          if (!target) {
+            display('Usage: /sessions delete <id>\n');
+            return true;
+          }
+          try {
+            const sessionsRoot = join(runtime.dataDir, 'sessions');
+            const deletedId = await SessionStore.deleteSession(sessionsRoot, target);
+            display(`Deleted saved session: ${deletedId}\n`);
+          } catch (err) {
+            display(`Failed to delete session: ${safeError(err, apiKey)}\n`);
+          }
+          return true;
+        }
+        if (cmdInput === '/sessions') {
+          if (!tui) {
+            const list = await SessionStore.list(join(runtime.dataDir, 'sessions'));
+            display((list.length ? list.map(s => {
+              const cur = s.id === store.session.id ? ' [current]' : '';
+              const label = s.title ? ` [${s.title}]` : s.preview ? ` "${s.preview}"` : '';
+              return `  ${s.id.slice(0, 8)}${cur}  (${s.messagesCount ?? 0} msgs)  ${s.updatedAt}  ${s.model}${label}  ${s.cwd}`;
+            }).join('\n') : '  No saved sessions.') + '\n');
+            return true;
+          }
+          return false;
         }
         if (cmdInput === '/doctor') {
           const { runCommand } = await import('./process.js');
@@ -3017,13 +3044,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             display(`Started new session: ${store.session.id}${store.session.title ? ` (${store.session.title})` : ''}\n`);
             continue;
           }
-          if (input === '/resume' || input.startsWith('/resume ')) {
+          if (input === '/resume' || input.startsWith('/resume ') || input === '/sessions' || input.startsWith('/sessions ')) {
+            const isSessions = input === '/sessions' || input.startsWith('/sessions ');
             const sessionsRoot = join(runtime.dataDir, 'sessions');
             const allList = await SessionStore.list(sessionsRoot);
             const resumable = (s: (typeof allList)[number]) => (s.messagesCount ?? 0) > 0 || Boolean(s.title);
             const projectSessions = allList.filter(resumable);
             const folderSessions = projectSessions.filter(s => sameWorkspace(s.cwd, runtime.cwd));
-            let arg = input.slice(7).trim();
+            let arg = isSessions ? input.slice(9).trim() : input.slice(7).trim();
             let targetId: string | undefined;
             if (!arg) {
               if (!projectSessions.length) {
@@ -3031,6 +3059,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                 continue;
               }
               if (tui) {
+                const activeTui = tui;
                 // Two tabs so a developer who does not remember the folder can still find a session.
                 const toItem = (s: (typeof allList)[number], showFolder: boolean) => ({
                   id: s.id,
@@ -3039,12 +3068,31 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                   detail: `${s.cwd}   ${s.id.slice(0, 8)}   ${s.model}`,
                   search: `${s.cwd} ${s.model} ${s.title ?? ''}`,
                 });
-                const picked = await tui.pick('Resume', [
+                const pickerTitle = isSessions ? 'Sessions' : 'Resume';
+                const pickerAction = isSessions ? 'switch' : 'resume';
+                const picked = await activeTui.pick(pickerTitle, [
                   { label: 'This folder', items: folderSessions.map(s => toItem(s, false)), empty: 'No sessions in this folder yet. Press → for all projects.' },
                   { label: 'All projects', items: projectSessions.map(s => toItem(s, true)) },
-                ], { initialTab: folderSessions.length ? 0 : 1, action: 'resume' });
+                ], {
+                  initialTab: folderSessions.length ? 0 : 1,
+                  action: pickerAction,
+                  onDelete: async (item) => {
+                    if (item.id === store.session.id) {
+                      activeTui.setNotice('Cannot delete active session from picker. Switch first or use /delete current.');
+                      return false;
+                    }
+                    try {
+                      await SessionStore.deleteSession(sessionsRoot, item.id);
+                      activeTui.setNotice(`Deleted session ${item.id.slice(0, 8)}.`);
+                      return true;
+                    } catch (err) {
+                      activeTui.setNotice(`Failed to delete session: ${safeError(err, apiKey)}`);
+                      return false;
+                    }
+                  },
+                });
                 if (!picked) {
-                  tui.setNotice('Resume cancelled.');
+                  activeTui.setNotice(`${pickerTitle} cancelled.`);
                   continue;
                 }
                 targetId = picked.item.id;
@@ -3056,14 +3104,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                   const rows = pool.slice(0, 20).map((s, idx) =>
                     `  ${String(idx + 1).padStart(2)}  ${(s.title ?? s.preview ?? '(no prompt yet)').replace(/\s+/g, ' ').slice(0, 60)}   ${showAll ? `${folderLabel(s.cwd)}   ` : ''}${formatRelativeTime(s.updatedAt)}`);
                   display(`\n${showAll ? 'All projects' : 'This folder'} (${pool.length})\n${rows.join('\n') || '  (none)'}\n`);
-                  const choice = (await question(`Resume [number, ID prefix, a = ${showAll ? 'this folder' : 'all projects'}, Enter = cancel]: `)).trim();
+                  const choice = (await question(`${isSessions ? 'Switch' : 'Resume'} [number, ID prefix, a = ${showAll ? 'this folder' : 'all projects'}, Enter = cancel]: `)).trim();
                   if (choice.toLowerCase() === 'a') { showAll = !showAll; continue; }
                   const n = Number(choice);
                   targetId = Number.isInteger(n) && n >= 1 && n <= pool.length ? pool[n - 1].id : choice || undefined;
                   break;
                 }
                 if (!targetId) {
-                  display('Resume cancelled.\n');
+                  display(`${isSessions ? 'Session switch' : 'Resume'} cancelled.\n`);
                   continue;
                 }
               }

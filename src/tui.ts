@@ -193,7 +193,7 @@ const SLASH_DESCRIPTIONS: Record<string, string> = {
   '/export': 'export the session to a Markdown file',
   '/init': 'create or update AGENTS.md for this project',
   '/tools': 'list available tools (built-in + MCP)',
-  '/sessions': 'list saved sessions',
+  '/sessions': 'interactive session manager: switch, search, and delete saved sessions',
   '/clear': 'clear the screen (history is kept)',
   '/exit': 'quit vyen cli',
 };
@@ -490,6 +490,11 @@ export interface PickerTab {
   /** Shown when the tab (or the filter result) is empty. */
   empty?: string;
 }
+export interface PickerOptions {
+  initialTab?: number;
+  action?: string;
+  onDelete?: (item: PickerItem, tab: number) => Promise<boolean> | boolean;
+}
 interface PickerState {
   title: string;
   tabs: PickerTab[];
@@ -497,6 +502,7 @@ interface PickerState {
   index: number;
   filter: string;
   action: string;
+  onDelete?: (item: PickerItem, tab: number) => Promise<boolean> | boolean;
   resolve: (value: { tab: number; item: PickerItem } | undefined) => void;
 }
 
@@ -806,7 +812,7 @@ export class TerminalUI {
    * Shows a tabbed list above the prompt and resolves with the chosen row, or undefined on Esc.
    * ←/→ or Tab switch tabs, ↑/↓ (PgUp/PgDn, Home/End) move, typing filters every tab, Enter picks.
    */
-  pick(title: string, tabs: PickerTab[], options: { initialTab?: number; action?: string } = {}): Promise<{ tab: number; item: PickerItem } | undefined> {
+  pick(title: string, tabs: PickerTab[], options: PickerOptions = {}): Promise<{ tab: number; item: PickerItem } | undefined> {
     if (this.closed) return Promise.resolve(undefined);
     this.picker?.resolve(undefined);
     return new Promise(resolve => {
@@ -817,6 +823,7 @@ export class TerminalUI {
         index: 0,
         filter: '',
         action: options.action ?? 'select',
+        onDelete: options.onDelete,
         resolve: value => {
           this.picker = undefined;
           this.needsFullClear = true;
@@ -863,6 +870,23 @@ export class TerminalUI {
     else if (key.name === 'pagedown') state.index = Math.min(Math.max(0, matches.length - 1), state.index + page);
     else if (key.name === 'home') state.index = 0;
     else if (key.name === 'end') state.index = Math.max(0, matches.length - 1);
+    else if (key.name === 'delete' || (key.ctrl && key.name === 'd')) {
+      if (state.onDelete) {
+        const item = matches[state.index];
+        if (item) {
+          Promise.resolve(state.onDelete(item, state.tab)).then(deleted => {
+            if (deleted) {
+              for (const t of state.tabs) {
+                t.items = t.items.filter(it => it.id !== item.id);
+              }
+              const newMatches = this.pickerMatches(state);
+              state.index = Math.max(0, Math.min(state.index, newMatches.length - 1));
+              this.schedule(0);
+            }
+          });
+        }
+      }
+    }
     else if (key.name === 'backspace') { state.filter = state.filter.slice(0, -1); state.index = 0; }
     else if (key.ctrl && key.name === 'u') { state.filter = ''; state.index = 0; }
     else if (text && !key.ctrl && !key.meta && !/[\r\n]/.test(text)) {
@@ -2799,7 +2823,8 @@ export class TerminalUI {
       while (body.length < height) body.push('');
       const filter = sliceVisible(state.filter, Math.max(1, safeCols - 3));
       const promptLine = `${T.brandBold}› ${T.reset}${filter || `${T.faint}type to filter${T.reset}`}`;
-      const hints = `←→ tabs   ↑↓ select   enter ${state.action}   esc cancel`;
+      const delHint = state.onDelete ? '   del delete' : '';
+      const hints = `←→ tabs   ↑↓ select   enter ${state.action}${delHint}   esc cancel`;
       const footer = rich ? `${T.faint}${clip(hints)}${T.reset}` : clip(hints);
       const screenLines = [...body, ...pickerLines, `${T.faint}${'─'.repeat(safeCols)}${T.reset}`, promptLine, footer];
       const cursorSeq = `\x1b[${screenLines.length - 1};${Math.min(safeCols, 3 + visibleLength(filter))}H\x1b[?25h`;

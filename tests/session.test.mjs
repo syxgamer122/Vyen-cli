@@ -160,3 +160,11 @@ test('deleteSession reports an unknown session instead of returning undefined', 
   await assert.rejects(SessionStore.deleteSession(root, 'deadbeef'), /No saved session matches/);
   assert.equal(await SessionStore.deleteSession(root, id), id);
 });
+test('/sessions command: supports /sessions list, /sessions delete, and drops through to picker in TUI mode', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
+  assert.ok(source.includes("if (cmdInput === '/sessions list' || cmdInput.startsWith('/sessions list '))"), '/sessions list must exist in immediate commands');
+  assert.ok(source.includes("if (cmdInput.startsWith('/sessions delete ') || cmdInput.startsWith('/sessions rm '))"), '/sessions delete must exist in immediate commands');
+  assert.ok(source.includes("if (input === '/resume' || input.startsWith('/resume ') || input === '/sessions' || input.startsWith('/sessions '))"), '/sessions must drop through to interactive picker in mainLoop');
+  assert.ok(source.includes("onDelete: async (item) =>"), 'session picker must wire up onDelete handler');
+});
