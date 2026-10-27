@@ -344,21 +344,26 @@ const CODE_TYPES = new Set([
   'dict', 'tuple', 'Optional', 'Union', 'Any',
 ]);
 
+const HASH_LANGS = new Set(['py', 'python', 'sh', 'bash', 'zsh', 'shell', 'yaml', 'yml', 'rb', 'ruby', 'dockerfile']);
+const PY_LANGS = new Set(['py', 'python']);
+const SH_LANGS = new Set(['sh', 'bash', 'zsh', 'shell']);
+const JSON_LANGS = new Set(['json', 'jsonc']);
+
 /** Syntax-highlights a single line of fenced code block with ANSI escapes according to language. */
 export function highlightCode(line: string, lang?: string): string {
   if (!line) return line;
   const l = (lang || '').toLowerCase().trim();
-  const isHash = ['py', 'python', 'sh', 'bash', 'zsh', 'shell', 'yaml', 'yml', 'rb', 'ruby', 'dockerfile'].includes(l);
-  const isPy = ['py', 'python'].includes(l);
-  const isSh = ['sh', 'bash', 'zsh', 'shell'].includes(l);
-  const isJson = ['json', 'jsonc'].includes(l);
+  const isHash = HASH_LANGS.has(l);
+  const isPy = PY_LANGS.has(l);
+  const isSh = SH_LANGS.has(l);
+  const isJson = JSON_LANGS.has(l);
 
   const keywords = isPy ? PY_KEYWORDS : isSh ? SH_KEYWORDS : JS_KEYWORDS;
 
   const tokenRegex = isHash
     ? /(#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?\b)|(\b[a-zA-Z_$][a-zA-Z0-9_$]*\b)/g
     : !l
-      ? /(?:\/\/.*$|\/\*.*?\*\/|^\s*#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?\b)|(\b[a-zA-Z_$][a-zA-Z0-9_$]*\b)/g
+      ? /((?:\/\/.*$|\/\*.*?\*\/|^\s*#.*$))|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?\b)|(\b[a-zA-Z_$][a-zA-Z0-9_$]*\b)/g
       : /(\/\/.*$|\/\*.*?\*\/)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?\b)|(\b[a-zA-Z_$][a-zA-Z0-9_$]*\b)/g;
 
   let lastIndex = 0;
@@ -2561,7 +2566,8 @@ export class TerminalUI {
           st.inDiff = false;
           st.answerFirst = false;
           const rawLang = trimmed.slice(3).trim();
-          st.codeLang = rawLang.toLowerCase() || undefined;
+          const langToken = rawLang.split(/[\s:{]/)[0].toLowerCase();
+          st.codeLang = langToken || undefined;
           rows.push({ kind: 'codeHead', pre: '', text: rawLang || 'code' });
         }
         continue;

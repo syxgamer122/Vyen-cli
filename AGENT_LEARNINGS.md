@@ -1,24 +1,24 @@
 # AGENT_LEARNINGS.md — Empirical Lessons & Anti-Patterns for AI Agents
 
 Loaded by `loadProjectInstructions` in `src/context.ts`. When a mistake is confirmed
-(red test, review verdict, user correction), append the evidence here — never a second
-copy of a rule that already lives in `AGENTS.md`. Two copies of one rule drift apart.
+(red test, review verdict, user correction), append evidence here — never a duplicate
+of a rule in `AGENTS.md`. Two copies of one rule drift apart.
 
 ## 1. System Seams: The Four Execution Runners Rule
 - **Canonical rule:** `AGENTS.md` §3.2 & §3.4.
-- **Anti-Pattern (CLI-Only):** wiring policy/hooks only in `src/cli.ts`/`src/subagents.ts`, leaving `src/network.ts` and `src/workflow.ts` unmediated — a silent bypass, not a partial win.
-- **"Attach" means live:** pass the policy evaluator, not a snapshot; test changes after construction.
+- **Anti-Pattern (CLI-Only):** wiring policy/hooks only in `src/cli.ts`/`src/subagents.ts`, leaving `src/network.ts` and `src/workflow.ts` unmediated — a silent bypass.
+- **"Attach" means live:** pass the live policy evaluator, not a snapshot; test updates after construction.
 
 ## 2. Shell Security: Segment-Aware Matching vs. Start-Anchored Regexes
 - **Canonical rule:** `AGENTS.md` §3.3.
-- **Detail:** split on `;`, `&&`, `||`, `|`, newline, `$()`, `<()`, `>()`, backticks; strip subshells `(...)`, `{...}`, quotes, wrappers (`sudo`, `env`, `sh -c`, `bash -c`, `eval`, `exec`, flags); deny if ANY segment matches.
-- **Seen (2026-10-25):** stripping only outer quotes left the command word unnormalized: `"rm" -rf /`, `r\m -rf /`, `r""m -rf /`, `rm${IFS}-rf /`, `/bin/rm -rf /`, `command rm -rf /` all bypassed `deny: ["bash(rm *)"]`.
-- **Rule:** tokenize with shell quoting rules; strip wrappers (`sudo`/`env`/`nohup`/`time`/`nice`/`timeout`/`xargs`), reserved words and redirections; match basename (`.exe` on Windows); fail closed on `$`, backticks, command substitution and brace expansion. Indirect execution (`python -c`, scripts) is not followed.
+- **Detail:** split on compound operators (`;`, `&&`, `||`, `|`, newline, `$()`, `<()`, `>()`, backticks); strip subshells `(...)`, `{...}`, quotes, wrappers (`sudo`, `env`, `sh -c`, `bash -c`, `eval`, `exec`); deny if ANY segment matches.
+- **Seen (2026-10-25):** stripping only outer quotes allowed `"rm" -rf /`, `r\m -rf /`, `/bin/rm -rf /`, `command rm -rf /` to bypass `deny: ["bash(rm *)"]`.
+- **Rule:** tokenize with shell quoting; strip wrappers and redirections; match basename (`.exe` on Windows); fail closed on `$`, backticks, command substitution.
 - **Guard:** `tests/policy.test.mjs` › "bash deny and ask rules cannot be bypassed by quoting or escaping the command word".
 
 ## 3. Trust Coverage: Executables in Auto-Allow Rules
 - **Canonical rule:** `AGENTS.md` §3.3.
-- **Anti-Pattern (Hooks-Only Hash):** hashing only `layered.hooks`, omitting `permissions.allow` script targets (`allow: ["bash(./deploy.sh)"]`). Non-existent scripts hash `file:<path>:missing`.
+- **Anti-Pattern:** hashing only `layered.hooks`, omitting `permissions.allow` script targets (`allow: ["bash(./deploy.sh)"]`). Missing scripts hash `file:<path>:missing`.
 
 ## 4. Fail-Closed vs. Fail-Open Architecture
 - **Canonical rule:** `AGENTS.md` §3.3.
@@ -27,7 +27,7 @@ copy of a rule that already lives in `AGENTS.md`. Two copies of one rule drift a
 
 ## 5. Lifecycle Synchronization: Process vs. Session Lifetime
 - **Canonical rule:** `AGENTS.md` §3.4.
-- **Anti-Pattern:** dispatching `SessionEnd` only on CLI exit, `SessionStart` only on `messages.length === 0`, or storing flags on the transient `Harness`.
+- **Anti-Pattern:** dispatching `SessionEnd` only on CLI exit, `SessionStart` only on `messages.length === 0`, or storing flags on transient `Harness`.
 - **Guard:** `tests/hooks.test.mjs` › "Harness emits SessionStart once on the first turn of a resumed session and SessionEnd at most once".
 
 ## 6. Testing Rigor: Negative Baselines & Adversarial Tests
@@ -44,11 +44,16 @@ copy of a rule that already lives in `AGENTS.md`. Two copies of one rule drift a
 - **Self-reporting guards:** spell self-referential guard patterns in pieces.
 
 ## 9. Readers Must Not Turn Corruption Into an Empty Document
-- **Seen (2026-10-25):** `loadCredentials` returned `{}` on a BOM/parse error; `saveCredential` then rewrote the file with only the new key, deleting every other provider key.
-- **Rule:** `{}` is only correct for `ENOENT`. Parse/schema errors throw and name the file; strip BOM before `JSON.parse`. A reader that feeds a writer must never convert corruption into an empty document.
+- **Seen (2026-10-25):** `loadCredentials` returned `{}` on a parse error; `saveCredential` rewrote the file with only the new key, deleting other keys.
+- **Rule:** `{}` is only for `ENOENT`. Parse/schema errors throw and name the file; strip BOM before `JSON.parse`.
 - **Guard:** `tests/config.test.mjs` › "saveCredential refuses to overwrite a corrupt credentials file".
 
 ## 10. Command Surfaces Must Reuse the Guarded Primitive
-- **Seen (2026-10-25):** `/export` called `writeFile` after `files.path`, overwriting an unread source file with no backup; `/delete <unknown>` printed `Deleted saved session: undefined`.
-- **Rule:** a slash command that writes or deletes goes through the tool's guard (`WorkspaceFiles.writeExport`, a throwing store method); catch the guard's error at the command boundary; never print success from a value that can be `undefined`.
+- **Seen (2026-10-25):** `/export` called `writeFile` after `files.path`, overwriting unread source files; `/delete <unknown>` printed `Deleted saved session: undefined`.
+- **Rule:** slash commands that write or delete go through guarded primitives (`WorkspaceFiles.writeExport`, throwing store methods); never print success from `undefined`.
 - **Guard:** `tests/files.test.mjs` › "session export refuses to overwrite a non-export file"; `tests/session.test.mjs` › "deleteSession reports an unknown session instead of returning undefined".
+
+## 11. Multi-Branch Regex Tokenizers Must Keep Parallel Capture Groups
+- **Seen (2026-10-28):** `highlightCode` used a non-capturing group `(?://...)` in the fallback regex, shifting destructuring offsets left by 1 and scrambling token styles.
+- **Rule:** regex alternation branches `(A)|(B)|(C)|(D)` must have identical capturing group counts and index order.
+- **Guard:** `tests/tui.test.mjs` › "syntax highlighting: Markdown fenced code blocks highlight keywords, strings, comments, numbers, and JSON keys in TUI".

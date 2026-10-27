@@ -1405,4 +1405,31 @@ test('syntax highlighting: Markdown fenced code blocks highlight keywords, strin
   assert.match(frame, /│/);
   assert.match(frame, new RegExp(THEME.brand.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + 'const'));
   assert.match(frame, new RegExp(THEME.warn.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '99'));
+
+  // 7. Untagged code block (empty lang) must not suffer from capture-group index shift
+  const noLangOut = highlightCode('const x = 42; "hello" // comment', '');
+  assert.match(noLangOut, new RegExp(THEME.brand.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + 'const'));
+  assert.match(noLangOut, new RegExp(THEME.warn.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '42'));
+  assert.match(noLangOut, new RegExp(THEME.ok.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '"hello"'));
+  assert.match(noLangOut, new RegExp(THEME.faint.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '\\/\\/ comment'));
+
+  // 8. Fenced code block with info-string attributes (e.g. ```python title="test.py")
+  const ttyInfo = terminal(t);
+  ttyInfo.output.columns = 80;
+  ttyInfo.output.rows = 24;
+  ttyInfo.ui.markTurnStart();
+  ttyInfo.ui.event({ type: 'text', text: '```python title="test.py"\ndef greet():\n    # say hello\n    pass\n```\n' });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const infoFrame = ttyInfo.ui.renderedFrame();
+  assert.match(infoFrame, new RegExp(THEME.brand.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + 'def'));
+  assert.match(infoFrame, new RegExp(THEME.faint.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '# say hello'));
+
+  // 9. Plain row rendering preserves raw code without ANSI escape sequences
+  tty.output.columns = 30;
+  tty.output.rows = 10;
+  tty.output.emit('resize');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const plainFrame = tty.ui.renderedFrame();
+  assert.match(plainFrame, /const total = 99;/);
+  assert(!plainFrame.includes(THEME.brand), 'Plain mode must not contain brand color ANSI escapes');
 });
