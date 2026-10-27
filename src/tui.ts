@@ -571,6 +571,9 @@ export class TerminalUI {
   private queuedPrompts: string[] = [];
   private popupIndex = 0;
   private popupFor = '';
+  private filePopupIndex = 0;
+  private filePopupFor = '';
+  private filePopupDismissedFor = '';
   private escCancels = false;
   private escHint = 'skip';
   private turnSnapshots: string[] = [];
@@ -772,7 +775,7 @@ export class TerminalUI {
   }
 
   setWorkspaceFiles(files: string[]) {
-    this.workspaceFiles = files;
+    this.workspaceFiles = files.map(f => f.replace(/\\/g, '/'));
   }
 
   /** Header identity: workspace folder name and current git branch (or short detached SHA). */
@@ -1625,6 +1628,69 @@ export class TerminalUI {
     return { matches, index };
   }
 
+  private filePopup(): { matches: string[]; index: number; query: string; atStart: number } {
+    if (this.label !== 'vyen> ' || this.workspaceFiles.length === 0) {
+      this.filePopupDismissedFor = '';
+      this.filePopupFor = '';
+      this.filePopupIndex = 0;
+      return { matches: [], index: 0, query: '', atStart: 0 };
+    }
+    const beforeCursor = this.input.slice(0, this.cursor).join('');
+    const atMatch = /(?:^|\s)@([A-Za-z0-9_./\\-]*)$/.exec(beforeCursor);
+    if (!atMatch) {
+      this.filePopupDismissedFor = '';
+      this.filePopupFor = '';
+      this.filePopupIndex = 0;
+      return { matches: [], index: 0, query: '', atStart: 0 };
+    }
+    const query = atMatch[1];
+    const atKey = '@' + query;
+    if (this.filePopupDismissedFor === atKey) {
+      return { matches: [], index: 0, query, atStart: 0 };
+    }
+    const atStart = beforeCursor.length - query.length - 1;
+    const matches = this.filterWorkspaceFiles(query.toLowerCase());
+    if (this.filePopupFor !== atKey) {
+      this.filePopupFor = atKey;
+      this.filePopupIndex = 0;
+    }
+    const index = matches.length ? Math.min(Math.max(0, this.filePopupIndex), matches.length - 1) : 0;
+    return { matches, index, query, atStart };
+  }
+
+  private filterWorkspaceFiles(q: string): string[] {
+    if (!q) {
+      return this.workspaceFiles.slice(0, 30);
+    }
+    type Scored = { file: string; score: number };
+    const scored: Scored[] = [];
+    for (const file of this.workspaceFiles) {
+      const lower = file.toLowerCase();
+      const slash = file.lastIndexOf('/');
+      const base = (slash >= 0 ? file.slice(slash + 1) : file).toLowerCase();
+      let score = 0;
+      if (base === q) score = 1000;
+      else if (lower === q) score = 950;
+      else if (base.startsWith(q)) score = 800 - base.length;
+      else if (lower.startsWith(q)) score = 600 - lower.length;
+      else if (base.includes(q)) score = 400 - base.length;
+      else if (lower.includes(q)) score = 200 - lower.length;
+      else if (this.isSubsequence(q, lower)) score = 100 - lower.length;
+      if (score > 0) scored.push({ file, score });
+    }
+    scored.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
+    return scored.slice(0, 30).map(s => s.file);
+  }
+
+  private isSubsequence(needle: string, haystack: string): boolean {
+    let n = 0, h = 0;
+    while (n < needle.length && h < haystack.length) {
+      if (needle[n] === haystack[h]) n++;
+      h++;
+    }
+    return n === needle.length;
+  }
+
   private scrollBy(deltaLines: number) {
     if (deltaLines === 0) return;
     this.scroll = Math.max(0, Math.min(this.maxScroll, this.scroll + deltaLines));
@@ -1754,6 +1820,12 @@ export class TerminalUI {
         }
       }
       if (key.name === 'escape') {
+        const filePop = this.filePopup();
+        if (filePop.matches.length > 0) {
+          this.filePopupDismissedFor = '@' + filePop.query;
+          this.schedule(0);
+          return;
+        }
         if (this.status === 'Running' || this.status === 'Compacting') {
           this.cancel();
           return;
@@ -1868,16 +1940,25 @@ export class TerminalUI {
       }
       // Plain Up / Down arrow (also emitted by Windows Terminal Mouse Wheel via \x1b[?1007h):
       // Scroll transcript when agent is busy, when already scrolled up, or when transcript overflows and input is empty.
-      if (key.name === 'up' || key.name === 'down') {
-        // While the slash popup is open, arrows move its selection (never history recall).
+      const isUp = key.name === 'up' || (key.ctrl && key.name === 'p');
+      const isDown = key.name === 'down' || (key.ctrl && key.name === 'n');
+      if (isUp || isDown) {
+        // While the slash or file popup is open, arrows move its selection (never history recall).
         const popup = this.slashPopup();
         if (popup.matches.length > 0) {
-          const delta = key.name === 'up' ? -1 : 1;
+          const delta = isUp ? -1 : 1;
           this.popupIndex = (popup.index + delta + popup.matches.length) % popup.matches.length;
           this.schedule(0);
           return;
         }
-        const dir = key.name === 'up' ? 2 : -2;
+        const filePop = this.filePopup();
+        if (filePop.matches.length > 0) {
+          const delta = isUp ? -1 : 1;
+          this.filePopupIndex = (filePop.index + delta + filePop.matches.length) % filePop.matches.length;
+          this.schedule(0);
+          return;
+        }
+        const dir = isUp ? 2 : -2;
         if (!this.pending && this.input.length === 0) {
           this.scrollBy(dir);
           return;
@@ -1931,20 +2012,24 @@ export class TerminalUI {
         }
         return;
       }
-      const atMatch = /(?:^|\s)@([A-Za-z0-9_./\\-]*)$/.exec(current);
-      if (atMatch && this.workspaceFiles.length > 0) {
-        const query = atMatch[1].toLowerCase();
-        const found =
-          this.workspaceFiles.find(f => f.toLowerCase().startsWith(query)) ??
-          this.workspaceFiles.find(f => f.toLowerCase().includes(query));
-        if (found) {
-          const prefixLen = current.length - atMatch[1].length;
-          this.input = [...(current.slice(0, prefixLen) + found + ' ')];
-          this.cursor = this.input.length;
-          this.inputRestoredFromRevert = false;
-          this.schedule();
-        }
+      const filePop = this.filePopup();
+      if (filePop.matches.length > 0) {
+        const chosen = filePop.matches[filePop.index];
+        const after = this.input.slice(this.cursor);
+        const insertTrailingSpace = after.length === 0 || after[0] !== ' ';
+        const formatted = (chosen.includes(' ') ? `@"${chosen}"` : `@${chosen}`) + (insertTrailingSpace ? ' ' : '');
+        const before = this.input.slice(0, filePop.atStart);
+        this.input = [...before, ...formatted, ...after];
+        this.cursor = before.length + formatted.length;
+        this.filePopupFor = '';
+        this.filePopupIndex = 0;
+        this.filePopupDismissedFor = '';
+        this.inputRestoredFromRevert = false;
+        this.schedule();
+        return;
       }
+
+
       return;
     }
 
@@ -1954,6 +2039,22 @@ export class TerminalUI {
       if (selected && selected !== this.input.join('')) {
         this.input = [...selected];
         this.cursor = this.input.length;
+      }
+      const filePop = this.filePopup();
+      if (filePop.matches.length > 0) {
+        const chosen = filePop.matches[filePop.index];
+        const after = this.input.slice(this.cursor);
+        const insertTrailingSpace = after.length === 0 || after[0] !== ' ';
+        const formatted = (chosen.includes(' ') ? `@"${chosen}"` : `@${chosen}`) + (insertTrailingSpace ? ' ' : '');
+        const before = this.input.slice(0, filePop.atStart);
+        this.input = [...before, ...formatted, ...after];
+        this.cursor = before.length + formatted.length;
+        this.filePopupFor = '';
+        this.filePopupIndex = 0;
+        this.filePopupDismissedFor = '';
+        this.inputRestoredFromRevert = false;
+        this.schedule();
+        return;
       }
       this.collapsePastedImagePathsInInput();
       const rawJoined = this.input.join('');
@@ -2807,6 +2908,36 @@ export class TerminalUI {
       }
       if (matches.length > shownCount && room > 0) {
         popupLines.push(`${T.faint}${clip(`  ${selected + 1} of ${matches.length}   ↑↓ select   tab accept`)}${T.reset}`);
+      }
+    } else {
+      const filePop = this.filePopup();
+      if (filePop.matches.length) {
+        const { matches, index: selected } = filePop;
+        const room = Math.max(0, Math.min(8, rows - fixedRows - 3));
+        const shownCount = matches.length > room ? Math.max(0, room - 1) : matches.length;
+        const start = Math.min(Math.max(0, selected - shownCount + 1), Math.max(0, matches.length - shownCount));
+        const windowed = matches.slice(start, start + shownCount);
+        for (const [offset, file] of windowed.entries()) {
+          const isSelected = start + offset === selected;
+          const marker = isSelected ? '› ' : '  ';
+          const slashIdx = file.lastIndexOf('/');
+          let line = '';
+          if (slashIdx >= 0) {
+            const dir = file.slice(0, slashIdx + 1);
+            const name = file.slice(slashIdx + 1);
+            line = isSelected
+              ? `${T.brandBold}${marker}${dir}${name}${T.reset}`
+              : `  ${T.faint}${dir}${T.reset}${T.text}${name}${T.reset}`;
+          } else {
+            line = isSelected
+              ? `${T.brandBold}${marker}${file}${T.reset}`
+              : `  ${T.text}${file}${T.reset}`;
+          }
+          popupLines.push(clip(line));
+        }
+        if (matches.length > shownCount && room > 0) {
+          popupLines.push(`${T.faint}${clip(`  ${selected + 1} of ${matches.length}   ↑↓ select   tab/enter accept   esc dismiss`)}${T.reset}`);
+        }
       }
     }
 

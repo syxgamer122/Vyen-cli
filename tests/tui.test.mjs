@@ -741,6 +741,118 @@ test('redesign: slash popup lists matching commands with descriptions and Tab st
   assert.equal(await q2, '/review', 'Enter submits the highlighted command');
 });
 
+test('redesign: at-mention popup lists matching workspace files, supports arrow navigation, and Tab/Enter completes path', async t => {
+  const { stripVTControlCharacters } = await import('node:util');
+  const tty = terminal(t);
+  tty.output.columns = 100;
+  tty.output.rows = 24;
+  tty.ui.setWorkspaceFiles(['src/tui.ts', 'src/cli.ts', 'tests/tui.test.mjs', 'docs/SPEC.md', 'path with space/file.txt']);
+
+  const q = tty.ui.question('vyen> ', undefined, true);
+  tty.key('@tu', undefined);
+  await new Promise(resolve => setTimeout(resolve, 25));
+
+  const frame = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frame, /›\s+src\/tui\.ts/, 'Exact basename match should be highlighted with selection marker');
+  assert.match(frame, /tests\/tui\.test\.mjs/, 'Matching test file should be listed');
+  assert(!/src\/cli\.ts/.test(frame), 'Non-matching files should be filtered out');
+  assert(!/docs\/SPEC\.md/.test(frame), 'Non-matching files should be filtered out');
+
+  // Down arrow moves selection to next match
+  tty.key('', 'down');
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frame2 = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frame2, /›\s+tests\/tui\.test\.mjs/, 'Down arrow moves selection to next match');
+
+  // Tab completes selected file with trailing space
+  tty.key('', 'tab');
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frameAfterTab = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert(!/tests\/tui\.test\.mjs/.test(frameAfterTab.split('\r\n').slice(0, -3).join('\n')), 'Popup must close after Tab completion');
+  assert.match(frameAfterTab.split('\r\n').at(-2), /^› @tests\/tui\.test\.mjs\s*$/, 'Tab must replace @tu with completed mention and trailing space');
+
+  // Space-containing file quotes path
+  tty.key('@space', undefined);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frameSpace = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frameSpace, /path with space\/file\.txt/);
+  tty.key('', 'tab');
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frameAfterSpaceTab = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frameAfterSpaceTab.split('\r\n').at(-2), /@"path with space\/file\.txt"\s*$/);
+
+  // Esc dismisses popup
+  tty.key('@src', undefined);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.match(stripVTControlCharacters(tty.ui.renderedFrame()), /src\/cli\.ts/);
+  tty.key('', 'escape');
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frameEsc = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert(!/src\/cli\.ts/.test(frameEsc.split('\r\n').slice(0, -3).join('\n')), 'Esc must dismiss popup without clearing input');
+  assert.match(frameEsc.split('\r\n').at(-2), /@src/);
+
+  tty.key('', 'return');
+  const result = await q;
+  assert.match(result, /@tests\/tui\.test\.mjs\s+@"path with space\/file\.txt"\s+@src/);
+});
+
+test('redesign: at-mention Enter completion, Ctrl+P/N navigation, and mid-prompt mention', async t => {
+  const { stripVTControlCharacters } = await import('node:util');
+  const tty = terminal(t);
+  tty.output.columns = 100;
+  tty.output.rows = 24;
+  tty.ui.setWorkspaceFiles(['src/tui.ts', 'src/cli.ts', 'tests/tui.test.mjs', 'docs/SPEC.md']);
+
+  const q = tty.ui.question('vyen> ', undefined, true);
+  tty.key('check @cl', undefined);
+  await new Promise(resolve => setTimeout(resolve, 25));
+
+  const frame1 = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frame1, /›\s+src\/cli\.ts/);
+
+  // Enter accepts completion and does NOT submit the prompt prematurely
+  tty.key('', 'return');
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frameAfterEnter = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frameAfterEnter.split('\r\n').at(-2), /^› check @src\/cli\.ts\s*$/);
+
+  // Continue typing prompt after completed mention
+  tty.key('and fix', undefined);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frameAfterTyping = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frameAfterTyping.split('\r\n').at(-2), /^› check @src\/cli\.ts and fix\s*$/);
+
+  // Submit prompt with Enter
+  tty.key('', 'return');
+  const result = await q;
+  assert.equal(result, 'check @src/cli.ts and fix');
+
+  // Test Ctrl+N and Ctrl+P navigation on bare @
+  const q2 = tty.ui.question('vyen> ', undefined, true);
+  tty.key('@', undefined);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frameAt = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frameAt, /›\s+src\/tui\.ts/);
+
+  // Ctrl+N moves down
+  tty.key('', 'n', { ctrl: true });
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frameN = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frameN, /›\s+src\/cli\.ts/);
+
+  // Ctrl+P moves back up
+  tty.key('', 'p', { ctrl: true });
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frameP = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frameP, /›\s+src\/tui\.ts/);
+
+  // Tab completes
+  tty.key('', 'tab');
+  await new Promise(resolve => setTimeout(resolve, 25));
+  tty.key('', 'return');
+  assert.equal((await q2).trim(), '@src/tui.ts');
+});
+
 test('redesign: Markdown tables align columns across rows', async t => {
   const { stripVTControlCharacters } = await import('node:util');
   const tty = terminal(t);

@@ -124,7 +124,8 @@ test('KnowledgeGraph tools normalize snake_case aliases and allow read operation
     observations: [{ entity_name: 'UserMod', contents: ['added feature'] }],
   }), signal());
 
-  const readOnlyRegistry = new ToolRegistry(f.cwd, async () => false, true);
+  const readOnlyRegistry = new ToolRegistry(f.cwd, async () => false);
+  readOnlyRegistry.planMode = true; // plan mode is read-only
   manager.registerTools(readOnlyRegistry);
 
   const readRes = await readOnlyRegistry.execute(call('mcp_read_graph', { scope: 'user' }), signal());
