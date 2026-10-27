@@ -86,6 +86,8 @@ normal → green · break the code → RED · restore → green
 
 - **Avoid tautological tests:** Anchor regex patterns; check cut points (`idx > -1`);
   verify edits actually landed on disk before testing.
+- **Keep test logic flat & minimize mocks:** Avoid branching or loops in tests; favor
+  real state and public API contracts over deep mocks.
 - **No unmeasured promises:** A comment promising behavior requires a test that goes red
   when the guard is removed (§2.1).
 - **Mutations must change behavior:** If a broken code path remains green, the test is
