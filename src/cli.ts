@@ -1177,6 +1177,51 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           mcpController = new AbortController();
           try {
             manager = new McpManager(merged, runtime.cwd);
+            manager.setSamplingHandler(async (params, maxTokens) => {
+              const { createModel } = await import('./provider.js');
+              const { generateText } = await import('ai');
+              const model = createModel(runtime);
+              const messages = Array.isArray((params as Record<string, unknown>)?.messages)
+                ? (params as { messages: Array<{ role: 'user' | 'assistant'; content: { type: string; text?: string } }> }).messages
+                : [];
+              const prompt = messages.map(m => m.content?.text ?? '').filter(Boolean).join('\n');
+              const res = await generateText({
+                model,
+                prompt: prompt || 'MCP sampling request',
+                maxOutputTokens: maxTokens,
+              });
+              return {
+                model: runtime.model,
+                stopReason: 'endTurn',
+                role: 'assistant',
+                content: { type: 'text', text: res.text },
+              };
+            });
+            manager.setElicitationHandler(async (params) => {
+              if (!interactive || !tui) {
+                return { action: 'decline' as const };
+              }
+              const message = typeof (params as Record<string, unknown>)?.message === 'string'
+                ? (params as { message: string }).message
+                : 'MCP server requests input confirmation:';
+              const answer = await reg.askUser?.(
+                [{
+                  id: 'mcp_elicit',
+                  header: 'MCP Elicit',
+                  question: message,
+                  options: [
+                    { label: 'Accept', description: 'Allow MCP request' },
+                    { label: 'Decline', description: 'Decline MCP request' },
+                  ],
+                }],
+                new AbortController().signal,
+              );
+              const choice = answer?.['mcp_elicit']?.[0];
+              if (choice === 'Accept') {
+                return { action: 'accept' as const };
+              }
+              return { action: 'decline' as const };
+            });
             const connecting = manager.connect(reg, mcpController.signal);
             // Restores the previous status afterwards so rebuilds (/setup, /model, /cd…) never stick on Working.
             await (tui ? tui.withStatus('Connecting MCP', () => connecting) : connecting);
@@ -1205,6 +1250,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         const { KnowledgeGraphManager } = await import('./memory.js');
         const kg = new KnowledgeGraphManager({
           projectGraphPath: join(runtime.cwd, '.vyen', 'knowledge-graph.jsonl'),
+          isTrusted: trust.isTrusted,
         });
         kg.registerTools(reg);
         {

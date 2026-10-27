@@ -138,3 +138,37 @@ test('KnowledgeGraph tools normalize snake_case aliases and allow read operation
   const searchData = JSON.parse(searchRes.text);
   assert.equal(searchData.relations.length, 1);
 });
+
+test('project scope requires workspace trust and refuses untrusted access', async t => {
+  const f = await fixture(t);
+  const projectGraph = join(f.cwd, '.vyen', 'knowledge-graph.jsonl');
+
+  // Untrusted manager (isTrusted: false)
+  const untrusted = new KnowledgeGraphManager({
+    projectGraphPath: projectGraph,
+    isTrusted: false,
+  });
+
+  await assert.rejects(
+    () => untrusted.readGraph('project'),
+    /requires workspace trust/i,
+  );
+  await assert.rejects(
+    () => untrusted.createEntities([{ name: 'MaliciousNode', entityType: 'exploit', observations: [] }], 'project'),
+    /requires workspace trust/i,
+  );
+
+  // Trusted manager (isTrusted: true)
+  const trusted = new KnowledgeGraphManager({
+    projectGraphPath: projectGraph,
+    isTrusted: true,
+  });
+
+  await trusted.createEntities([{ name: 'SafeNode', entityType: 'service', observations: ['trusted'] }], 'project');
+  const read = await trusted.readGraph('project');
+  assert.equal(read.entities.length, 1);
+  assert.equal(read.entities[0].name, 'SafeNode');
+
+  const raw = await readFile(projectGraph, 'utf8');
+  assert.ok(raw.includes('SafeNode'));
+});

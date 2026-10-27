@@ -67,7 +67,8 @@ test('sequential_thinking tracks revision indices and maintains branch history',
 test('sequential_thinking is available in readOnly mode and serializes state transitions', async t => {
   const f = await fixture(t);
   const registry = new ToolRegistry(f.cwd, async () => false, true); // readOnly = true
-  assert.equal(registry.isReadOnly('sequential_thinking'), false, 'must return false to serialize state transitions');
+  assert.equal(registry.canBatchParallel('sequential_thinking'), false, 'must return false to serialize state transitions');
+  assert.equal(registry.isReadOnly('sequential_thinking'), true, 'must return true as read-only tool');
 
   // Must execute without throwing "Tool is not available in read-only mode"
   const res = await registry.execute(

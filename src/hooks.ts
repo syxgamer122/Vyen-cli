@@ -61,6 +61,7 @@ function normalizeWorkspaceDir(cwd: string): string {
 
 export interface WorkspaceTrustHashOptions {
   includeProjectMcp?: boolean;
+  includeProjectKnowledgeGraph?: boolean;
 }
 
 /**
@@ -97,6 +98,18 @@ export async function calculateWorkspaceTrustHash(
       hasher.update(mcpData);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') hasher.update('mcp:unreadable');
+    }
+  }
+
+  // 3. Hash the project Knowledge Graph if present
+  if (options.includeProjectKnowledgeGraph !== false) {
+    const kgFile = join(normalizedCwd, '.vyen', 'knowledge-graph.jsonl');
+    try {
+      const kgData = await readFile(kgFile);
+      hasher.update('kg:');
+      hasher.update(kgData);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') hasher.update('kg:unreadable');
     }
   }
 
@@ -218,6 +231,7 @@ export interface WorkspaceTrustOptions {
   projectMcpServers?: Record<string, McpServerConfig>;
   projectMcpError?: boolean;
   includeProjectMcp?: boolean;
+  includeProjectKnowledgeGraph?: boolean;
   trustWorkspace?: boolean;
 }
 
@@ -251,6 +265,16 @@ export async function evaluateWorkspaceTrust(
   if (allowCommands.length) reasons.push('project permission allow rules');
   if (mcpCount) reasons.push(`${mcpCount} project MCP server(s)`);
 
+  const includeProjectKnowledgeGraph = options.includeProjectKnowledgeGraph !== false;
+  if (includeProjectKnowledgeGraph) {
+    const kgFile = join(resolve(cwd), '.vyen', 'knowledge-graph.jsonl');
+    try {
+      const { stat } = await import('node:fs/promises');
+      const st = await stat(kgFile);
+      if (st.isFile()) reasons.push('project knowledge graph');
+    } catch {}
+  }
+
   const trustRequired = reasons.length > 0 || projectMcpError;
   if (!trustRequired) {
     return { layered, isTrusted: false, trustRequired: false, hash: '', reasons: [] };
@@ -263,7 +287,7 @@ export async function evaluateWorkspaceTrust(
       ...allowCommands,
       ...(includeProjectMcp ? projectMcpCommandCandidates(projectMcpServers) : []),
     ],
-    { includeProjectMcp },
+    { includeProjectMcp, includeProjectKnowledgeGraph },
   );
   let isTrusted = await isWorkspaceTrusted(cwd, hash);
   if (!isTrusted && options.trustWorkspace) {

@@ -519,6 +519,7 @@ export class Subagents {
       this.bus.registerPeerTools(tools, managed.nickname, managed.agentType);
       new KnowledgeGraphManager({
         projectGraphPath: join(childConfig.cwd, '.vyen', 'knowledge-graph.jsonl'),
+        isTrusted: this.hookBus?.isTrusted ?? false,
       }).registerTools(tools);
       const peerInbox = this.bus.drainUnreadPromptBlock(managed.nickname);
       const effectivePrompt = peerInbox ? `${prompt}\n${peerInbox}` : prompt;
@@ -857,6 +858,7 @@ export class Subagents {
       tools.policy = this.registry.policy;
       new KnowledgeGraphManager({
         projectGraphPath: join(this.config.cwd, '.vyen', 'knowledge-graph.jsonl'),
+        isTrusted: this.hookBus?.isTrusted ?? false,
       }).registerTools(tools);
       // No delegation tools are registered in children: depth is exactly one.
       const config = { ...this.config };

@@ -799,7 +799,7 @@ export class ToolRegistry {
     return Object.fromEntries([...this.definitions].filter(([name, d]) => this.isExposed(name, d))
       .map(([name, d]) => [name, tool({ description: d.description, inputSchema: d.schema })]));
   }
-  isReadOnly(name: string) {
+  canBatchParallel(name: string): boolean {
     const canonical = this.resolveToolName(name);
     if (
       canonical === 'exit_plan_mode' ||
@@ -816,6 +816,10 @@ export class ToolRegistry {
     ) {
       return false; // serialize state transitions
     }
+    return this.definitions.get(canonical)?.readOnly === true;
+  }
+  isReadOnly(name: string): boolean {
+    const canonical = this.resolveToolName(name);
     return this.definitions.get(canonical)?.readOnly === true;
   }
   async execute(call: ToolCall, signal: AbortSignal): Promise<{ text: string; denied?: boolean }> {

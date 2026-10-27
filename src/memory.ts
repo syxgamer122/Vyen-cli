@@ -100,7 +100,7 @@ export async function saveGraph(
   graph: KnowledgeGraph,
   unreadable: string[] = [],
 ): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true });
+  await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
   const lines: string[] = [];
 
   for (const line of unreadable) {
@@ -130,17 +130,34 @@ export interface KnowledgeGraphManagerOptions {
   userGraphPath?: string;
   projectGraphPath?: string;
   legacyMemoryPath?: string;
+  isTrusted?: boolean;
 }
 
 export class KnowledgeGraphManager {
   private userGraphPath: string;
   private projectGraphPath: string;
   private legacyMemoryPath: string;
+  private isTrusted: boolean;
+  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(options: KnowledgeGraphManagerOptions = {}) {
     this.userGraphPath = options.userGraphPath ?? join(configDir(), 'knowledge-graph.jsonl');
     this.projectGraphPath = options.projectGraphPath ?? join(process.cwd(), '.vyen', 'knowledge-graph.jsonl');
     this.legacyMemoryPath = options.legacyMemoryPath ?? join(configDir(), 'memories.json');
+    this.isTrusted = options.isTrusted ?? false;
+  }
+
+  private checkTrust(scope: 'user' | 'project'): void {
+    if (scope === 'project' && !this.isTrusted) {
+      throw new Error('Project Knowledge Graph requires workspace trust. Run with --trust-workspace to enable.');
+    }
+  }
+
+  private async withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = async () => fn();
+    const next = this.writeQueue.then(run, run);
+    this.writeQueue = next.then(() => {}, () => {});
+    return next;
   }
 
   private resolvePath(scope: 'user' | 'project' = 'user'): string {
@@ -148,6 +165,7 @@ export class KnowledgeGraphManager {
   }
 
   async readGraph(scope: 'user' | 'project' = 'user'): Promise<KnowledgeGraph> {
+    this.checkTrust(scope);
     const filePath = this.resolvePath(scope);
     const { graph, unreadable } = await loadGraph(filePath);
 
@@ -162,7 +180,9 @@ export class KnowledgeGraphManager {
             entityType: 'system_memory',
             observations: legacyMemories.map(m => String(m)),
           });
-          await saveGraph(filePath, graph, unreadable);
+          await this.withWriteLock(async () => {
+            await saveGraph(filePath, graph, unreadable);
+          });
         }
       } catch {
         // Ignore legacy parse errors
@@ -173,82 +193,92 @@ export class KnowledgeGraphManager {
   }
 
   async createEntities(entities: Entity[], scope: 'user' | 'project' = 'user'): Promise<Entity[]> {
-    const filePath = this.resolvePath(scope);
-    const { graph, unreadable } = await loadGraph(filePath);
-    const created: Entity[] = [];
+    this.checkTrust(scope);
+    return this.withWriteLock(async () => {
+      const filePath = this.resolvePath(scope);
+      const { graph, unreadable } = await loadGraph(filePath);
+      const created: Entity[] = [];
 
-    for (const entity of entities) {
-      const existing = graph.entities.find(e => e.name.toLowerCase() === entity.name.toLowerCase());
-      if (existing) {
-        // Merge observations without duplicates
-        const existingObs = new Set(existing.observations);
-        for (const obs of entity.observations) {
-          if (!existingObs.has(obs)) existing.observations.push(obs);
+      for (const entity of entities) {
+        const existing = graph.entities.find(e => e.name.toLowerCase() === entity.name.toLowerCase());
+        if (existing) {
+          // Merge observations without duplicates
+          const existingObs = new Set(existing.observations);
+          for (const obs of entity.observations) {
+            if (!existingObs.has(obs)) existing.observations.push(obs);
+          }
+          created.push(existing);
+        } else {
+          graph.entities.push(entity);
+          created.push(entity);
         }
-        created.push(existing);
-      } else {
-        graph.entities.push(entity);
-        created.push(entity);
       }
-    }
 
-    await saveGraph(filePath, graph, unreadable);
-    return created;
+      await saveGraph(filePath, graph, unreadable);
+      return created;
+    });
   }
 
   async createRelations(relations: Relation[], scope: 'user' | 'project' = 'user'): Promise<Relation[]> {
-    const filePath = this.resolvePath(scope);
-    const { graph, unreadable } = await loadGraph(filePath);
-    const created: Relation[] = [];
+    this.checkTrust(scope);
+    return this.withWriteLock(async () => {
+      const filePath = this.resolvePath(scope);
+      const { graph, unreadable } = await loadGraph(filePath);
+      const created: Relation[] = [];
 
-    for (const rel of relations) {
-      const exists = graph.relations.some(
-        r => r.from.toLowerCase() === rel.from.toLowerCase() &&
-             r.to.toLowerCase() === rel.to.toLowerCase() &&
-             r.relationType.toLowerCase() === rel.relationType.toLowerCase(),
-      );
-      if (!exists) {
-        graph.relations.push(rel);
-        created.push(rel);
+      for (const rel of relations) {
+        const exists = graph.relations.some(
+          r => r.from.toLowerCase() === rel.from.toLowerCase() &&
+               r.to.toLowerCase() === rel.to.toLowerCase() &&
+               r.relationType.toLowerCase() === rel.relationType.toLowerCase(),
+        );
+        if (!exists) {
+          graph.relations.push(rel);
+          created.push(rel);
+        }
       }
-    }
 
-    await saveGraph(filePath, graph, unreadable);
-    return created;
+      await saveGraph(filePath, graph, unreadable);
+      return created;
+    });
   }
 
   async addObservations(
     observations: Array<{ entityName: string; contents: string[] }>,
     scope: 'user' | 'project' = 'user',
   ): Promise<void> {
-    const filePath = this.resolvePath(scope);
-    const { graph, unreadable } = await loadGraph(filePath);
+    this.checkTrust(scope);
+    return this.withWriteLock(async () => {
+      const filePath = this.resolvePath(scope);
+      const { graph, unreadable } = await loadGraph(filePath);
 
-    for (const obs of observations) {
-      let entity = graph.entities.find(e => e.name.toLowerCase() === obs.entityName.toLowerCase());
-      if (!entity) {
-        entity = {
-          name: obs.entityName,
-          entityType: 'generic',
-          observations: [],
-        };
-        graph.entities.push(entity);
-      }
-      const existingObs = new Set(entity.observations);
-      for (const content of obs.contents) {
-        if (!existingObs.has(content)) {
-          entity.observations.push(content);
+      for (const obs of observations) {
+        let entity = graph.entities.find(e => e.name.toLowerCase() === obs.entityName.toLowerCase());
+        if (!entity) {
+          entity = {
+            name: obs.entityName,
+            entityType: 'generic',
+            observations: [],
+          };
+          graph.entities.push(entity);
+        }
+        const existingObs = new Set(entity.observations);
+        for (const content of obs.contents) {
+          if (!existingObs.has(content)) {
+            entity.observations.push(content);
+          }
         }
       }
-    }
 
-    await saveGraph(filePath, graph, unreadable);
+      await saveGraph(filePath, graph, unreadable);
+    });
   }
 
   async searchNodes(
     query: string,
     scope: 'user' | 'project' = 'user',
   ): Promise<{ entities: Entity[]; relations: Relation[] }> {
+    this.checkTrust(scope);
     const graph = await this.readGraph(scope);
     const q = query.toLowerCase();
 

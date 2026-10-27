@@ -24,9 +24,8 @@ npm run typecheck    # tsc --noEmit
 npm test             # tsc build -> node --test tests/*.test.mjs
 ```
 
-`npm test` builds first, so a green `npm test` already proves the build is clean.
-`npm run release:pack` (pack + install into an isolated prefix) is for release
-work only — do not run it for an ordinary change.
+`npm test` builds first, proving the build is clean.
+`npm run release:pack` is for release work only — do not run it for an ordinary change.
 
 Lint must report zero errors. Warnings are baseline; do not "fix" them and do not
 report them as findings.
@@ -69,9 +68,9 @@ The gate above only counts if the agent does not lower it.
   Missing `~/.config/vyen/` or credentials/memories bootstrap on demand; never crash when absent.
 
 > **Guarded vs self-declared.** BOM, `@ts-ignore`, and reason-less `@ts-expect-error`
-> are guarded by `tests/repo-hygiene.test.mjs`. Traceability tables are guarded by
+> are guarded by `tests/repo-hygiene.test.mjs`; traceability tables by
 > `tests/plan-traceability.test.mjs`. The rest (`as any`, `--no-verify`, destructive
-> commands, bent evidence) are self-declared; treat them as non-negotiable.
+> commands, bent evidence) are self-declared and non-negotiable.
 
 ### 1.2 Speculative hardening
 
@@ -137,6 +136,11 @@ Cite actual command execution output in completion reports.
 Invoke `requesting-code-review`. Re-reading your own diff cannot replace review:
 self-review re-reads intent, not behavior. The reviewer must be asked to run an
 end-to-end probe. Cite reviewer subagent verdict in completion reports.
+
+**Three Review & Completion Rules:**
+1. Before saying it's done, run the tests and the build, and paste the output.
+2. After making changes, have a subagent that hasn't seen this conversation review the diff against `REVIEW.md`. From round two on, it looks only at what's new.
+3. Three review rounds max. If it still doesn't pass after three, stop and come back to rethink the approach with me.
 
 **Review findings become rules, not TODOs:** Every confirmed finding (red test,
 review verdict, user correction) lands as a rule in the section that owns it
@@ -211,6 +215,7 @@ Session lifecycle synchronization (`SessionStart`/`SessionEnd`):
 
 **Docs have no effect. Tests do.** Plans included — see §2.5.
 
+- `REVIEW.md` — review checklist and bug patterns from git history.
 - `docs/SPEC.md` — the contract. If code and SPEC disagree, one is a bug; say which.
 - `docs/VALIDATION.md` — what the suite covers, and what claims are *not* established.
 - `docs/REFERENCE_REVIEW.md` — stream and subagent design references and rationale.
@@ -250,17 +255,11 @@ function, check if one already exists: if yes, **extend it**. If user memory sto
 `~/.config/vyen/memories.json` does not exist on disk, bootstrap it on demand;
 do not invent a parallel store.
 
-**Before deleting: not finding it is NOT proof.** Four things are required:
-
-1. Run the search against something that **certainly still exists** and confirm it
-   is found.
-2. Do not trust an empty result when the command just printed errors (a wrong
-   regex makes `Select-String` throw *per file* and still exit 0 with no
-   matches).
-3. Use a real recursive tool: `rg`, the `grep` tool, `Get-ChildItem -Recurse`.
-   `**` in PowerShell is not always recursive.
-4. Scan the whole tree, not only the source directory — a live symbol can live
-   in `tests/`, a fixture, a config file, or only appear as a **string**.
+**Before deleting: not finding it is NOT proof.** Four requirements:
+1. Search something that definitely exists to confirm the search tool works.
+2. Never trust empty output when the command printed errors (`Select-String` regex errors exit 0).
+3. Use a real recursive tool (`rg`, `grep`, `Get-ChildItem -Recurse`; `**` in PowerShell is unreliable).
+4. Scan the full tree (`tests/`, fixtures, configs, strings), not just `src/`.
 
 ## 7. Units and identifiers must match
 

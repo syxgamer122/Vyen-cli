@@ -865,8 +865,8 @@ export class Harness {
     while (index < calls.length) {
       // Consecutive reads form small parallel groups. Writes/shell are barriers.
       const group = [calls[index++]];
-      if (this.tools.isReadOnly(group[0].toolName)) {
-        while (group.length < MAX_PARALLEL_READS && index < calls.length && this.tools.isReadOnly(calls[index].toolName)) group.push(calls[index++]);
+      if (this.tools.canBatchParallel(group[0].toolName)) {
+        while (group.length < MAX_PARALLEL_READS && index < calls.length && this.tools.canBatchParallel(calls[index].toolName)) group.push(calls[index++]);
       }
       content.push(...await Promise.all(group.map(execute)));
       // Keep one tool result message per batch in model order, checkpointed at

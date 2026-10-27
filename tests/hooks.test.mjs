@@ -897,6 +897,16 @@ test('workspace trust hash covers project MCP config and referenced scripts', as
 
     await writeFile(mcpFile, '{broken');
     await assert.doesNotReject(calculateWorkspaceTrustHash(dir, []), 'corrupt project MCP JSON must still hash');
+
+    const kgFile = join(dir, '.vyen', 'knowledge-graph.jsonl');
+    const hashWithoutKg = await calculateWorkspaceTrustHash(dir, []);
+    await writeFile(kgFile, '{"type":"entity","name":"test","entityType":"mod","observations":[]}\n');
+    const hashWithKg = await calculateWorkspaceTrustHash(dir, []);
+    assert.notEqual(hashWithKg, hashWithoutKg, 'adding .vyen/knowledge-graph.jsonl must change the trust hash');
+
+    await writeFile(kgFile, '{"type":"entity","name":"test2","entityType":"mod","observations":[]}\n');
+    const hashWithModifiedKg = await calculateWorkspaceTrustHash(dir, []);
+    assert.notEqual(hashWithModifiedKg, hashWithKg, 'modifying .vyen/knowledge-graph.jsonl must change the trust hash');
   } finally {
     if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = oldXdg;
