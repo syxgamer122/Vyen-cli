@@ -503,6 +503,7 @@ interface PickerState {
   filter: string;
   action: string;
   onDelete?: (item: PickerItem, tab: number) => Promise<boolean> | boolean;
+  deleting?: boolean;
   resolve: (value: { tab: number; item: PickerItem } | undefined) => void;
 }
 
@@ -871,19 +872,25 @@ export class TerminalUI {
     else if (key.name === 'home') state.index = 0;
     else if (key.name === 'end') state.index = Math.max(0, matches.length - 1);
     else if (key.name === 'delete' || (key.ctrl && key.name === 'd')) {
-      if (state.onDelete) {
+      if (state.onDelete && !state.deleting) {
         const item = matches[state.index];
         if (item) {
-          Promise.resolve(state.onDelete(item, state.tab)).then(deleted => {
-            if (deleted) {
-              for (const t of state.tabs) {
-                t.items = t.items.filter(it => it.id !== item.id);
+          state.deleting = true;
+          Promise.resolve(state.onDelete(item, state.tab))
+            .then(deleted => {
+              state.deleting = false;
+              if (deleted) {
+                for (const t of state.tabs) {
+                  t.items = t.items.filter(it => it.id !== item.id);
+                }
+                const newMatches = this.pickerMatches(state);
+                state.index = Math.max(0, Math.min(state.index, newMatches.length - 1));
+                this.schedule(0);
               }
-              const newMatches = this.pickerMatches(state);
-              state.index = Math.max(0, Math.min(state.index, newMatches.length - 1));
-              this.schedule(0);
-            }
-          });
+            })
+            .catch(() => {
+              state.deleting = false;
+            });
         }
       }
     }

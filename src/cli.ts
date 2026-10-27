@@ -2350,7 +2350,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           display(names.map(n => `  ${tools.isReadOnly(n) ? '● [read]' : '◆ [exec]'} ${n}`).join('\n') + '\n');
           return true;
         }
-        if (cmdInput === '/sessions list' || cmdInput.startsWith('/sessions list ')) {
+        if (cmdInput === '/sessions list' || cmdInput.startsWith('/sessions list ') || (cmdInput === '/sessions' && !tui)) {
           const list = await SessionStore.list(join(runtime.dataDir, 'sessions'));
           display((list.length ? list.map(s => {
             const cur = s.id === store.session.id ? ' [current]' : '';
@@ -2359,10 +2359,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           }).join('\n') : '  No saved sessions.') + '\n');
           return true;
         }
-        if (cmdInput.startsWith('/sessions delete ') || cmdInput.startsWith('/sessions rm ')) {
-          const target = cmdInput.replace(/^\/sessions\s+(?:delete|rm)\s+/, '').trim();
+        if (cmdInput === '/sessions delete' || cmdInput.startsWith('/sessions delete ') || cmdInput === '/sessions rm' || cmdInput.startsWith('/sessions rm ')) {
+          const target = cmdInput.replace(/^\/sessions\s+(?:delete|rm)\s*/, '').trim();
           if (!target) {
             display('Usage: /sessions delete <id>\n');
+            return true;
+          }
+          if (target.toLowerCase() === 'current' || store.session.id.toLowerCase().startsWith(target.toLowerCase())) {
+            display('Cannot delete active session. Run /delete current to close and delete the active session.\n');
             return true;
           }
           try {
@@ -2375,15 +2379,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           return true;
         }
         if (cmdInput === '/sessions') {
-          if (!tui) {
-            const list = await SessionStore.list(join(runtime.dataDir, 'sessions'));
-            display((list.length ? list.map(s => {
-              const cur = s.id === store.session.id ? ' [current]' : '';
-              const label = s.title ? ` [${s.title}]` : s.preview ? ` "${s.preview}"` : '';
-              return `  ${s.id.slice(0, 8)}${cur}  (${s.messagesCount ?? 0} msgs)  ${s.updatedAt}  ${s.model}${label}  ${s.cwd}`;
-            }).join('\n') : '  No saved sessions.') + '\n');
-            return true;
-          }
           return false;
         }
         if (cmdInput === '/doctor') {
