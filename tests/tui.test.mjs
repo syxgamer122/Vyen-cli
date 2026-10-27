@@ -706,6 +706,46 @@ test('redesign: the footer shows workspace, branch and a provider-reported conte
   assert(rawFooter.includes(`${THEME.err}ctx 93%`), 'critical occupancy must use the error tone');
 });
 
+test('pro status bar: context meter renders visual block gauge and token fraction at wide columns', async t => {
+  const { stripVTControlCharacters } = await import('node:util');
+  const tty = terminal(t);
+  tty.output.columns = 100;
+  tty.output.rows = 24;
+  tty.ui.setContextWindow(200_000);
+
+  // 68k / 200k = 34% -> 2 of 5 blocks filled: [██░░░]
+  tty.ui.event({ type: 'usage', input: 60_000, output: 8_000, total: 68_000 });
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const footerOf = () => tty.ui.renderedFrame().split('\r\n').at(-1);
+  let footer = stripVTControlCharacters(footerOf());
+
+  assert.match(footer, /\[██░░░\]\s+ctx 34%/, 'Wide columns must show visual block gauge');
+  assert.match(footer, /\(68k\/200k\)/, 'Wide columns must show detailed context fraction');
+
+  // >= 90% (185k / 200k = 93%) -> 5 of 5 blocks filled: [█████]
+  tty.ui.event({ type: 'usage', input: 185_000, output: 0, total: 185_000 });
+  await new Promise(resolve => setTimeout(resolve, 25));
+  footer = stripVTControlCharacters(footerOf());
+  assert.match(footer, /\[█████\]\s+ctx 93%/, 'Critical occupancy must fill all gauge blocks');
+
+  // Medium columns show gauge but hide detailed fraction
+  tty.output.columns = 76;
+  tty.output.emit('resize');
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const medFooter = stripVTControlCharacters(footerOf());
+  assert.match(medFooter, /\[█████\]\s+ctx 93%/, 'Medium columns retain visual block gauge');
+  assert(!medFooter.includes('185k/200k'), 'Medium columns hide detailed fraction');
+
+  // Narrow columns hide both gauge and detailed fraction to prevent wrap/truncation
+  tty.output.columns = 60;
+  tty.output.emit('resize');
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const narrowFooter = stripVTControlCharacters(footerOf());
+  assert.match(narrowFooter, /ctx 93%/, 'Narrow columns still keep percentage');
+  assert(!narrowFooter.includes('['), 'Narrow columns hide visual block gauge');
+  assert(!narrowFooter.includes('185k/200k'), 'Narrow columns hide detailed fraction to save space');
+});
+
 test('redesign: slash popup lists matching commands with descriptions and Tab still completes the first match', async t => {
   const { stripVTControlCharacters } = await import('node:util');
   const tty = terminal(t);

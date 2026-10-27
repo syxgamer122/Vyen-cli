@@ -2728,13 +2728,24 @@ export class TerminalUI {
     return rightOut ? `${leftOut}${gap}${rightOut}` : leftOut;
   }
 
-  /** Context occupancy as a short percentage, coloured only when it starts to matter. */
-  private contextGroup(): Seg[] {
+  /** Context occupancy gauge and percentage, dynamically scaled to safe printable columns. */
+  private contextGroup(cols = 80): Seg[] {
     if (!this.contextWindow || this.contextUsed === undefined) return [];
     const T = THEME;
     const pct = Math.max(0, Math.min(100, Math.round((this.contextUsed / this.contextWindow) * 100)));
     const tone = pct >= 90 ? T.err : pct >= 70 ? T.warn : T.faint;
-    return [[`ctx ${pct}%`, tone]];
+    const filled = Math.min(5, Math.max(0, Math.round((pct / 100) * 5)));
+    const showGauge = cols >= 70;
+    const gauge = showGauge ? `[${'█'.repeat(filled)}${'░'.repeat(5 - filled)}] ` : '';
+    const showDetail = cols >= 85;
+    const detail = showDetail
+      ? ` (${formatTokenCount(this.contextUsed)}/${formatTokenCount(this.contextWindow)})`
+      : '';
+    return [
+      ...(gauge ? [[gauge, tone] as Seg] : []),
+      [`ctx ${pct}%`, tone],
+      ...(detail ? [[detail, T.faint] as Seg] : []),
+    ];
   }
 
   private render() {
@@ -2975,7 +2986,7 @@ export class TerminalUI {
       ? [[this.branch ? `${this.workspaceName} (${this.branch})` : this.workspaceName, T.faint]]
       : [];
     // Right-hand groups are dropped from the front when space runs out: hint and place go first.
-    const footer = this.band(left, [hint, place, goalGroup, todoGroup, this.contextGroup(), tokenGroup], safeCols, rich);
+    const footer = this.band(left, [hint, place, goalGroup, todoGroup, this.contextGroup(safeCols), tokenGroup], safeCols, rich);
 
     const screenLines = [...body, statusLine, ...popupLines, ...queueLines, rule, promptLine, footer];
     const promptRow = screenLines.length - 1;
