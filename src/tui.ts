@@ -1648,8 +1648,9 @@ export class TerminalUI {
     if (this.filePopupDismissedFor === atKey) {
       return { matches: [], index: 0, query, atStart: 0 };
     }
-    const atStart = beforeCursor.length - query.length - 1;
-    const matches = this.filterWorkspaceFiles(query.toLowerCase());
+    const atStart = this.cursor - query.length - 1;
+    const normalizedQuery = query.replace(/\\/g, '/').toLowerCase();
+    const matches = this.filterWorkspaceFiles(normalizedQuery);
     if (this.filePopupFor !== atKey) {
       this.filePopupFor = atKey;
       this.filePopupIndex = 0;
@@ -1671,11 +1672,11 @@ export class TerminalUI {
       let score = 0;
       if (base === q) score = 1000;
       else if (lower === q) score = 950;
-      else if (base.startsWith(q)) score = 800 - base.length;
-      else if (lower.startsWith(q)) score = 600 - lower.length;
-      else if (base.includes(q)) score = 400 - base.length;
-      else if (lower.includes(q)) score = 200 - lower.length;
-      else if (this.isSubsequence(q, lower)) score = 100 - lower.length;
+      else if (base.startsWith(q)) score = 800 + Math.max(0, 100 - base.length);
+      else if (lower.startsWith(q)) score = 600 + Math.max(0, 100 - lower.length);
+      else if (base.includes(q)) score = 400 + Math.max(0, 100 - base.length);
+      else if (lower.includes(q)) score = 200 + Math.max(0, 100 - lower.length);
+      else if (this.isSubsequence(q, lower)) score = 100 + Math.max(0, 50 - lower.length);
       if (score > 0) scored.push({ file, score });
     }
     scored.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
@@ -1689,6 +1690,22 @@ export class TerminalUI {
       h++;
     }
     return n === needle.length;
+  }
+
+  private completeFileMention(filePop: ReturnType<typeof this.filePopup>): void {
+    const chosen = filePop.matches[filePop.index];
+    const after = this.input.slice(this.cursor);
+    const insertTrailingSpace = after.length === 0 || after[0] !== ' ';
+    const formatted = (chosen.includes(' ') ? `@"${chosen}"` : `@${chosen}`) + (insertTrailingSpace ? ' ' : '');
+    const formattedChars = [...formatted];
+    const before = this.input.slice(0, filePop.atStart);
+    this.input = [...before, ...formattedChars, ...after];
+    this.cursor = before.length + formattedChars.length;
+    this.filePopupFor = '';
+    this.filePopupIndex = 0;
+    this.filePopupDismissedFor = '';
+    this.inputRestoredFromRevert = false;
+    this.schedule();
   }
 
   private scrollBy(deltaLines: number) {
@@ -2014,18 +2031,7 @@ export class TerminalUI {
       }
       const filePop = this.filePopup();
       if (filePop.matches.length > 0) {
-        const chosen = filePop.matches[filePop.index];
-        const after = this.input.slice(this.cursor);
-        const insertTrailingSpace = after.length === 0 || after[0] !== ' ';
-        const formatted = (chosen.includes(' ') ? `@"${chosen}"` : `@${chosen}`) + (insertTrailingSpace ? ' ' : '');
-        const before = this.input.slice(0, filePop.atStart);
-        this.input = [...before, ...formatted, ...after];
-        this.cursor = before.length + formatted.length;
-        this.filePopupFor = '';
-        this.filePopupIndex = 0;
-        this.filePopupDismissedFor = '';
-        this.inputRestoredFromRevert = false;
-        this.schedule();
+        this.completeFileMention(filePop);
         return;
       }
 
@@ -2042,18 +2048,7 @@ export class TerminalUI {
       }
       const filePop = this.filePopup();
       if (filePop.matches.length > 0) {
-        const chosen = filePop.matches[filePop.index];
-        const after = this.input.slice(this.cursor);
-        const insertTrailingSpace = after.length === 0 || after[0] !== ' ';
-        const formatted = (chosen.includes(' ') ? `@"${chosen}"` : `@${chosen}`) + (insertTrailingSpace ? ' ' : '');
-        const before = this.input.slice(0, filePop.atStart);
-        this.input = [...before, ...formatted, ...after];
-        this.cursor = before.length + formatted.length;
-        this.filePopupFor = '';
-        this.filePopupIndex = 0;
-        this.filePopupDismissedFor = '';
-        this.inputRestoredFromRevert = false;
-        this.schedule();
+        this.completeFileMention(filePop);
         return;
       }
       this.collapsePastedImagePathsInInput();

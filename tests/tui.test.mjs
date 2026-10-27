@@ -853,6 +853,49 @@ test('redesign: at-mention Enter completion, Ctrl+P/N navigation, and mid-prompt
   assert.equal((await q2).trim(), '@src/tui.ts');
 });
 
+test('redesign: at-mention handles non-BMP emoji prefixes, Windows backslashes, and long paths', async t => {
+  const { stripVTControlCharacters } = await import('node:util');
+  const tty = terminal(t);
+  tty.output.columns = 120;
+  tty.output.rows = 24;
+  const longPath = 'deeply/nested/directory/structure/that/exceeds/one/hundred/characters/in/total/relative/path/length/component.ts';
+  tty.ui.setWorkspaceFiles(['src/tui.ts', 'src/cli.ts', longPath]);
+
+  // 1. Emoji prefix does not desynchronize atStart index
+  const q1 = tty.ui.question('vyen> ', undefined, true);
+  tty.key('🚀 @tu', undefined);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  tty.key('', 'tab');
+  await new Promise(resolve => setTimeout(resolve, 25));
+  tty.key('', 'return');
+  const res1 = await q1;
+  assert.equal(res1.trim(), '🚀 @src/tui.ts');
+
+  // 2. Windows backslash in query matches normalized workspace path
+  const q2 = tty.ui.question('vyen> ', undefined, true);
+  tty.key('@src\\cl', undefined);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frameBackslash = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frameBackslash, /›\s+src\/cli\.ts/);
+  tty.key('', 'tab');
+  await new Promise(resolve => setTimeout(resolve, 25));
+  tty.key('', 'return');
+  const res2 = await q2;
+  assert.equal(res2.trim(), '@src/cli.ts');
+
+  // 3. Path exceeding 100 characters is not dropped by score subtraction
+  const q3 = tty.ui.question('vyen> ', undefined, true);
+  tty.key('@comp', undefined);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const frameLong = stripVTControlCharacters(tty.ui.renderedFrame());
+  assert.match(frameLong, /component\.ts/);
+  tty.key('', 'tab');
+  await new Promise(resolve => setTimeout(resolve, 25));
+  tty.key('', 'return');
+  const res3 = await q3;
+  assert.equal(res3.trim(), `@${longPath}`);
+});
+
 test('redesign: Markdown tables align columns across rows', async t => {
   const { stripVTControlCharacters } = await import('node:util');
   const tty = terminal(t);
