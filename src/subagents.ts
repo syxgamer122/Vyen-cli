@@ -15,6 +15,7 @@ import {
   agentNetworkToolSchema,
   formatBrainstormReport,
 } from './network.js';
+import { KnowledgeGraphManager } from './memory.js';
 import type { HookBus } from './hooks.js';
 
 export type SubagentProgress = Exclude<HarnessEvent, { type: 'text' | 'reasoning' | 'tool_stream' }>;
@@ -516,6 +517,9 @@ export class Subagents {
       tools.policy = this.registry.policy;
       tools.allowPeerToolsInReadOnly = true;
       this.bus.registerPeerTools(tools, managed.nickname, managed.agentType);
+      new KnowledgeGraphManager({
+        projectGraphPath: join(childConfig.cwd, '.vyen', 'knowledge-graph.jsonl'),
+      }).registerTools(tools);
       const peerInbox = this.bus.drainUnreadPromptBlock(managed.nickname);
       const effectivePrompt = peerInbox ? `${prompt}\n${peerInbox}` : prompt;
       childHarness = new Harness(childConfig, store, tools, event => {
@@ -851,6 +855,9 @@ export class Subagents {
         readOnly || this.registry.readOnly,
       );
       tools.policy = this.registry.policy;
+      new KnowledgeGraphManager({
+        projectGraphPath: join(this.config.cwd, '.vyen', 'knowledge-graph.jsonl'),
+      }).registerTools(tools);
       // No delegation tools are registered in children: depth is exactly one.
       const config = { ...this.config };
       childHarness = new Harness(config, store, tools, event => {

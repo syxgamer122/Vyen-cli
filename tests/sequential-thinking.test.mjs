@@ -63,3 +63,74 @@ test('sequential_thinking tracks revision indices and maintains branch history',
   assert.ok(parsed3.branches.includes('mutex-approach'));
   assert.equal(parsed3.historyLength, 3);
 });
+
+test('sequential_thinking is available in readOnly mode and serializes state transitions', async t => {
+  const f = await fixture(t);
+  const registry = new ToolRegistry(f.cwd, async () => false, true); // readOnly = true
+  assert.equal(registry.isReadOnly('sequential_thinking'), false, 'must return false to serialize state transitions');
+
+  // Must execute without throwing "Tool is not available in read-only mode"
+  const res = await registry.execute(
+    call('sequential_thinking', {
+      thought: 'Analyzing code in read-only mode.',
+      thoughtNumber: 1,
+      totalThoughts: 1,
+      nextThoughtNeeded: false,
+    }),
+    signal(),
+  );
+  const parsed = JSON.parse(res.text);
+  assert.equal(parsed.thoughtNumber, 1);
+});
+
+test('sequential_thinking resets history on a fresh thought sequence', async t => {
+  const f = await fixture(t);
+  const registry = new ToolRegistry(f.cwd, async () => true, false);
+
+  // Sequence 1: 2 thoughts
+  await registry.execute(call('sequential_thinking', {
+    thought: 'First query step 1',
+    thoughtNumber: 1,
+    totalThoughts: 2,
+    nextThoughtNeeded: true,
+  }), signal());
+  await registry.execute(call('sequential_thinking', {
+    thought: 'First query step 2',
+    thoughtNumber: 2,
+    totalThoughts: 2,
+    nextThoughtNeeded: false,
+  }), signal());
+  assert.equal(registry.thoughtHistory.length, 2);
+
+  // Sequence 2: starts fresh with thoughtNumber 1
+  const freshRes = await registry.execute(call('sequential_thinking', {
+    thought: 'Second query step 1',
+    thoughtNumber: 1,
+    totalThoughts: 1,
+    nextThoughtNeeded: false,
+  }), signal());
+  const parsed = JSON.parse(freshRes.text);
+  assert.equal(parsed.historyLength, 1, 'history must reset on fresh sequence');
+  assert.equal(registry.thoughtHistory.length, 1);
+});
+
+test('sequential_thinking normalizes snake_case aliases from model calls', async t => {
+  const f = await fixture(t);
+  const registry = new ToolRegistry(f.cwd, async () => true, false);
+
+  const res = await registry.execute(
+    call('sequential_thinking', {
+      thought: 'Testing snake_case normalization',
+      thought_number: 1,
+      total_thoughts: 2,
+      next_thought_needed: true,
+      branch_id: 'test-branch',
+    }),
+    signal(),
+  );
+  const parsed = JSON.parse(res.text);
+  assert.equal(parsed.thoughtNumber, 1);
+  assert.equal(parsed.totalThoughts, 2);
+  assert.equal(parsed.nextThoughtNeeded, true);
+  assert.equal(parsed.branchId, 'test-branch');
+});

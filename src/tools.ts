@@ -30,9 +30,6 @@ const COLLAB_TOOLS = new Set([
   'agent_network', 'run_workflow',
   'update_plan', 'get_goal', 'create_goal', 'update_goal', 'request_user_input', 'view_image',
   'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource',
-  'list_mcp_prompts', 'get_mcp_prompt',
-  'mcp_create_entities', 'mcp_create_relations', 'mcp_add_observations', 'mcp_read_graph', 'mcp_search_nodes',
-  'sequential_thinking',
 ]);
 interface RegisteredTool {
   description: string; schema: FlexibleSchema<unknown>; readOnly: boolean;
@@ -353,6 +350,69 @@ export function normalizeToolInput(toolName: string, input: unknown): unknown {
     delete obj.prompt;
     delete obj.title;
   }
+  if (toolName === 'sequential_thinking') {
+    if (obj.thoughtNumber === undefined && typeof obj.thought_number === 'number') {
+      obj.thoughtNumber = obj.thought_number;
+    }
+    if (obj.totalThoughts === undefined && typeof obj.total_thoughts === 'number') {
+      obj.totalThoughts = obj.total_thoughts;
+    }
+    if (obj.nextThoughtNeeded === undefined && typeof obj.next_thought_needed === 'boolean') {
+      obj.nextThoughtNeeded = obj.next_thought_needed;
+    }
+    if (obj.isRevision === undefined && typeof obj.is_revision === 'boolean') {
+      obj.isRevision = obj.is_revision;
+    }
+    if (obj.revisesThought === undefined && typeof obj.revises_thought === 'number') {
+      obj.revisesThought = obj.revises_thought;
+    }
+    if (obj.branchFromThought === undefined && typeof obj.branch_from_thought === 'number') {
+      obj.branchFromThought = obj.branch_from_thought;
+    }
+    if (obj.branchId === undefined && typeof obj.branch_id === 'string') {
+      obj.branchId = obj.branch_id;
+    }
+    delete obj.thought_number;
+    delete obj.total_thoughts;
+    delete obj.next_thought_needed;
+    delete obj.is_revision;
+    delete obj.revises_thought;
+    delete obj.branch_from_thought;
+    delete obj.branch_id;
+  }
+  if (toolName === 'mcp_create_entities' && Array.isArray(obj.entities)) {
+    for (const ent of obj.entities) {
+      if (typeof ent === 'object' && ent !== null) {
+        const e = ent as Record<string, unknown>;
+        if (e.entityType === undefined && typeof e.entity_type === 'string') {
+          e.entityType = e.entity_type;
+          delete e.entity_type;
+        }
+      }
+    }
+  }
+  if (toolName === 'mcp_create_relations' && Array.isArray(obj.relations)) {
+    for (const rel of obj.relations) {
+      if (typeof rel === 'object' && rel !== null) {
+        const r = rel as Record<string, unknown>;
+        if (r.relationType === undefined && typeof r.relation_type === 'string') {
+          r.relationType = r.relation_type;
+          delete r.relation_type;
+        }
+      }
+    }
+  }
+  if (toolName === 'mcp_add_observations' && Array.isArray(obj.observations)) {
+    for (const obs of obj.observations) {
+      if (typeof obs === 'object' && obs !== null) {
+        const o = obs as Record<string, unknown>;
+        if (o.entityName === undefined && typeof o.entity_name === 'string') {
+          o.entityName = o.entity_name;
+          delete o.entity_name;
+        }
+      }
+    }
+  }
   return obj;
 }
 
@@ -443,6 +503,9 @@ export class ToolRegistry {
       }),
       readOnly: true,
       execute: async input => {
+        if (input.thoughtNumber === 1 && !input.isRevision && !input.branchFromThought) {
+          this.thoughtHistory = [];
+        }
         this.thoughtHistory.push(input);
         const branches = [...new Set(this.thoughtHistory.map(t => t.branchId).filter((b): b is string => Boolean(b)))];
         return limitText(JSON.stringify({
@@ -748,7 +811,8 @@ export class ToolRegistry {
       canonical === 'wait_agent' ||
       canonical === 'send_input' ||
       canonical === 'close_agent' ||
-      canonical === 'resume_agent'
+      canonical === 'resume_agent' ||
+      canonical === 'sequential_thinking'
     ) {
       return false; // serialize state transitions
     }

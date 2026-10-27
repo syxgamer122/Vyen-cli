@@ -105,3 +105,36 @@ test('KnowledgeGraph tools registered on ToolRegistry allow CRUD operations', as
   assert.equal(searchData.entities[0].name, 'PaymentGateway');
   assert.deepEqual(searchData.entities[0].observations, ['Stripe webhook', 'supports Apple Pay']);
 });
+
+test('KnowledgeGraph tools normalize snake_case aliases and allow read operations in read-only mode', async t => {
+  const f = await fixture(t);
+  const graphFile = join(f.cwd, 'knowledge-graph.jsonl');
+  const manager = new KnowledgeGraphManager({ userGraphPath: graphFile });
+
+  const mutatingRegistry = new ToolRegistry(f.cwd, async () => true, false);
+  manager.registerTools(mutatingRegistry);
+
+  await mutatingRegistry.execute(call('mcp_create_entities', {
+    entities: [{ name: 'UserMod', entity_type: 'module', observations: ['initial'] }],
+  }), signal());
+  await mutatingRegistry.execute(call('mcp_create_relations', {
+    relations: [{ from: 'UserMod', to: 'AuthMod', relation_type: 'depends_on' }],
+  }), signal());
+  await mutatingRegistry.execute(call('mcp_add_observations', {
+    observations: [{ entity_name: 'UserMod', contents: ['added feature'] }],
+  }), signal());
+
+  const readOnlyRegistry = new ToolRegistry(f.cwd, async () => false, true);
+  manager.registerTools(readOnlyRegistry);
+
+  const readRes = await readOnlyRegistry.execute(call('mcp_read_graph', { scope: 'user' }), signal());
+  const graphData = JSON.parse(readRes.text);
+  assert.equal(graphData.entities.length, 1);
+  assert.equal(graphData.entities[0].entityType, 'module');
+  assert.equal(graphData.relations.length, 1);
+  assert.equal(graphData.relations[0].relationType, 'depends_on');
+
+  const searchRes = await readOnlyRegistry.execute(call('mcp_search_nodes', { query: 'depends_on' }), signal());
+  const searchData = JSON.parse(searchRes.text);
+  assert.equal(searchData.relations.length, 1);
+});

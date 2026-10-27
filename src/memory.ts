@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
@@ -117,8 +117,13 @@ export async function saveGraph(
 
   const content = lines.length ? `${lines.join('\n')}\n` : '';
   const tempPath = `${filePath}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-  await writeFile(tempPath, content, 'utf8');
-  await rename(tempPath, filePath);
+  try {
+    await writeFile(tempPath, content, { encoding: 'utf8', mode: 0o600 });
+    await rename(tempPath, filePath);
+  } catch (err) {
+    try { await unlink(tempPath); } catch {}
+    throw err;
+  }
 }
 
 export interface KnowledgeGraphManagerOptions {

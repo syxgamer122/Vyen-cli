@@ -556,8 +556,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         stdout.write(JSON.stringify(res, null, 2) + '\n');
         return;
       }
+      if (sub === 'presets') {
+        const { listPresets } = await import('./mcp-presets.js');
+        stdout.write(JSON.stringify(listPresets(), null, 2) + '\n');
+        return;
+      }
       if (sub !== 'check') {
-        throw new Error('Usage: vyen mcp list | check [name] | get <name> | add [name] [--preset <preset>] ... | remove <name> | import-codex [name...]');
+        throw new Error('Usage: vyen mcp list | check [name] | get <name> | presets | add [name] [--preset <preset>] ... | remove <name> | import-codex [name...]');
       }
       const targetFilter = positionals[2];
       const view = await loadView();
@@ -1197,13 +1202,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           subagents = new Subagents(runtime, store, reg, emit, hookBus);
           subagents.register();
         }
-        {
-          const { KnowledgeGraphManager } = await import('./memory.js');
-          const kg = new KnowledgeGraphManager({
-            projectGraphPath: join(runtime.cwd, '.vyen', 'knowledge-graph.jsonl'),
-          });
-          kg.registerTools(reg);
-        }
+        const { KnowledgeGraphManager } = await import('./memory.js');
+        const kg = new KnowledgeGraphManager({
+          projectGraphPath: join(runtime.cwd, '.vyen', 'knowledge-graph.jsonl'),
+        });
+        kg.registerTools(reg);
         {
           // Workflows run prompts and shell steps themselves; subagent and network steps degrade
           // to a prompt when --no-subagents removed those features, so the tool stays available.
@@ -1234,6 +1237,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                     const stepReadOnly = reg.readOnly || Boolean(step.readOnly) || step.mode === 'readonly';
                     const childTools = new ToolRegistry(runtime.cwd, req => reg.approve(req));
                     childTools.policy = reg.policy;
+                    kg.registerTools(childTools);
                     applyPermissionMode(
                       childTools,
                       stepReadOnly ? 'readonly' : reg.planMode || step.mode === 'plan' ? 'plan' : 'ask',
@@ -1700,7 +1704,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             '  /export [filename.md]             Export session transcript to a Markdown file\n' +
             '  /init                             Generate or update AGENTS.md for this project\n' +
             '  /status, /debug-config, /warnings Show session status, config layers, or runtime warnings\n' +
-            '  /mcp [list|check|prompts|import-codex|reload] Inspect, check, list prompts, reload, or import Codex MCP servers\n' +
+            '  /mcp [list|check|prompts|presets|import-codex|reload] Inspect, check, list prompts/presets, reload, or import Codex MCP servers\n' +
             '  /subagents [list|show <id>|<task>] List spawned subagents, view transcript, or run a subagent\n' +
             '  /tools                            List active tools in current mode\n' +
             '  /sessions                         List saved workspace sessions\n' +
@@ -3493,6 +3497,16 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               if (!found) display('No prompts exposed by connected MCP servers.\n');
               continue;
             }
+            if (sub === 'presets') {
+              const { listPresets } = await import('./mcp-presets.js');
+              const presets = listPresets();
+              display('Available MCP server presets:\n');
+              for (const p of presets) {
+                display(`  - ${p.name}: ${p.description}\n`);
+              }
+              display('\nInstall with: vyen mcp add --preset <name> [--scope=user|project]\n');
+              continue;
+            }
             if (sub === 'check') {
               await rebuildHarness({ reconnectMcp: true });
               for (const st of manager?.statuses ?? []) {
@@ -3500,7 +3514,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               }
               continue;
             }
-            display('Usage: /mcp [list | check | prompts | reload | import-codex [names...] | remove <name>]\n');
+            display('Usage: /mcp [list | check | prompts | presets | reload | import-codex [names...] | remove <name>]\n');
             continue;
           }
           if (input === '/subagents' || input === '/agents' || input === '/agent' || input.startsWith('/subagents ') || input.startsWith('/agents ') || input.startsWith('/agent ')) {

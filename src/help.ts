@@ -11,7 +11,7 @@ Usage: vyen [options] [prompt]
        vyen setup
        vyen init --provider openai-compatible --base-url URL --model MODEL [--effort LEVEL]
        vyen doctor | sessions
-       vyen mcp list | check [name] | get <name> | add [name] [--preset <preset>] ... [--scope=user|project] [--project] | remove <name> [--scope=user|project] [--project] | import-codex [name...]
+       vyen mcp list | check [name] | get <name> | presets | add [name] [--preset <preset>] ... [--scope=user|project] [--project] | remove <name> [--scope=user|project] [--project] | import-codex [name...]
        vyen upgrade [VERSION] [--method npm|pnpm|yarn|bun] [--dry-run]
 
 Options:

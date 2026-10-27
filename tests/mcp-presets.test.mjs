@@ -58,3 +58,13 @@ test('preset CLI honours --trust flag for user servers', async t => {
   assert.ok(json.servers.memory);
   assert.equal(json.servers.memory.trust, true);
 });
+
+test('mcp presets CLI command lists available presets as JSON', async t => {
+  const f = await fixture(t);
+  const res = await cli(f, false, ['mcp', 'presets'], { baseUrl: false }).done;
+  assert.equal(res.code, 0, res.stderr);
+  const parsed = JSON.parse(res.stdout);
+  assert.ok(Array.isArray(parsed));
+  assert.ok(parsed.some(p => p.name === 'memory'));
+  assert.ok(parsed.some(p => p.name === 'sequentialthinking'));
+});
