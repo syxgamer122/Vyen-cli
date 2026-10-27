@@ -88,12 +88,13 @@ const TRANSCRIPT_KEEP_CHARS = 120_000;
 interface ParseState {
   block: 'normal' | 'answer' | 'reasoning';
   inCode: boolean;
+  codeLang?: string;
   inDiff: boolean;
   answerFirst: boolean;
   lastWasUser: boolean;
   inBanner: boolean;
 }
-const initialParseState = (): ParseState => ({ block: 'normal', inCode: false, inDiff: false, answerFirst: false, lastWasUser: false, inBanner: false });
+const initialParseState = (): ParseState => ({ block: 'normal', inCode: false, codeLang: undefined, inDiff: false, answerFirst: false, lastWasUser: false, inBanner: false });
 /** First line of the welcome banner (see welcomeBanner in cli.ts). */
 const BANNER_TITLE_RE = /^◆ vyen v\S+\s*$/;
 const BANNER_LABEL_RE = /(^|\s)(model|effort|mode|gateway|workspace|session|branch)(?= )/g;
@@ -125,6 +126,7 @@ interface Row {
   glyph?: string;
   sign?: '+' | '-' | ' ';
   level?: number;
+  lang?: string;
 }
 
 export function formatTokenCount(n: number): string {
@@ -307,6 +309,102 @@ export function formatInlineMarkdown(raw: string, baseSgr = '\x1b[0m'): string {
   out = out.replace(/\*\*([^*]+)\*\*/g, `\x1b[1m$1\x1b[22m${baseSgr}`);
   // Strikethrough ~~...~~
   out = out.replace(/~~([^~]+)~~/g, `\x1b[9m$1\x1b[29m${baseSgr}`);
+  return out;
+}
+
+const JS_KEYWORDS = new Set([
+  'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
+  'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'from',
+  'function', 'if', 'import', 'in', 'instanceof', 'interface', 'let', 'new', 'of',
+  'return', 'super', 'switch', 'this', 'throw', 'try', 'type', 'typeof', 'var', 'void',
+  'while', 'with', 'yield', 'enum', 'implements', 'declare', 'namespace', 'readonly',
+  'private', 'protected', 'public', 'static', 'override', 'as', 'fn', 'mut', 'val',
+]);
+
+const PY_KEYWORDS = new Set([
+  'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue', 'def',
+  'del', 'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if',
+  'import', 'in', 'is', 'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise',
+  'return', 'try', 'while', 'with', 'yield', 'match', 'case',
+]);
+
+const SH_KEYWORDS = new Set([
+  'if', 'then', 'else', 'elif', 'fi', 'case', 'esac', 'for', 'while', 'until',
+  'do', 'done', 'in', 'function', 'return', 'exit', 'local', 'export', 'source',
+  'alias', 'select', 'declare',
+]);
+
+const CODE_LITERALS = new Set([
+  'true', 'false', 'null', 'undefined', 'nil', 'None', 'True', 'False', 'NaN', 'Infinity',
+]);
+
+const CODE_TYPES = new Set([
+  'string', 'number', 'boolean', 'any', 'unknown', 'never', 'void', 'Promise', 'Array',
+  'Record', 'Map', 'Set', 'Object', 'Function', 'int', 'str', 'float', 'bool', 'list',
+  'dict', 'tuple', 'Optional', 'Union', 'Any',
+]);
+
+/** Syntax-highlights a single line of fenced code block with ANSI escapes according to language. */
+export function highlightCode(line: string, lang?: string): string {
+  if (!line) return line;
+  const l = (lang || '').toLowerCase().trim();
+  const isHash = ['py', 'python', 'sh', 'bash', 'zsh', 'shell', 'yaml', 'yml', 'rb', 'ruby', 'dockerfile'].includes(l);
+  const isPy = ['py', 'python'].includes(l);
+  const isSh = ['sh', 'bash', 'zsh', 'shell'].includes(l);
+  const isJson = ['json', 'jsonc'].includes(l);
+
+  const keywords = isPy ? PY_KEYWORDS : isSh ? SH_KEYWORDS : JS_KEYWORDS;
+
+  const tokenRegex = isHash
+    ? /(#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?\b)|(\b[a-zA-Z_$][a-zA-Z0-9_$]*\b)/g
+    : !l
+      ? /(?:\/\/.*$|\/\*.*?\*\/|^\s*#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?\b)|(\b[a-zA-Z_$][a-zA-Z0-9_$]*\b)/g
+      : /(\/\/.*$|\/\*.*?\*\/)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?\b)|(\b[a-zA-Z_$][a-zA-Z0-9_$]*\b)/g;
+
+  let lastIndex = 0;
+  let out = '';
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRegex.exec(line)) !== null) {
+    if (match.index > lastIndex) {
+      out += line.slice(lastIndex, match.index);
+    }
+    const [full, comment, str, num, ident] = match;
+    if (comment !== undefined) {
+      out += `${THEME.faint}${comment}${THEME.reset}`;
+    } else if (str !== undefined) {
+      if (isJson) {
+        const nextChar = line.slice(match.index + full.length).trimStart()[0];
+        if (nextChar === ':') {
+          out += `${THEME.info}${str}${THEME.reset}`;
+        } else {
+          out += `${THEME.ok}${str}${THEME.reset}`;
+        }
+      } else {
+        out += `${THEME.ok}${str}${THEME.reset}`;
+      }
+    } else if (num !== undefined) {
+      out += `${THEME.warn}${num}${THEME.reset}`;
+    } else if (ident !== undefined) {
+      if (CODE_LITERALS.has(ident)) {
+        out += `${THEME.warn}${ident}${THEME.reset}`;
+      } else if (keywords.has(ident)) {
+        out += `${THEME.brand}${ident}${THEME.reset}`;
+      } else if (CODE_TYPES.has(ident)) {
+        out += `${THEME.info}${ident}${THEME.reset}`;
+      } else {
+        out += ident;
+      }
+    } else {
+      out += full;
+    }
+    lastIndex = match.index + full.length;
+  }
+
+  if (lastIndex < line.length) {
+    out += line.slice(lastIndex);
+  }
+
   return out;
 }
 
@@ -2411,6 +2509,7 @@ export class TerminalUI {
       if (rawLine === '[normal]') {
         st.block = 'normal';
         st.inCode = false;
+        st.codeLang = undefined;
         st.inDiff = false;
         st.answerFirst = false;
         st.inBanner = false;
@@ -2419,6 +2518,7 @@ export class TerminalUI {
       if (rawLine.startsWith('[reasoning')) {
         st.block = 'reasoning';
         st.inCode = false;
+        st.codeLang = undefined;
         st.inDiff = false;
         if (showReasoning) {
           blank();
@@ -2430,6 +2530,7 @@ export class TerminalUI {
         blank();
         st.block = 'answer';
         st.inCode = false;
+        st.codeLang = undefined;
         st.inDiff = false;
         st.answerFirst = true;
         continue;
@@ -2440,6 +2541,7 @@ export class TerminalUI {
         st.lastWasUser = true;
         st.block = 'normal';
         st.inCode = false;
+        st.codeLang = undefined;
         st.inDiff = false;
         continue;
       }
@@ -2452,17 +2554,20 @@ export class TerminalUI {
       if (trimmed.startsWith('```')) {
         if (st.inCode) {
           st.inCode = false;
+          st.codeLang = undefined;
           blank();
         } else {
           st.inCode = true;
           st.inDiff = false;
           st.answerFirst = false;
-          rows.push({ kind: 'codeHead', pre: '', text: trimmed.slice(3).trim() || 'code' });
+          const rawLang = trimmed.slice(3).trim();
+          st.codeLang = rawLang.toLowerCase() || undefined;
+          rows.push({ kind: 'codeHead', pre: '', text: rawLang || 'code' });
         }
         continue;
       }
       if (st.inCode) {
-        wrapInto('code', rawLine.replace(/\t/g, '  ').trimEnd(), '    ', '    ', {}, false);
+        wrapInto('code', rawLine.replace(/\t/g, '  ').trimEnd(), '    ', '    ', { lang: st.codeLang }, false);
         continue;
       }
 
@@ -2615,7 +2720,7 @@ export class TerminalUI {
         return `  ${T.faint}${sliceVisible(row.text, Math.max(1, cols - 2))}${R}`;
       case 'code':
         // A dim gutter instead of a background block: readable on any terminal theme.
-        return `  ${T.faint}│${R} ${row.text}`;
+        return `  ${T.faint}│${R} ${highlightCode(row.text, row.lang)}`;
       case 'codeFoot':
         return '';
       case 'cell':

@@ -1360,3 +1360,49 @@ test('Codex /goal system: formatting, draft parsing, get_goal/create_goal/update
   assert.equal(cliStep, 4, 'CLI should run Turn 1 (2 model calls) + automatic Continuation Turn 2 (2 model calls)');
   assert.equal(sawContinuationXml, true, 'Continuation turn must include Codex goal continuation XML');
 });
+
+test('syntax highlighting: Markdown fenced code blocks highlight keywords, strings, comments, numbers, and JSON keys in TUI', async t => {
+  const { highlightCode } = await import('../dist/tui.js');
+  assert.equal(typeof highlightCode, 'function', 'highlightCode must be an exported function');
+
+  // 1. TypeScript / JavaScript
+  const tsOut = highlightCode('const count: number = 42; // item count', 'ts');
+  assert.match(tsOut, new RegExp(THEME.brand.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + 'const'));
+  assert.match(tsOut, new RegExp(THEME.info.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + 'number'));
+  assert.match(tsOut, new RegExp(THEME.warn.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '42'));
+  assert.match(tsOut, new RegExp(THEME.faint.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '\\/\\/ item count'));
+
+  // 2. Python
+  const pyOut = highlightCode('def calculate(x: int) -> bool:\n    return x > 0 and True # comment', 'py');
+  assert.match(pyOut, new RegExp(THEME.brand.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + 'def'));
+  assert.match(pyOut, new RegExp(THEME.warn.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + 'True'));
+  assert.match(pyOut, new RegExp(THEME.faint.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '# comment'));
+
+  // 3. Shell
+  const shOut = highlightCode('if [ -f "$FILE" ]; then echo "done"; fi', 'bash');
+  assert.match(shOut, new RegExp(THEME.brand.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + 'if'));
+  assert.match(shOut, new RegExp(THEME.brand.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + 'then'));
+  assert.match(shOut, new RegExp(THEME.ok.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '"done"'));
+
+  // 4. JSON: keys vs values
+  const jsonKeyOut = highlightCode('  "status": "active",', 'json');
+  assert.match(jsonKeyOut, new RegExp(THEME.info.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '"status"'));
+  assert.match(jsonKeyOut, new RegExp(THEME.ok.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '"active"'));
+
+  // 5. Strings must not false-match keywords inside them
+  const strOut = highlightCode('const msg = "function return true // not comment";', 'js');
+  assert.match(strOut, new RegExp(THEME.ok.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '"function return true // not comment"'));
+
+  // 6. TerminalUI end-to-end integration: renderedFrame includes highlighted code block in rich mode
+  const tty = terminal(t);
+  tty.output.columns = 80;
+  tty.output.rows = 24;
+  tty.ui.markTurnStart();
+  tty.ui.event({ type: 'text', text: '```ts\nconst total = 99;\n```\n' });
+  await new Promise(resolve => setTimeout(resolve, 30));
+
+  const frame = tty.ui.renderedFrame();
+  assert.match(frame, /│/);
+  assert.match(frame, new RegExp(THEME.brand.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + 'const'));
+  assert.match(frame, new RegExp(THEME.warn.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + '99'));
+});
