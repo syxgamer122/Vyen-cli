@@ -135,23 +135,33 @@ export function normalizeToolInput(toolName: string, input: unknown): unknown {
   }
   if (toolName === 'edit_file') {
     if (obj.oldText === undefined) {
-      const aliasOld = obj.old_string ?? obj.old_str;
+      const aliasOld = obj.old_string ?? obj.old_str ?? obj.old_text;
       if (aliasOld !== undefined) obj.oldText = aliasOld;
     }
     if (obj.newText === undefined) {
-      const aliasNew = obj.new_string ?? obj.new_str;
+      const aliasNew = obj.new_string ?? obj.new_str ?? obj.new_text;
       if (aliasNew !== undefined) obj.newText = aliasNew;
+    }
+    if (obj.replaceAll === undefined && typeof obj.replace_all === 'boolean') {
+      obj.replaceAll = obj.replace_all;
     }
     delete obj.old_string;
     delete obj.old_str;
+    delete obj.old_text;
     delete obj.new_string;
     delete obj.new_str;
+    delete obj.new_text;
+    delete obj.replace_all;
   }
   if (toolName === 'bash') {
     if (obj.command === undefined && obj.cmd !== undefined) {
       obj.command = obj.cmd;
     }
     delete obj.cmd;
+    if (obj.timeoutMs === undefined && obj.timeout_ms !== undefined) {
+      obj.timeoutMs = obj.timeout_ms;
+    }
+    delete obj.timeout_ms;
     if (typeof obj.command === 'string') {
       obj.command = sanitizeBashCommand(obj.command);
     }

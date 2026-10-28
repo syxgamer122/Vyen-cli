@@ -141,6 +141,13 @@ function buildToolMeta(toolName: string, rawInput: unknown): ToolEventMeta {
     const count = Array.isArray(rec.plan) ? rec.plan.length : 0;
     return { kind: 'other', summary: `${count} step(s)` };
   }
+  if (canonical === 'todo_write') {
+    const count = Array.isArray(rec.todos) ? rec.todos.length : 0;
+    return { kind: 'other', summary: `${count} todo(s)` };
+  }
+  if (canonical === 'todo_read') {
+    return { kind: 'read', summary: 'task checklist' };
+  }
   if (canonical === 'get_goal') {
     return { kind: 'other', summary: 'inspect active goal' };
   }

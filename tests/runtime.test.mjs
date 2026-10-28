@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fixture, provider, sse, cli } from './helpers.mjs';
+import { normalizeToolInput } from '../dist/tools.js';
 
 test('real CLI streams tool arguments, writes, resumes and preserves reasoning through edit', async t => {
   const f = await fixture(t);
@@ -711,4 +712,28 @@ test('the MCP phase uses its own abort scope and never the run controller', asyn
   assert.doesNotMatch(block, /(^|[^.\w])controller\s*=/m, 'the MCP phase must not assign the run controller');
   assert.match(block, /mcpController\s*=\s*new AbortController\(\)/);
   assert.match(source, /const live = \[controller, mcpController\]/);
+});
+
+test('normalizeToolInput maps standard snake_case arguments for edit_file and bash', () => {
+  const editNormalized = normalizeToolInput('edit_file', {
+    file_path: 'foo.ts',
+    old_text: 'hello',
+    new_text: 'world',
+    replace_all: true,
+  });
+  assert.deepEqual(editNormalized, {
+    path: 'foo.ts',
+    oldText: 'hello',
+    newText: 'world',
+    replaceAll: true,
+  });
+
+  const bashNormalized = normalizeToolInput('bash', {
+    cmd: 'echo 123',
+    timeout_ms: 5000,
+  });
+  assert.deepEqual(bashNormalized, {
+    command: 'echo 123',
+    timeoutMs: 5000,
+  });
 });

@@ -924,6 +924,9 @@ export class McpManager {
         for (const [hk, hv] of Object.entries(config.headers)) {
           const placeholder = parseEnvPlaceholder(hv);
           if (placeholder) {
+            if (isSecretEnv(placeholder.name)) {
+              throw new Error(`MCP ${server}: cannot forward protected credential variable "${placeholder.name}"`);
+            }
             const resolved = process.env[placeholder.name] ?? placeholder.fallback;
             if (!resolved) throw new Error(`MCP ${server}: missing environment variable ${placeholder.name}`);
             headers[hk] = resolved;
