@@ -23,6 +23,7 @@ import {
 import { safeError } from './errors.js';
 import { VERSION } from './version.js';
 import { HELP } from './help.js';
+import { EVENT_SCHEMA_VERSION } from './events.js';
 import type { Harness, HarnessEvent } from './harness.js';
 import type { SubagentEvent } from './subagents.js';
 import { InputCancelledError, terminalText as cleanTerminal, TerminalUI } from './tui.js';
@@ -388,6 +389,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'key-env': { type: 'string' }, resume: { type: 'string' }, pair: { type: 'boolean' }, yes: { type: 'boolean' },
       plan: { type: 'boolean' },
       'read-only': { type: 'boolean' }, json: { type: 'boolean' },
+      'output-format': { type: 'string' }, 'json-schema': { type: 'string' },
       'no-tui': { type: 'boolean' }, 'no-mcp': { type: 'boolean' }, 'no-subagents': { type: 'boolean' },
       'inline-reasoning': { type: 'string' }, 'show-reasoning': { type: 'boolean' },
       'context-window': { type: 'string' }, 'max-output-tokens': { type: 'string' },
@@ -414,9 +416,41 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     };
     const cliAllowedTools = collectToolList(values['allowed-tools']);
     const cliDisallowedTools = collectToolList(values['disallowed-tools']);
-    jsonOutput = values.json === true;
+    const rawJsonSchemaValue = values['json-schema'];
+    let parsedJsonSchema: Record<string, unknown> | undefined;
     if (values.help) { stdout.write(HELP); return; }
     if (values.version) { stdout.write(`vyen cli ${VERSION}\n`); return; }
+    const rawOutputFormat = values['output-format'];
+    if (rawOutputFormat !== undefined && (typeof rawOutputFormat !== 'string' || rawOutputFormat.trim() === '')) {
+      throw new Error('--output-format requires "text" or "stream-json".');
+    }
+    const outputFormatArg = typeof rawOutputFormat === 'string' ? rawOutputFormat.trim().toLowerCase() : undefined;
+    if (outputFormatArg && outputFormatArg !== 'text' && outputFormatArg !== 'stream-json') {
+      throw new Error(`Invalid --output-format "${outputFormatArg}". Expected "text" or "stream-json".`);
+    }
+    jsonOutput = outputFormatArg === 'stream-json' || values.json === true;
+    if (rawJsonSchemaValue !== undefined) {
+      let schemaError: string | undefined;
+      if (typeof rawJsonSchemaValue !== 'string' || rawJsonSchemaValue.trim() === '') {
+        schemaError = '--json-schema requires a non-empty JSON string or file path.';
+      } else {
+        const { loadJsonSchema } = await import('./events.js');
+        try {
+          parsedJsonSchema = await loadJsonSchema(rawJsonSchemaValue, resolve(values.cwd ?? '.'));
+        } catch (err) {
+          schemaError = (err as Error).message;
+        }
+      }
+      if (schemaError) {
+        if (jsonOutput) {
+          stdout.write(JSON.stringify({ type: 'error', message: schemaError }) + '\n');
+        } else {
+          stderr.write(`vyen: ${schemaError}\n`);
+        }
+        process.exitCode = 1;
+        return;
+      }
+    }
     // Update before reading config: a broken config must not stop the command
     // that can replace this installation. It also keeps the registry call out
     // of the normal startup path.
@@ -732,6 +766,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       }
       prompt = Buffer.concat(chunks).toString('utf8').trim();
       if (!prompt) throw new Error('Empty input. Supply --prompt or run in an interactive terminal.');
+    }
+    if (parsedJsonSchema) {
+      if (!prompt) {
+        throw new Error('--json-schema requires a prompt (-p or piped input).');
+      }
+      prompt = `${prompt}\n\nIMPORTANT: Your final response must strictly adhere to this JSON Schema:\n${JSON.stringify(parsedJsonSchema, null, 2)}\nProvide ONLY valid JSON conforming to the schema above (optionally wrapped in a \`\`\`json markdown code block).`;
     }
     // Auto-launch interactive setup wizard on first interactive run if unconfigured
     if (!prompt && stdin.isTTY && !jsonOutput && (!config.model || !(await resolveApiKey(config)))) {
@@ -1474,7 +1514,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       };
 
       starting = false;
-      if (jsonOutput) stdout.write(JSON.stringify({ type: 'session', id: store.session.id, cwd: runtime.cwd }) + '\n');
+      if (jsonOutput) stdout.write(JSON.stringify({ type: 'session', version: EVENT_SCHEMA_VERSION, id: store.session.id, cwd: runtime.cwd }) + '\n');
       else if (interactive) {
         display(welcomeBanner(runtime.model, runtime.provider, runtime.baseUrl, runtime.effort, runtime.cwd, store.session.id, mode));
         renderResumedHistory();
@@ -1517,7 +1557,34 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             const { writeFile } = await import('node:fs/promises');
             await writeFile(resolve(outputLastMessage), outText.endsWith('\n') ? outText : `${outText}\n`, 'utf8');
           }
-          if (jsonOutput) stdout.write(JSON.stringify({ type: 'done', text: outText, denied, sessionId: store.session.id }) + '\n');
+          let structuredOutput: unknown;
+          if (parsedJsonSchema) {
+            const { validateStructuredOutput } = await import('./events.js');
+            const validation = validateStructuredOutput(parsedJsonSchema, outText);
+            if (!validation.valid) {
+              hadError = true;
+              if (!interactive) process.exitCode = 1;
+              const errorPayload = {
+                type: 'error',
+                message: 'Final output does not conform to --json-schema',
+                schemaErrors: validation.errors,
+              };
+              if (jsonOutput) stdout.write(JSON.stringify(errorPayload) + '\n');
+              else display(`\nvyen: Final output does not conform to --json-schema: ${validation.errors?.map(e => `${e.path}: ${e.message}`).join(', ')}\n`);
+              return { aborted, hadError: true, text: outText };
+            }
+            structuredOutput = validation.data;
+          }
+          const donePayload: Record<string, unknown> = {
+            type: 'done',
+            text: outText,
+            denied,
+            sessionId: store.session.id,
+          };
+          if (structuredOutput !== undefined) {
+            donePayload.structuredOutput = structuredOutput;
+          }
+          if (jsonOutput) stdout.write(JSON.stringify(donePayload) + '\n');
           else if (tui) tui.write('\n'); else stdout.write('\n');
           if (denied && !interactive) process.exitCode = 2;
         } catch (error) {

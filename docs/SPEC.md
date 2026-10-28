@@ -41,6 +41,7 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   inherit tool hooks but do not emit global `SessionStart`/`SessionEnd`. CLI flags
   `--allowed-tools` and `--disallowed-tools` override layered settings. User deny
   cannot be widened by project rules; deny rules take effect even in auto mode.
+- Headless automation supports `--output-format stream-json|text` (`--json` aliases to `stream-json`). The `stream-json` stream emits versioned `v1` NDJSON events starting with `session` (`version: 'v1'`) once a session exists; a startup failure such as an invalid or unreadable `--json-schema` emits a single `error` event before any session is created. Callers enforce structured final output via `--json-schema`; output is validated with ajv and attached to `done.structuredOutput`. Missing schema files, invalid schema syntax, an Ajv-invalid schema, or model output violating the schema fail closed with exit code 1 and emit an `error` event. Unattended runs can cap consumption with `--run-token-budget`.
 - Help/init/doctor/sessions/upgrade perform no model request. No account login,
   plugin marketplace, telemetry, browser, native addons or bundled runtime.
   `vyen doctor --json` keeps `baseUrl` as the configured value or

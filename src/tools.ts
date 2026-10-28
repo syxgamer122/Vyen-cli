@@ -532,8 +532,7 @@ export class ToolRegistry {
       }),
       readOnly: true,
       execute: async input => {
-        this.todos = input.plan.map((item, idx) => ({
-          id: String(idx + 1),
+        this.todos = input.plan.map(item => ({
           content: item.step,
           status: item.status,
           priority: 'medium' as const,

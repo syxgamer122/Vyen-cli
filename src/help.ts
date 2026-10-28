@@ -26,7 +26,9 @@ Options:
       --pair                Start Cloudflared tunnel + QR device pairing on launch
       --yes                 Approve file changes and shell commands automatically
       --read-only           Read tools and research agents; no writes or shell
-      --json                Emit NDJSON events instead of terminal output
+      --output-format FORMAT stream-json | text (default: text, or stream-json with --json)
+      --json-schema SCHEMA   JSON Schema (inline string or file path) for structured final output
+      --json                Emit NDJSON events (alias for --output-format stream-json)
       --no-tui              Use plain readline instead of the full-screen UI
       --no-mcp              Disable configured MCP servers for this run
       --no-subagents        Disable delegation tools for this run

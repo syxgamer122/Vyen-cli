@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0
+
+- Chuẩn hóa giao diện Headless Contract (R1.4):
+  - Bổ sung cờ `--output-format stream-json|text` với schema `v1` có phiên bản (`--json` giữ vai trò alias tương thích ngược).
+  - Khởi tạo phiên `stream-json` với event `session` mang thông tin phiên bản `version: "v1"`.
+  - Hỗ trợ `--json-schema <inline-json|path>` ép kiểu đầu ra có cấu trúc (Structured Outputs) kiểm tra bởi Ajv, tự động nhúng vào event `done.structuredOutput`.
+  - Cơ chế fail-closed: nếu file schema không tồn tại, cú pháp JSON schema không hợp lệ, hoặc dữ liệu trả về của model vi phạm schema thì Vyen lập tức phát event `error` và thoát với mã lỗi `exitCode = 1`.
+  - Chuẩn hóa tài liệu cho `--run-token-budget` trong môi trường tự động hóa không giám sát.
+- Tách biệt module kiến trúc `src/events.ts` (R1.5 - "Extract on touch"):
+  - Quản lý tập trung toàn bộ Zod schemas, Ajv validator và kiểu dữ liệu sự kiện headless, mở rộng codebase lên 31 modules có kiểm soát.
+  - Hoàn tất toàn bộ các mục tiêu của Phase 1 (Extension seams).
+
 ## 0.4.0
 
 - Cấu hình phân tầng (`.vyen/settings.json`) với chính sách kiểm soát quyền `permissions.allow`,

@@ -7,18 +7,9 @@ import { safeError } from './errors.js';
 import { buildGoalBudgetLimitPrompt, compactIfNeeded, compactNow, estimatedTokens, expandFileMentions, recapSession, systemPrompt, type SystemPromptCache } from './context.js';
 import { AnswerProjection, visibleAnswer, withReasoningReplay, type AnswerPart } from './reasoning.js';
 import type { HookBus } from './hooks.js';
+import type { ToolEventMeta } from './events.js';
 
-export interface ToolEventMeta {
-  kind: 'read' | 'list' | 'search' | 'exec' | 'edit' | 'other';
-  summary: string;
-  durationMs?: number;
-  outputPreview?: string[];
-  omittedLines?: number;
-  diff?: string;
-  added?: number;
-  removed?: number;
-  verb?: 'Added' | 'Edited' | 'Deleted';
-}
+export type { ToolEventMeta };
 
 export type HarnessEvent =
   | { type: 'text'; text: string }

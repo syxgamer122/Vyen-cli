@@ -326,6 +326,7 @@ caller in turn to "make it work".
 | CLI entry, flags, slash commands | `src/cli.ts` |
 | Config paths, atomic writes | `src/config.ts` |
 | Error redaction | `src/errors.ts` |
+| Headless event schema v1 and structured output | `src/events.ts` |
 | Legacy `goon` → `vyen` migration | `src/migrate.ts` |
 | Remote pair server, Agent Network, workflows | `src/pair.ts`, `src/network.ts`, `src/workflow.ts` |
 | Setup, prompt files, help, update, version, exports | `src/setup.ts`, `src/prompts.ts`, `src/help.ts`, `src/update.ts`, `src/version.ts`, `src/index.ts` |

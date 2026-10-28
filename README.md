@@ -76,6 +76,8 @@ vyen -p 'Đọc repo, tìm nguyên nhân lỗi và sửa; chạy kiểm tra phù
 vyen --effort max -p 'Phân tích sâu và tối ưu hiệu năng'
 vyen --read-only -p 'Đọc và giải thích kiến trúc repo'
 vyen --yes -p 'Tự động duyệt mọi thao tác ghi file và bash'
+vyen --output-format stream-json -p 'Kiểm tra dự án' # xuất luồng NDJSON chuẩn v1 (--json là alias)
+vyen -p 'Trích xuất cấu trúc' --json --json-schema schema.json # đầu ra có cấu trúc; structuredOutput nằm trong event done
 vyen --json -p 'Kiểm tra dự án'
 printf '%s' 'Giải thích các file chính' | vyen --read-only
 git diff | vyen -p 'Review diff này'              # dữ liệu pipe vào stdin được đính kèm làm ngữ cảnh
@@ -365,6 +367,7 @@ npm install -g . --omit=dev
 | `src/prompts.ts`, `src/help.ts` | Prompt tuỳ biến `/prompts:<tên>`; nội dung `--help` (nạp nhanh, không kéo SDK) |
 | `src/files.ts`, `src/process.ts` | File I/O, unified diff, patch, backup cho /undo, bảo vệ `nul`, subprocess và lọc biến môi trường bí mật |
 | `src/session.ts` | Lock, checkpoint, rewind, resume và sửa lịch sử bị ngắt |
+| `src/events.ts` | Hợp đồng NDJSON `v1`, schema sự kiện Zod, xác thực `--json-schema` bằng Ajv |
 | `src/context.ts` | System prompt, `AGENTS.md`, `SKILL.md`, `memories.json`, `presets.json` và compaction |
 | `src/cli.ts`, `src/tui.ts` | Flags, giao diện TUI, Transcript Mode (`Ctrl+T`), popup `/slash` |
 | `src/mcp.ts` | MCP client, stdio/HTTP transport, resources, `import-codex`, lifecycle |

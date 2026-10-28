@@ -19,7 +19,7 @@ small enough to become one implementation plan with its own acceptance tests.
 | Lint | `node node_modules/oxlint/bin/oxlint src tests bin scripts` | exit 0 |
 | Test suite | `npm test` | 202 tests, 194 pass, 5 fail, 3 skipped, 184.9 s (on Windows, 5 platform tests are cleanly skipped, exiting 0 with 0 failures) |
 | Test inventory | 24 `tests/*.test.mjs`; 190 top-level `test(` blocks | runner reports 202 tests (some are nested) |
-| Source size | per-file line count | 30 modules (was 28 in Phase 1; memory.ts, mcp-presets.ts added) |
+| Source size | per-file line count | 31 modules (was 30; events.ts added in Phase 1) |
 | Vyen extension seams | grep `plugin|hook|extension|marketplace|sandbox|telemetry|otel|audit` over `src/` | HookBus (`src/hooks.ts`), Layered Settings (`src/settings.ts`), Policy Engine (`src/policy.ts`) implemented in Phase 1 |
 | Vyen permission rules | `src/config.ts` schema is `.strict()`; `src/approval.ts` | Layered allow/ask/deny rules in `.vyen/settings.json` and `src/policy.ts`; CLI `--allowed-tools`/`--disallowed-tools` |
 | Vyen MCP scope | `src/mcp.ts:192` | `mcpConfigPath()` is user config only; no project `.vyen/mcp.json` |
@@ -295,8 +295,8 @@ lifecycle events with fail-closed semantics, and `--trust-workspace` guards proj
 | R1.1 | Layered settings | user `config.json` + project `.vyen/settings.json`; `permissions.allow`, `ask`, `deny`; CLI `--allowed-tools`/`--disallowed-tools` | Completed (2026-10-25): project allow skips prompt, user deny wins, CLI overrides landed | M |
 | R1.2 | Hook bus | events: `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PreCompact`, `Stop`; command handlers with JSON stdin/stdout; matcher, timeout, exit 0/2 | Completed (2026-10-25): HookBus in `src/hooks.ts`, exit 2 / error / timeout denies tool, context injected on exit 0 | L |
 | R1.3 | Project MCP | `.vyen/mcp.json` merged with user config; source shown in `vyen mcp list`; user deny wins | Completed (2026-10-26): `.vyen/mcp.json` loaded after workspace trust, user definition wins on collision, project approval grants rejected, `--scope=project` supported | M |
-| R1.4 | Headless contract | `--output-format stream-json`, schema version `v1`, documented event union, `--json-schema` for the final answer; expose the existing `--run-token-budget` in the contract (no second budget flag) | an external consumer can validate every event against the schema; an invalid final answer fails with a clear exit code | M |
-| R1.5 | Extract on touch | move settings/policy/hooks/event types out of `cli.ts` as they land; no big-bang rewrite | `cli.ts` does not grow by more than the wiring; new modules have focused tests | M |
+| R1.4 | Headless contract | `--output-format stream-json`, schema version `v1`, documented event union, `--json-schema` for the final answer; expose the existing `--run-token-budget` in the contract (no second budget flag) | Completed (2026-10-28): NDJSON `v1` events, `src/events.ts`, `--output-format`, `--json-schema` fail-closed; external consumers can validate every emitted event with `streamJsonEventSchema` | M |
+| R1.5 | Extract on touch | move settings/policy/hooks/event types out of `cli.ts` as they land; no big-bang rewrite | In progress: `src/events.ts` extracted on 2026-10-28; `cli.ts` does not grow by more than the wiring; new modules have focused tests | M |
 
 Design constraints:
 - Hook input must never include the API key or the full environment.

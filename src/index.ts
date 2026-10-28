@@ -97,6 +97,11 @@ export {
   OFFICIAL_PRESETS,
 } from './mcp-presets.js';
 export type { PresetDefinition } from './mcp-presets.js';
-
-
-
+export {
+  EVENT_SCHEMA_VERSION,
+  streamJsonEventSchema,
+  validateStructuredOutput,
+  loadJsonSchema,
+  extractJsonFromText,
+} from './events.js';
+export type { StreamJsonEvent, StructuredOutputResult } from './events.js';

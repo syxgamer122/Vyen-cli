@@ -31,7 +31,7 @@ test('SPEC matches the implemented retry, budget and MCP-resource contract, and 
   assert.doesNotMatch(spec, /No sampling, OAuth, resources/);
 
   const sourceFiles = (await readdir('src')).filter(name => name.endsWith('.ts'));
-  assert.equal(sourceFiles.length, 30);
+  assert.equal(sourceFiles.length, 31);
   for (const file of sourceFiles) assert.ok(agents.includes(`src/${file}`), `AGENTS.md omits src/${file}`);
 
   const validationText = validation.replace(/\s+/g, ' ');
@@ -152,7 +152,7 @@ test('CHANGELOG.md records 0.4.0 release notes for settings, permissions, hooks,
 
 test('ROADMAP.md reflects completed Phase 1, 28 modules, and 5 Windows platform skips with zero test failures', async () => {
   const roadmap = await readFile('docs/ROADMAP.md', 'utf8');
-  assert.match(roadmap, /30 modules/, 'ROADMAP.md must reflect 30 modules in src/');
+  assert.match(roadmap, /31 modules/, 'ROADMAP.md must reflect 31 modules in src/');
   assert.match(roadmap, /Phase 1.*(?:completed|done)|R1\.1.*completed/i, 'ROADMAP.md must mark Phase 1 as completed');
   assert.match(roadmap, /0 failures|cleanly skipped|cleanly skips/i, 'ROADMAP.md must record 0 failures with platform skips on Windows');
 });
