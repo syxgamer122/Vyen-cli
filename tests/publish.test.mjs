@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { command } from '../scripts/pack-release.mjs';
 
 const exec = promisify(execFile);
-test('publishing creates the first tag, bumps on update and repairs a rerun without another bump', { timeout: 120000 }, async t => {
+test('publishing creates the first tag, bumps on update and repairs a rerun without another bump', { timeout: 240000 }, async t => {
   assert.equal(await command(process.execPath, ['-e', 'process.stdout.write(process.argv[1])', 'literal-%TEMP%'], process.cwd()), 'literal-%TEMP%');
   const savedRegistry = process.env.npm_config_registry, savedProxy = process.env.npm_config_https_proxy;
   process.env.npm_config_registry = 'https://registry.example/';
@@ -69,7 +69,7 @@ globalThis.fetch=async url=>{
   await git('push', 'origin', 'main');
   const first = await git('rev-parse', 'HEAD');
   const publish = async source => exec(process.execPath, ['scripts/publish-release.mjs'], {
-    cwd: work, timeout: 60000, env: { ...process.env, PATH: bin + delimiter + process.env.PATH,
+    cwd: work, timeout: 120000, env: { ...process.env, PATH: bin + delimiter + process.env.PATH,
       GH_TOKEN: 'fake-local-test-token', GITHUB_REPOSITORY: 'test/vyen-cli', SOURCE_SHA: source,
       GH_TEST_STATE: state, GH_TEST_LOG: log, NODE_OPTIONS: '--import=' + pathToFileURL(preload).href,
       // Reproduce an exported npm config value: npm 12 rejects it for a

@@ -9,6 +9,8 @@ import { limitText } from './files.js';
 import { childEnv } from './process.js';
 import type { HarnessEvent } from './harness.js';
 import type { SubagentEvent } from './subagents.js';
+import { getAuditLogger } from './audit.js';
+
 
 // ============================================================================
 // Pure TypeScript ISO/IEC 18004 QR Code Encoder (Versions 1..10, Level L, Byte)
@@ -983,6 +985,12 @@ export class PairManager {
     const addr = srv.address();
     this.port = typeof addr === 'object' && addr ? addr.port : (options?.port ?? 0);
     this.server = srv;
+    const startSessionId = this.callbacks.getState?.().sessionId ?? this.token;
+    void getAuditLogger().recordPairEvent({
+      sessionId: startSessionId,
+      action: 'session_start',
+      origin: this.bindHost,
+    });
 
     this.heartbeatTimer = setInterval(() => {
       for (const res of this.clients) {
@@ -1131,6 +1139,12 @@ export class PairManager {
   }
 
   async stop(): Promise<void> {
+    const stopSessionId = this.callbacks.getState?.().sessionId ?? this.token;
+    void getAuditLogger().recordPairEvent({
+      sessionId: stopSessionId,
+      action: 'session_stop',
+      origin: this.bindHost,
+    });
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
@@ -1521,6 +1535,15 @@ export class PairManager {
           res.end(JSON.stringify({ error: 'Approval request not found or already resolved' }));
           return;
         }
+        const originHeader = req.headers.origin || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'remote';
+        const origin = Array.isArray(originHeader) ? originHeader[0] : originHeader;
+        const approveSessionId = this.callbacks.getState?.().sessionId ?? this.token;
+        void getAuditLogger().recordPairEvent({
+          sessionId: approveSessionId,
+          action: decision === 'no' ? 'remote_deny' : 'remote_approve',
+          origin: String(origin),
+          tool: pending.tool,
+        });
         pending.resolve(decision);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, decision }));

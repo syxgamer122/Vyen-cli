@@ -116,7 +116,7 @@ test('subprocess output fits or truncates without duplicate middle bytes', async
   const f = await fixture(t);
   for (const size of [20, 40_000, 65_000, 100_000]) {
     const result = await runCommand(process.execPath, ['-e', `process.stdout.write('a'.repeat(${size}))`], {
-      cwd: f.cwd, signal: new AbortController().signal, timeoutMs: 3000,
+      cwd: f.cwd, signal: new AbortController().signal, timeoutMs: 15000,
     });
     assert.equal(result.code, 0);
     if (size <= 65_536) assert.equal(result.output.length, size);

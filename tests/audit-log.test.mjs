@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fixture, provider, sse, cli } from './helpers.mjs';

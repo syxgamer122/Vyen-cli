@@ -8,6 +8,7 @@ import { buildGoalBudgetLimitPrompt, compactIfNeeded, compactNow, estimatedToken
 import { AnswerProjection, visibleAnswer, withReasoningReplay, type AnswerPart } from './reasoning.js';
 import type { HookBus } from './hooks.js';
 import type { ToolEventMeta } from './events.js';
+import { AuditLogger, getAuditLogger } from './audit.js';
 
 export type { ToolEventMeta };
 
@@ -284,9 +285,11 @@ export class Harness {
   private turnHadSuccessfulTool = false;
   private turnHadFailedExec = false;
   private flushGoalProgressHook?: (allowStopped?: boolean) => void;
+  readonly auditLogger?: AuditLogger;
   constructor(readonly config: RuntimeConfig, readonly store: SessionStore, readonly tools: ToolRegistry,
-    readonly emit: (event: HarnessEvent) => void = () => {}, model?: LanguageModel, readonly hookBus?: HookBus) {
+    readonly emit: (event: HarnessEvent) => void = () => {}, model?: LanguageModel, readonly hookBus?: HookBus, auditLogger?: AuditLogger) {
     this.model = model ?? createModel(config, this.store.session.id);
+    this.auditLogger = auditLogger ?? getAuditLogger({ secretKeys: config.apiKey ? [config.apiKey] : [] });
     if (this.store.session.todos?.length) {
       this.tools.todos = [...this.store.session.todos];
     }
@@ -786,6 +789,14 @@ export class Harness {
               type: 'error-text',
               value: reason.startsWith('Tool execution') ? reason : `Tool execution blocked: ${reason}`,
             };
+            void this.auditLogger?.recordToolDecision({
+              sessionId: this.store.session.id,
+              tool: canonicalName,
+              decision: 'deny',
+              durationMs: meta.durationMs,
+              tokens: this.store.session.tokens ? { total: this.store.session.tokens } : undefined,
+              errorClass: reason,
+            });
             this.emit({ type: 'tool', name: call.toolName, id: call.toolCallId, state: 'error', meta });
             return { type: 'tool-result' as const, toolCallId: call.toolCallId, toolName: call.toolName, output };
           }
@@ -834,6 +845,14 @@ export class Harness {
           ? `\n[Loop warning: ${call.toolName} was called ${this.repeatCount} times consecutively with identical arguments. Analyze the previous result and try a different approach.]`
           : '';
         output = { type: result.denied ? 'error-text' : 'text', value: result.text + loopNote };
+        void this.auditLogger?.recordToolDecision({
+          sessionId: this.store.session.id,
+          tool: canonicalName,
+          decision: result.denied ? 'deny' : 'allow',
+          durationMs: meta.durationMs,
+          tokens: this.store.session.tokens ? { total: this.store.session.tokens } : undefined,
+          errorClass: result.denied ? result.text : undefined,
+        });
         this.emit({ type: 'tool', name: call.toolName, id: call.toolCallId, state: result.denied ? 'error' : 'done', meta });
       } catch (error) {
         if (this.hookBus) {
@@ -848,6 +867,14 @@ export class Harness {
         }
         meta.durationMs = Date.now() - startedMs;
         output = { type: 'error-text', value: safeError(error, this.config.apiKey) };
+        void this.auditLogger?.recordToolDecision({
+          sessionId: this.store.session.id,
+          tool: call.toolName,
+          decision: 'deny',
+          durationMs: meta.durationMs,
+          tokens: this.store.session.tokens ? { total: this.store.session.tokens } : undefined,
+          errorClass: error instanceof Error ? error.message : String(error),
+        });
         this.emit({ type: 'tool', name: call.toolName, id: call.toolCallId, state: 'error', meta });
       }
       return { type: 'tool-result' as const, toolCallId: call.toolCallId, toolName: call.toolName, output };

@@ -246,6 +246,7 @@ tên lệnh, `$1`…`$9` là từng từ, `$$` là ký tự `$`.
 - Tool đọc ảnh do model gọi (`view_image`, `@ảnh` trong prompt của subagent) chỉ đọc trong workspace; ảnh ngoài workspace cần bạn duyệt. Ảnh bạn tự kéo/thả hoặc dán vẫn đọc được ở bất kỳ đâu.
 - Tool bị ẩn ở chế độ hiện tại (ví dụ `view_image`, subagent trong `--read-only`) không thể bị gọi "chui" bằng tên.
 - API key luôn nhập ẩn (`vyen setup`, `/setup`, `/key`); `vyen doctor` cảnh báo `credentials.json` có quyền quá rộng và base URL `http://` không phải loopback (key bị gửi dạng rõ).
+- **Nhật ký kiểm toán cục bộ (Local Audit Log)**: Tự động ghi nhận mọi quyết định gọi tool, phê duyệt từ xa qua mobile pair, thời gian chạy và token vào các file JSONL hàng ngày dưới `$XDG_DATA_HOME/vyen/audit/` (`audit-YYYY-MM-DD.jsonl`) với cơ chế ngắt file 10MB. Không bao giờ lưu prompt, nội dung file hay API key. Tắt hoàn toàn khi đặt biến môi trường `VYEN_AUDIT=off`.
 - Lưu ý: approval **không phải sandbox của hệ điều hành**; lệnh shell đã duyệt chạy với quyền của user hiện tại.
 
 ## Reasoning, Thinking Replay & Gateway Inline Think

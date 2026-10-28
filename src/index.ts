@@ -105,3 +105,18 @@ export {
   extractJsonFromText,
 } from './events.js';
 export type { StreamJsonEvent, StructuredOutputResult } from './events.js';
+export {
+  AuditLogger,
+  getAuditLogger,
+  auditRecordSchema,
+  toolAuditRecordSchema,
+  pairAuditRecordSchema,
+} from './audit.js';
+export type {
+  AuditRecord,
+  ToolAuditRecord,
+  PairAuditRecord,
+  ToolDecision,
+  PairAction,
+  AuditLoggerOptions,
+} from './audit.js';

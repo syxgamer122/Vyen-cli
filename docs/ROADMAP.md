@@ -19,7 +19,7 @@ small enough to become one implementation plan with its own acceptance tests.
 | Lint | `node node_modules/oxlint/bin/oxlint src tests bin scripts` | exit 0 |
 | Test suite | `npm test` | 202 tests, 194 pass, 5 fail, 3 skipped, 184.9 s (on Windows, 5 platform tests are cleanly skipped, exiting 0 with 0 failures) |
 | Test inventory | 24 `tests/*.test.mjs`; 190 top-level `test(` blocks | runner reports 202 tests (some are nested) |
-| Source size | per-file line count | 31 modules (was 30; events.ts added in Phase 1) |
+| Source size | per-file line count | 32 modules (was 30; events.ts added in Phase 1, audit.ts added in Phase 2) |
 | Vyen extension seams | grep `plugin|hook|extension|marketplace|sandbox|telemetry|otel|audit` over `src/` | HookBus (`src/hooks.ts`), Layered Settings (`src/settings.ts`), Policy Engine (`src/policy.ts`) implemented in Phase 1 |
 | Vyen permission rules | `src/config.ts` schema is `.strict()`; `src/approval.ts` | Layered allow/ask/deny rules in `.vyen/settings.json` and `src/policy.ts`; CLI `--allowed-tools`/`--disallowed-tools` |
 | Vyen MCP scope | `src/mcp.ts:192` | `mcpConfigPath()` is user config only; no project `.vyen/mcp.json` |
@@ -319,7 +319,7 @@ Goal: make the agent observable and honest about what it redacts.
 
 | ID | Item | Scope | Acceptance | Effort |
 |---|---|---|---|---|
-| R2.1 | Local audit log | JSONL under `$XDG_DATA_HOME/vyen/audit/`; fields: timestamp, session, tool, decision, duration, tokens, error class; pair session start/stop and remote approve/deny are recorded as decisions; no prompt or file content by default; size rotation; `VYEN_AUDIT=off` | a completed run writes one row per tool decision; a pair-controlled approval writes a row that names the remote origin; the configured API key never appears; opt-out writes nothing | M |
+| R2.1 | Local audit log | JSONL under `$XDG_DATA_HOME/vyen/audit/`; fields: timestamp, session, tool, decision, duration, tokens, error class; pair session start/stop and remote approve/deny are recorded as decisions; no prompt or file content by default; size rotation; `VYEN_AUDIT=off` | Completed (2026-10-28): non-blocking JSONL audit log under `$XDG_DATA_HOME/vyen/audit/audit-YYYY-MM-DD.jsonl` with 10MB chunk rotation; tool decisions and pair events recorded with origin; opt-out via `VYEN_AUDIT=off` | M |
 | R2.2 | Transcript secret scrubbing | redact configured key values and common token patterns before session JSON, NDJSON and audit rows are written | the configured secret cannot be recovered from any persisted file after restart; a test asserts the raw value is absent from every persisted file | M |
 | R2.3 | Web tools | `web_fetch` baseline; `web_search` only with a configured backend or provider-native search; both behind the policy layer; resolve every host and reject loopback/private/link-local/metadata addresses after DNS resolution, pin the checked address for the connection, and re-check after every redirect; per-domain allow/ask/deny; size and redirect caps | a private-address fetch is refused even when a public name resolves to `127.0.0.1`; a redirect to a private address is refused; an allowed public domain works; a denied domain asks or fails according to the rule | M |
 | R2.4 | Usage and cost | `/usage` with tokens by model and session; optional `modelPricing` config; no hardcoded prices | the report is derived from recorded usage, not estimated from prompt length | S |
