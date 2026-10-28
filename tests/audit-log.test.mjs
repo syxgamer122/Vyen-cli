@@ -4,7 +4,8 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fixture, provider, sse, cli } from './helpers.mjs';
-import { AuditLogger, auditRecordSchema } from '../dist/audit.js';
+import { AuditLogger, getAuditLogger, auditRecordSchema } from '../dist/audit.js';
+import { PairManager } from '../dist/pair.js';
 
 test('tool run writes a valid JSONL audit record with decision, tokens, and duration', async t => {
   const f = await fixture(t);
@@ -50,13 +51,12 @@ test('tool run writes a valid JSONL audit record with decision, tokens, and dura
 test('pair session lifecycle and remote approvals write audit records with origin', async t => {
   const f = await fixture(t);
   const auditDir = join(f.data, 'vyen', 'audit');
-  const logger = new AuditLogger({ baseDir: auditDir });
+  const logger = getAuditLogger({ baseDir: auditDir });
 
-  await logger.recordPairEvent({
-    sessionId: 'test-session-123',
-    action: 'session_start',
-    origin: 'https://pair.local:8443',
+  const pm = new PairManager({
+    getState: () => ({ sessionId: 'test-session-123' }),
   });
+  await pm.start({ skipTunnel: true });
 
   await logger.recordPairEvent({
     sessionId: 'test-session-123',
@@ -65,11 +65,7 @@ test('pair session lifecycle and remote approvals write audit records with origi
     tool: 'bash',
   });
 
-  await logger.recordPairEvent({
-    sessionId: 'test-session-123',
-    action: 'session_stop',
-    origin: 'https://pair.local:8443',
-  });
+  await pm.stop();
 
   const files = (await readdir(auditDir)).filter(name => name.endsWith('.jsonl'));
   assert.equal(files.length, 1);
@@ -80,7 +76,7 @@ test('pair session lifecycle and remote approvals write audit records with origi
 
   assert.equal(records[0].type, 'pair_event');
   assert.equal(records[0].action, 'session_start');
-  assert.equal(records[0].origin, 'https://pair.local:8443');
+  assert.ok(records[0].origin);
 
   assert.equal(records[1].type, 'pair_event');
   assert.equal(records[1].action, 'remote_approve');
@@ -88,6 +84,7 @@ test('pair session lifecycle and remote approvals write audit records with origi
 
   assert.equal(records[2].type, 'pair_event');
   assert.equal(records[2].action, 'session_stop');
+  assert.ok(records[2].origin);
 });
 
 test('VYEN_AUDIT=off disables audit logging and creates no files', async t => {
@@ -109,22 +106,28 @@ test('VYEN_AUDIT=off disables audit logging and creates no files', async t => {
 test('audit records redact configured API keys from error fields', async t => {
   const f = await fixture(t);
   const auditDir = join(f.data, 'vyen', 'audit');
-  const secretKey = 'sk-live-secret-test-key-12345';
-  const logger = new AuditLogger({
+  const secretKey1 = 'sk-live-secret-test-key-12345';
+  const secretKey2 = 'sk-subagent-child-key-67890';
+  const logger1 = getAuditLogger({
     baseDir: auditDir,
-    secretKeys: [secretKey],
+    secretKeys: [secretKey1],
   });
+  const logger2 = getAuditLogger({
+    secretKeys: [secretKey2],
+  });
+  assert.equal(logger1, logger2, 'getAuditLogger must preserve singleton instance');
 
-  await logger.recordToolDecision({
+  await logger2.recordToolDecision({
     sessionId: 'session-redact',
     tool: 'bash',
     decision: 'deny',
-    errorClass: `Error connecting with auth token: ${secretKey} at server`,
+    errorClass: `Error connecting with auth token: ${secretKey1} and child token: ${secretKey2} at server`,
   });
 
   const files = (await readdir(auditDir)).filter(name => name.endsWith('.jsonl'));
   const content = await readFile(join(auditDir, files[0]), 'utf8');
-  assert.equal(content.includes(secretKey), false, 'secret API key must be scrubbed from audit record');
+  assert.equal(content.includes(secretKey1), false, 'secret API key 1 must be scrubbed from audit record');
+  assert.equal(content.includes(secretKey2), false, 'secret API key 2 must be scrubbed from audit record');
   assert.match(content, /\[REDACTED\]/, 'secret must be replaced with [REDACTED]');
 });
 

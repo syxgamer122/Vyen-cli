@@ -824,7 +824,7 @@ export class ToolRegistry {
     const canonical = this.resolveToolName(name);
     return this.definitions.get(canonical)?.readOnly === true;
   }
-  async execute(call: ToolCall, signal: AbortSignal): Promise<{ text: string; denied?: boolean }> {
+  async execute(call: ToolCall, signal: AbortSignal): Promise<{ text: string; denied?: boolean; decision?: 'allow' | 'deny' | 'ask_approved' | 'ask_denied' }> {
     signal.throwIfAborted();
     const canonicalName = this.resolveToolName(call.toolName);
     const definition = this.definitions.get(canonicalName);
@@ -836,23 +836,32 @@ export class ToolRegistry {
     }
     const normalizedInput = normalizeToolInput(canonicalName, call.input);
     const input = definition.parse(normalizedInput);
+    let resolvedDecision: 'allow' | 'deny' | 'ask_approved' | 'ask_denied' = 'allow';
     if (this.policy) {
       const decision = this.policy({ tool: canonicalName, input });
       if (decision === 'deny') {
-        return { text: 'Permission denied by policy. Stop this run.', denied: true };
+        return { text: 'Permission denied by policy. Stop this run.', denied: true, decision: 'deny' };
       }
       if (decision === 'allow') {
-        // Explicitly allowed by policy
-      } else if ((decision === 'ask' || !definition.readOnly) && !await this.approve({ tool: canonicalName, input, signal })) {
-        return { text: 'Permission denied by the user. Stop this run.', denied: true };
+        resolvedDecision = 'allow';
+      } else if (decision === 'ask' || !definition.readOnly) {
+        const approved = await this.approve({ tool: canonicalName, input, signal });
+        if (!approved) {
+          return { text: 'Permission denied by the user. Stop this run.', denied: true, decision: 'ask_denied' };
+        }
+        resolvedDecision = 'ask_approved';
       }
-    } else if (!definition.readOnly && !await this.approve({ tool: canonicalName, input, signal })) {
-      return { text: 'Permission denied by the user. Stop this run.', denied: true };
+    } else if (!definition.readOnly) {
+      const approved = await this.approve({ tool: canonicalName, input, signal });
+      if (!approved) {
+        return { text: 'Permission denied by the user. Stop this run.', denied: true, decision: 'ask_denied' };
+      }
+      resolvedDecision = 'ask_approved';
     }
     signal.throwIfAborted();
-    try { return { text: await definition.execute(input, signal) }; }
+    try { return { text: await definition.execute(input, signal), decision: resolvedDecision }; }
     catch (error) {
-      if (error instanceof PermissionDeniedError) return { text: error.message, denied: true };
+      if (error instanceof PermissionDeniedError) return { text: error.message, denied: true, decision: 'deny' };
       throw error;
     }
   }

@@ -345,6 +345,9 @@ export class Harness {
   }
 
   async endSession(): Promise<void> {
+    try {
+      await this.auditLogger?.flush();
+    } catch {}
     if (
       !this.hookBus ||
       !this.sessionLifecycle ||
@@ -848,7 +851,7 @@ export class Harness {
         void this.auditLogger?.recordToolDecision({
           sessionId: this.store.session.id,
           tool: canonicalName,
-          decision: result.denied ? 'deny' : 'allow',
+          decision: result.decision ?? (result.denied ? 'deny' : 'allow'),
           durationMs: meta.durationMs,
           tokens: this.store.session.tokens ? { total: this.store.session.tokens } : undefined,
           errorClass: result.denied ? result.text : undefined,
@@ -866,14 +869,15 @@ export class Harness {
           }).catch(() => {});
         }
         meta.durationMs = Date.now() - startedMs;
-        output = { type: 'error-text', value: safeError(error, this.config.apiKey) };
+        const errText = safeError(error, this.config.apiKey);
+        output = { type: 'error-text', value: errText };
         void this.auditLogger?.recordToolDecision({
           sessionId: this.store.session.id,
           tool: call.toolName,
           decision: 'deny',
           durationMs: meta.durationMs,
           tokens: this.store.session.tokens ? { total: this.store.session.tokens } : undefined,
-          errorClass: error instanceof Error ? error.message : String(error),
+          errorClass: errText,
         });
         this.emit({ type: 'tool', name: call.toolName, id: call.toolCallId, state: 'error', meta });
       }

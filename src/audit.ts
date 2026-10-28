@@ -52,7 +52,7 @@ export interface AuditLoggerOptions {
 const DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 export class AuditLogger {
-  private readonly baseDir: string;
+  public readonly baseDir: string;
   private readonly maxFileSizeBytes: number;
   private readonly secretKeys: string[];
   private readonly enabled: boolean;
@@ -154,10 +154,7 @@ export class AuditLogger {
           return candidatePath;
         }
         index++;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-          return candidatePath;
-        }
+      } catch {
         return candidatePath;
       }
     }
@@ -167,8 +164,12 @@ export class AuditLogger {
 let globalAuditLogger: AuditLogger | undefined;
 
 export function getAuditLogger(options?: AuditLoggerOptions): AuditLogger {
-  if (!globalAuditLogger || options) {
+  if (!globalAuditLogger || (options?.baseDir && options.baseDir !== globalAuditLogger.baseDir)) {
     globalAuditLogger = new AuditLogger(options);
+  } else if (options?.secretKeys) {
+    for (const key of options.secretKeys) {
+      globalAuditLogger.addSecretKey(key);
+    }
   }
   return globalAuditLogger;
 }

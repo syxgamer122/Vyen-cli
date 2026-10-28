@@ -1140,7 +1140,7 @@ export class PairManager {
 
   async stop(): Promise<void> {
     const stopSessionId = this.callbacks.getState?.().sessionId ?? this.token;
-    void getAuditLogger().recordPairEvent({
+    await getAuditLogger().recordPairEvent({
       sessionId: stopSessionId,
       action: 'session_stop',
       origin: this.bindHost,
