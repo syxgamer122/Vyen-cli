@@ -308,3 +308,24 @@ test('text output stays the default and emits no NDJSON envelope', async t => {
   assert.equal(explicitText.code, 0, explicitText.stdout + explicitText.stderr);
   assert.equal(explicitText.stdout.trim(), 'plain text answer');
 });
+
+test('output-last-message does not write to disk if json-schema validation fails', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, (_, response) => sse(response, { text: 'invalid-non-json' }));
+  const outFile = join(f.cwd, 'out-test.txt');
+  const schema = JSON.stringify({ type: 'object', required: ['x'], properties: { x: { type: 'number' } } });
+  const run = await cli(f, p.url, ['--output-format', 'stream-json', '--json-schema', schema, '--output-last-message', outFile, '-p', 'x']).done;
+  assert.equal(run.code, 1);
+  const { existsSync } = await import('node:fs');
+  assert.equal(existsSync(outFile), false, 'output file must not be written when schema validation fails');
+});
+
+test('output-format text takes precedence when both --output-format text and --json are passed', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, (_, response) => sse(response, { text: 'hello text' }));
+  const run = await cli(f, p.url, ['--output-format', 'text', '--json', '-p', 'say hello']).done;
+  assert.equal(run.code, 0);
+  assert.equal(run.stdout.trim(), 'hello text');
+  assert.equal(run.stdout.includes('"type":"session"'), false, 'should emit text, not stream-json');
+});
+

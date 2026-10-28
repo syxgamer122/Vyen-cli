@@ -428,7 +428,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     if (outputFormatArg && outputFormatArg !== 'text' && outputFormatArg !== 'stream-json') {
       throw new Error(`Invalid --output-format "${outputFormatArg}". Expected "text" or "stream-json".`);
     }
-    jsonOutput = outputFormatArg === 'stream-json' || values.json === true;
+    jsonOutput = outputFormatArg !== undefined ? outputFormatArg === 'stream-json' : values.json === true;
     if (rawJsonSchemaValue !== undefined) {
       let schemaError: string | undefined;
       if (typeof rawJsonSchemaValue !== 'string' || rawJsonSchemaValue.trim() === '') {
@@ -1553,10 +1553,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         pairManager?.notifyUserPrompt(input);
         try {
           outText = await harness.run(input, controller.signal);
-          if (outputLastMessage) {
-            const { writeFile } = await import('node:fs/promises');
-            await writeFile(resolve(outputLastMessage), outText.endsWith('\n') ? outText : `${outText}\n`, 'utf8');
-          }
           let structuredOutput: unknown;
           if (parsedJsonSchema) {
             const { validateStructuredOutput } = await import('./events.js');
@@ -1574,6 +1570,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               return { aborted, hadError: true, text: outText };
             }
             structuredOutput = validation.data;
+          }
+          if (outputLastMessage) {
+            const { writeFile } = await import('node:fs/promises');
+            await writeFile(resolve(outputLastMessage), outText.endsWith('\n') ? outText : `${outText}\n`, 'utf8');
           }
           const donePayload: Record<string, unknown> = {
             type: 'done',
