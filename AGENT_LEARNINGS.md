@@ -58,7 +58,6 @@ of a rule in `AGENTS.md`. Two copies of one rule drift apart.
 - **Rule:** regex alternation branches `(A)|(B)|(C)|(D)` must have identical capturing group counts and index order.
 - **Guard:** `tests/tui.test.mjs` › "syntax highlighting: Markdown fenced code blocks highlight keywords, strings, comments, numbers, and JSON keys in TUI".
 
-## 12. Wire Schemas Must Be Validated Against Real Emitted Events
-- **Seen (2026-10-28):** the exported `v1` stream schema rejected the CLI's own events: tool `kind` values, todo `id/text` vs `content/priority`, goal statuses, subagent `phase/agentId` vs `id/state`, and missing `workflow_done`/`network_done`. The happy-path test passed because it never parsed emitted lines with the exported schema.
-- **Rule:** a hand-written wire schema reuses the canonical type/schema or is validated against a real emitted stream; every event family has a stream-level test that goes red when the shape is reverted.
-- **Guard:** `tests/headless.test.mjs` -> "every emitted event validates against the v1 schema during tool use"; "event schemas cover goal, workflow, network and reject the old drift".
+## 12. Wire Schemas Must Validate Against Real Emitted Events
+- **Rule:** wire schemas must reuse canonical types and validate against real emitted streams; every event family requires a stream-level test.
+- **Guard:** `tests/headless.test.mjs` › "every emitted event validates against the v1 schema during tool use".

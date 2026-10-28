@@ -67,16 +67,9 @@ The gate above only counts if the agent does not lower it.
   come from `VYEN_API_KEY` or `~/.config/vyen/credentials.json`. Redaction in `src/errors.ts`.
   Missing `~/.config/vyen/` or credentials/memories bootstrap on demand; never crash when absent.
 
-> **Guarded vs self-declared.** BOM, `@ts-ignore`, and reason-less `@ts-expect-error`
-> are guarded by `tests/repo-hygiene.test.mjs`; traceability tables by
-> `tests/plan-traceability.test.mjs`. The rest (`as any`, `--no-verify`, destructive
-> commands, bent evidence) are self-declared and non-negotiable.
-
 ### 1.2 Speculative hardening
 
-Before writing code for an edge case or unlikely failure, explain what breaks,
-its probability, and added complexity. Obtain approval before widening diff scope.
-Never weaken existing security, path, or permission invariants.
+Explain breaks, probability, and added complexity before writing edge-case code; obtain approval before widening diff scope. Never weaken security, path, or permission invariants.
 
 ## 2. New tests must be proven RED before the fix
 
