@@ -858,8 +858,8 @@ export class Harness {
         });
         this.emit({ type: 'tool', name: call.toolName, id: call.toolCallId, state: result.denied ? 'error' : 'done', meta });
       } catch (error) {
+        const canonicalName = normalizeToolName(call.toolName);
         if (this.hookBus) {
-          const canonicalName = normalizeToolName(call.toolName);
           const normalizedInput = normalizeToolInput(canonicalName, call.input);
           await this.hookBus.dispatch('PostToolUseFailure', {
             tool: canonicalName,
@@ -873,7 +873,7 @@ export class Harness {
         output = { type: 'error-text', value: errText };
         void this.auditLogger?.recordToolDecision({
           sessionId: this.store.session.id,
-          tool: call.toolName,
+          tool: canonicalName,
           decision: 'deny',
           durationMs: meta.durationMs,
           tokens: this.store.session.tokens ? { total: this.store.session.tokens } : undefined,

@@ -51,20 +51,31 @@ test('tool run writes a valid JSONL audit record with decision, tokens, and dura
 test('pair session lifecycle and remote approvals write audit records with origin', async t => {
   const f = await fixture(t);
   const auditDir = join(f.data, 'vyen', 'audit');
-  const logger = getAuditLogger({ baseDir: auditDir });
+  getAuditLogger({ baseDir: auditDir });
 
   const pm = new PairManager({
     getState: () => ({ sessionId: 'test-session-123' }),
   });
   await pm.start({ skipTunnel: true });
 
-  await logger.recordPairEvent({
-    sessionId: 'test-session-123',
-    action: 'remote_approve',
-    origin: 'https://pair.local:8443',
-    tool: 'bash',
-  });
+  const info = pm.getInfo();
+  const ac = new AbortController();
+  const pending = pm.requestRemoteApproval('bash', '$ echo hi', ac.signal);
 
+  const approveRes = await fetch(`http://127.0.0.1:${info.port}/api/approve?t=${info.token}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'https://pair.local:8443',
+    },
+    body: JSON.stringify({ id: pending.id, decision: 'yes' }),
+  });
+  assert.equal(approveRes.status, 200);
+  const decision = await pending.promise;
+  assert.equal(decision, 'yes');
+
+  await pm.stop();
+  // Idempotency check: calling stop() again should not emit another session_stop audit record
   await pm.stop();
 
   const files = (await readdir(auditDir)).filter(name => name.endsWith('.jsonl'));
@@ -81,6 +92,7 @@ test('pair session lifecycle and remote approvals write audit records with origi
   assert.equal(records[1].type, 'pair_event');
   assert.equal(records[1].action, 'remote_approve');
   assert.equal(records[1].tool, 'bash');
+  assert.equal(records[1].origin, 'https://pair.local:8443');
 
   assert.equal(records[2].type, 'pair_event');
   assert.equal(records[2].action, 'session_stop');
@@ -154,4 +166,30 @@ test('audit logger rotates to indexed chunk when file exceeds size limit', async
   const files = (await readdir(auditDir)).filter(name => name.endsWith('.jsonl')).sort();
   assert.ok(files.length >= 2, `expected at least 2 files after rollover, got ${files.length}: ${files.join(', ')}`);
   assert.ok(files.some(name => /\.\d+\.jsonl$/.test(name)), 'expected an indexed rollover chunk file');
+});
+
+test('audit records normalize aliased tool names on tool failure', async t => {
+  const f = await fixture(t);
+  const p = await provider(t, (req, response) => {
+    if (req.messages.some(m => m.role === 'tool')) {
+      sse(response, { text: 'Done.' });
+    } else {
+      sse(response, {
+        calls: [{ id: 'call_1', name: 'read', input: { path: 'nonexistent-missing-file.txt' } }],
+      });
+    }
+  });
+
+  const run = await cli(f, p.url, ['-p', 'read something']).done;
+  assert.equal(run.code, 0, run.stdout + run.stderr);
+
+  const auditDir = join(f.data, 'vyen', 'audit');
+  const files = (await readdir(auditDir)).filter(name => name.endsWith('.jsonl'));
+  assert.ok(files.length > 0);
+
+  const content = await readFile(join(auditDir, files[0]), 'utf8');
+  const records = content.trim().split(/\r?\n/).map(l => JSON.parse(l));
+  const failedToolRecord = records.find(r => r.type === 'tool_decision');
+  assert.ok(failedToolRecord, 'must record tool decision');
+  assert.equal(failedToolRecord.tool, 'read_file', 'aliased tool must record canonical name even on failure');
 });

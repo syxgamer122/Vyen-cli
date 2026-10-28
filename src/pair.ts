@@ -1139,12 +1139,14 @@ export class PairManager {
   }
 
   async stop(): Promise<void> {
-    const stopSessionId = this.callbacks.getState?.().sessionId ?? this.token;
-    await getAuditLogger().recordPairEvent({
-      sessionId: stopSessionId,
-      action: 'session_stop',
-      origin: this.bindHost,
-    });
+    if (this.server) {
+      const stopSessionId = this.callbacks.getState?.().sessionId ?? this.token;
+      await getAuditLogger().recordPairEvent({
+        sessionId: stopSessionId,
+        action: 'session_stop',
+        origin: this.bindHost,
+      });
+    }
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
