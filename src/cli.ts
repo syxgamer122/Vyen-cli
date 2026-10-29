@@ -485,9 +485,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       dataDir: dataDir(),
     });
     if (migration.error) {
-      stderr.write(`vyen: could not migrate the legacy goon data (${migration.error}). Copy ${legacyConfigDir()} to ${configDir()} manually.\\n`);
+      stderr.write(`vyen: could not migrate the legacy goon data (${migration.error}). Copy ${legacyConfigDir()} to ${configDir()} manually.\n`);
     } else if (migration.copied.length) {
-      stderr.write(`vyen: migrated ${migration.copied.length} entries from ${legacyConfigDir()} to ${configDir()}: ${migration.copied.join(', ')}\\n`);
+      stderr.write(`vyen: migrated ${migration.copied.length} entries from ${legacyConfigDir()} to ${configDir()}: ${migration.copied.join(', ')}\n`);
     }
     let config: Config = await loadConfig(overrides);
     if (positionals[0] === 'mcp') {
