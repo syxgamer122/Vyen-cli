@@ -1398,13 +1398,21 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         return { tools: reg, harness: new Harness(runtime, store, reg, emit, undefined, hookBus) };
       };
 
-      const setPermissionMode = (nextMode: PermissionMode) => {
+      /**
+       * `persist` is for the explicit commands (/mode, /auto) that state a preference.
+       * A transient switch - Shift+Tab, or a paired device tapping a mode button -
+       * must not rewrite the saved default: leaving vyen in auto would otherwise
+       * start every later session with auto-approve.
+       */
+      const setPermissionMode = (nextMode: PermissionMode, persist = false) => {
         if (nextMode === 'plan' && mode !== 'plan') prePlanMode = mode;
         mode = nextMode;
         applyPermissionMode(tools, mode);
         tui?.setMode(mode);
-        config.approvalMode = mode;
-        void saveConfig(config).catch(() => {});
+        if (persist) {
+          config.approvalMode = mode;
+          void saveConfig(config).catch(() => {});
+        }
         const label = mode === 'auto' ? 'auto-approve (all tools & commands auto-approved)' : mode;
         if (tui) tui.setNotice(`Mode: ${label}`);
         display(`\n[Mode switched to: ${label}]\n`);
@@ -1466,6 +1474,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         tui.onToggleMode = () => {
           const order: PermissionMode[] = ['ask', 'auto', 'plan', 'readonly'];
           const next = order[(order.indexOf(mode) + 1) % order.length];
+          // A keyboard toggle is a temporary look at another mode, not a saved preference.
           setPermissionMode(next);
         };
         tui.onCycleEffort = direction => {
@@ -1773,6 +1782,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                 display('\n[Blocked remote attempt to switch to auto-approve mode.]\n');
                 return;
               }
+              // A paired device changes this session only; the saved default is the user's.
               setPermissionMode(nextMode);
             },
             onRemoteStop: () => {
@@ -2278,7 +2288,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             display('Usage: /auto [on | off] (or /yolo)\n');
             return true;
           }
-          setPermissionMode(next);
+          // /auto is an explicit request: remember it.
+          setPermissionMode(next, true);
           return true;
         }
         if (cmdInput === '/mode' || cmdInput.startsWith('/mode ')) {
@@ -2306,7 +2317,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             display('Usage: /mode [ask | auto | plan | readonly]\n');
             return true;
           }
-          setPermissionMode(next);
+          // /mode states the mode the user wants from now on.
+          setPermissionMode(next, true);
           return true;
         }
         if (cmdInput === '/transcript' || cmdInput.startsWith('/transcript ')) {
