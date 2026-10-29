@@ -25,6 +25,38 @@ test('an all-digit 8-char session ID prefix resumes by prefix instead of being t
   await byIndex.close();
 });
 
+test('a recovery lock left by a crashed process is reclaimed, a live one is respected', async t => {
+  const f = await fixture(t), root = join(f.root, 'sessions');
+  const input = { cwd: f.cwd, provider: 'test', model: 'model', baseUrl: 'http://localhost/v1' };
+  const seed = await SessionStore.open(root, input);
+  await seed.close();
+  const id = seed.session.id;
+  const lock = join(root, `${id}.lock`);
+  // A lock owned by a PID that certainly does not exist, plus a recovery lock
+  // that a killed process left behind. Both must not block the session forever.
+  await writeFile(lock, '2147483646');
+  await writeFile(`${lock}.recovery`, '2147483646');
+  const reopened = await SessionStore.open(root, input, id);
+  assert.equal(reopened.session.id, id);
+  await reopened.close();
+
+  // A recovery lock held by a LIVE process still fails closed.
+  await writeFile(lock, '2147483646');
+  await writeFile(`${lock}.recovery`, String(process.pid));
+  await assert.rejects(SessionStore.open(root, input, id), /locked or undergoing recovery/);
+});
+
+test('deleting a session also removes a leftover recovery lock', async t => {
+  const f = await fixture(t), root = join(f.root, 'sessions');
+  const input = { cwd: f.cwd, provider: 'test', model: 'model', baseUrl: 'http://localhost/v1' };
+  const seed = await SessionStore.open(root, input);
+  const id = seed.session.id;
+  await seed.close();
+  await writeFile(join(root, `${id}.lock.recovery`), '2147483646');
+  assert.equal(await SessionStore.deleteSession(root, id.slice(0, 8)), id);
+  await assert.rejects(readFile(join(root, `${id}.lock.recovery`), 'utf8'), { code: 'ENOENT' });
+});
+
 test('session lock prevents two owners and resume retains message history', async t => {
   const f = await fixture(t), root = join(f.root, 'sessions');
   const input = { cwd: f.cwd, provider: 'test', model: 'model', baseUrl: 'http://localhost/v1' };

@@ -378,18 +378,13 @@ export class SessionStore {
       const recovery = `${lock}.recovery`;
       // Serialize stale-lock recovery: two reclaimers must not unlink the new
       // live owner's lock between the first unlink and exclusive reacquisition.
-      try { await SessionStore.acquire(recovery); }
-      catch { throw new Error('Session is locked or undergoing recovery.'); }
-      try {
+      await SessionStore.withRecoveryLock(recovery, async () => {
         const pid = Number(await readFile(lock, 'utf8'));
         if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error(`Invalid session lock: ${lock}`);
-        let dead = false;
-        try { process.kill(pid, 0); }
-        catch (e) { dead = (e as NodeJS.ErrnoException).code === 'ESRCH'; }
-        if (!dead) throw new Error('Session is already open in another process.');
+        if (SessionStore.isProcessAlive(pid)) throw new Error('Session is already open in another process.');
         await unlink(lock);
         await SessionStore.acquire(lock);
-      } finally { await unlink(recovery); }
+      });
       const secretKeys = [...(options?.secretKeys ?? [])];
       if (input.apiKey && !secretKeys.includes(input.apiKey)) {
         secretKeys.push(input.apiKey);
@@ -405,6 +400,31 @@ export class SessionStore {
   private static async acquire(lock: string) {
     const handle = await open(lock, 'wx', 0o600);
     try { await handle.writeFile(String(process.pid)); } finally { await handle.close(); }
+  }
+  /** True while a process with this PID exists. ESRCH is the only "gone" errno. */
+  private static isProcessAlive(pid: number): boolean {
+    try { process.kill(pid, 0); return true; }
+    catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
+  }
+  /**
+   * Runs `action` while holding the recovery lock. A recovery lock left behind
+   * by a crashed process would otherwise block the session forever, so an
+   * existing one is reclaimed only once its owner is proven dead; an
+   * unreadable one is treated as abandoned.
+   */
+  private static async withRecoveryLock<T>(recovery: string, action: () => Promise<T>): Promise<T> {
+    const reclaim = async (): Promise<void> => {
+      const pid = Number(await readFile(recovery, 'utf8').catch(() => ''));
+      if (Number.isSafeInteger(pid) && pid > 0 && SessionStore.isProcessAlive(pid)) {
+        throw new Error('Session is locked or undergoing recovery.');
+      }
+      await unlink(recovery).catch(() => {});
+      await SessionStore.acquire(recovery);
+    };
+    try { await SessionStore.acquire(recovery); }
+    catch { await reclaim(); }
+    try { return await action(); }
+    finally { await unlink(recovery).catch(() => {}); }
   }
   private static async load(root: string, input: SessionStoreInput, id: string, lock: string, resume: boolean, secretKeys: string[] = []) {
     try {
@@ -479,10 +499,8 @@ export class SessionStore {
     // A live owner keeps writing this session; removing its lock would let two processes share it.
     try {
       const pid = Number(await readFile(lock, 'utf8'));
-      if (Number.isSafeInteger(pid) && pid > 0) {
-        let alive = true;
-        try { process.kill(pid, 0); } catch (e) { alive = (e as NodeJS.ErrnoException).code !== 'ESRCH'; }
-        if (alive) throw new Error(`Session ${match.id.slice(0, 8)} is open in another vyen process (pid ${pid}).`);
+      if (Number.isSafeInteger(pid) && pid > 0 && SessionStore.isProcessAlive(pid)) {
+        throw new Error(`Session ${match.id.slice(0, 8)} is open in another vyen process (pid ${pid}).`);
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -492,10 +510,9 @@ export class SessionStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    try {
-      await unlink(lock);
-    } catch {
-      // ignore
+    // A crashed recovery leaves this behind; the session is gone, so must the lock.
+    for (const file of [lock, `${lock}.recovery`]) {
+      await unlink(file).catch(() => {});
     }
     return match.id;
   }
