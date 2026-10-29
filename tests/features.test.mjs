@@ -265,12 +265,28 @@ test('slash workflow and network use one shared budget and honour step permissio
   assert.match(workflowBlock, /const wfBudget: RunBudget = tools\.budget \?\?/);
   assert.match(workflowBlock, /applyPermissionMode\(tools, stepMode\)/);
   assert.match(workflowBlock, /budget: wfBudget/);
+  assert.match(workflowBlock, /runNetwork:\s*subagents\s*\?\s*async/, 'slash workflow must pass runNetwork conditionally when subagents are available');
 
   const networkStart = source.indexOf("input.startsWith('/network ') ||");
   assert.ok(networkStart > -1, 'the slash network branch must exist');
   const networkBlock = source.slice(networkStart);
   assert.match(networkBlock, /const netBudget: RunBudget = tools\.budget \?\?/);
   assert.match(networkBlock, /budget: netBudget/);
+});
+
+test('interactive /memories and /presets handle load parse errors with safeError', async () => {
+  const source = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8');
+  const memStart = source.indexOf("cmdInput === '/memories'");
+  const memEnd = source.indexOf("cmdInput === '/presets'", memStart);
+  assert.ok(memStart > -1 && memEnd > memStart, 'the /memories block must exist');
+  const memBlock = source.slice(memStart, memEnd);
+  assert.match(memBlock, /catch\s*\((?:error|err)\)\s*\{[^}]*safeError/, '/memories must handle errors gracefully with safeError');
+
+  const presetStart = memEnd;
+  const presetEnd = source.indexOf("cmdInput === '/mention'", presetStart);
+  assert.ok(presetEnd > presetStart, 'the /presets block must exist');
+  const presetBlock = source.slice(presetStart, presetEnd);
+  assert.match(presetBlock, /catch\s*\((?:error|err)\)\s*\{[^}]*safeError/, '/presets must handle errors gracefully with safeError');
 });
 
 test('cloudflared runs without credentials and is downloaded only after consent', async () => {

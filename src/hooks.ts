@@ -197,7 +197,7 @@ export async function isWorkspaceTrusted(
   const storePath = trustedWorkspacesFile();
   try {
     const raw = await readFile(storePath, 'utf8');
-    const records = JSON.parse(raw) as Record<string, string>;
+    const records = JSON.parse(raw.replace(/^\uFEFF/, '')) as Record<string, string>;
     const normalized = normalizeWorkspaceDir(cwd);
     return records[normalized] === expectedHash;
   } catch {

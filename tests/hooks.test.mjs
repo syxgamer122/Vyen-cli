@@ -65,6 +65,26 @@ test('project hooks require workspace trust and hash changes invalidate trust', 
   }
 });
 
+test('isWorkspaceTrusted strips BOM from trusted_workspaces.json', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vyen-trust-bom-'));
+  const oldXdg = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = join(dir, '.config');
+  try {
+    const hash = 'a'.repeat(64);
+    await recordWorkspaceTrust(dir, hash);
+    const storePath = join(process.env.XDG_CONFIG_HOME, 'vyen', 'trusted_workspaces.json');
+    const content = await readFile(storePath, 'utf8');
+    // Prepend UTF-8 BOM
+    await writeFile(storePath, '\uFEFF' + content, 'utf8');
+    const trusted = await isWorkspaceTrusted(dir, hash);
+    assert.equal(trusted, true, 'workspace should be trusted even if trusted_workspaces.json has a BOM');
+  } finally {
+    if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = oldXdg;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('hook bus executes PreToolUse command and exit 2 denies execution', async () => {
   const bus = new HookBus({
     cwd: process.cwd(),

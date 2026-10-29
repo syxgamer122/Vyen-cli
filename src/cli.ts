@@ -2104,86 +2104,96 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           return true;
         }
         if (cmdInput === '/memories' || cmdInput === '/memory' || cmdInput.startsWith('/memories ') || cmdInput.startsWith('/memory ')) {
-          const { loadMemories, saveMemories, memoriesPath } = await import('./context.js');
-          const rest = cmdInput.replace(/^\/memor(?:ies|y)\b/, '').trim();
-          const entries = await loadMemories();
-          if (!rest || rest.toLowerCase() === 'list') {
-            if (!entries.length) {
-              display(`No saved memories (${memoriesPath()}).\nUse "/memories add <note>" to save a persistent preference across sessions.\n`);
-            } else {
-              const lines = entries.map((m, i) => `  [${i + 1}] ${m.text} (${m.createdAt.slice(0, 10)})`);
-              display(`Saved Memories (${entries.length}):\n${lines.join('\n')}\n`);
+          try {
+            const { loadMemories, saveMemories, memoriesPath } = await import('./context.js');
+            const rest = cmdInput.replace(/^\/memor(?:ies|y)\b/, '').trim();
+            const entries = await loadMemories();
+            if (!rest || rest.toLowerCase() === 'list') {
+              if (!entries.length) {
+                display(`No saved memories (${memoriesPath()}).\nUse "/memories add <note>" to save a persistent preference across sessions.\n`);
+              } else {
+                const lines = entries.map((m, i) => `  [${i + 1}] ${m.text} (${m.createdAt.slice(0, 10)})`);
+                display(`Saved Memories (${entries.length}):\n${lines.join('\n')}\n`);
+              }
+              return true;
             }
-            return true;
-          }
-          if (rest.toLowerCase() === 'clear' || rest.toLowerCase() === 'reset') {
-            await saveMemories([]);
-            display('Cleared all saved memories.\n');
-            return true;
-          }
-          if (rest.toLowerCase().startsWith('rm ') || rest.toLowerCase().startsWith('remove ') || rest.toLowerCase().startsWith('del ')) {
-            const target = rest.replace(/^(?:rm|remove|del)\s+/i, '').trim();
-            const idx = Number(target) - 1;
-            if (Number.isInteger(idx) && idx >= 0 && idx < entries.length) {
-              const removed = entries.splice(idx, 1)[0];
-              await saveMemories(entries);
-              display(`Removed memory: "${removed.text}"\n`);
-            } else {
-              display(`Invalid memory index "${target}". Use /memories list.\n`);
+            if (rest.toLowerCase() === 'clear' || rest.toLowerCase() === 'reset') {
+              await saveMemories([]);
+              display('Cleared all saved memories.\n');
+              return true;
             }
+            if (rest.toLowerCase().startsWith('rm ') || rest.toLowerCase().startsWith('remove ') || rest.toLowerCase().startsWith('del ')) {
+              const target = rest.replace(/^(?:rm|remove|del)\s+/i, '').trim();
+              const idx = Number(target) - 1;
+              if (Number.isInteger(idx) && idx >= 0 && idx < entries.length) {
+                const removed = entries.splice(idx, 1)[0];
+                await saveMemories(entries);
+                display(`Removed memory: "${removed.text}"\n`);
+              } else {
+                display(`Invalid memory index "${target}". Use /memories list.\n`);
+              }
+              return true;
+            }
+            const note = rest.toLowerCase().startsWith('add ') ? rest.slice(4).trim() : rest;
+            entries.push({
+              id: String(Date.now()),
+              text: note,
+              createdAt: new Date().toISOString(),
+            });
+            await saveMemories(entries);
+            display(`Saved memory #${entries.length}: "${note}"\n`);
+            return true;
+          } catch (error) {
+            display(`Failed to load memories: ${safeError(error, runtime.apiKey)}\n`);
             return true;
           }
-          const note = rest.toLowerCase().startsWith('add ') ? rest.slice(4).trim() : rest;
-          entries.push({
-            id: String(Date.now()),
-            text: note,
-            createdAt: new Date().toISOString(),
-          });
-          await saveMemories(entries);
-          display(`Saved memory #${entries.length}: "${note}"\n`);
-          return true;
         }
         if (cmdInput === '/presets' || cmdInput === '/preset' || cmdInput.startsWith('/presets ') || cmdInput.startsWith('/preset ')) {
-          const { loadPresets, savePresets, presetsPath } = await import('./context.js');
-          const rest = cmdInput.replace(/^\/presets?\b/, '').trim();
-          const presets = await loadPresets();
-          if (!rest || rest.toLowerCase() === 'list') {
-            const list = Object.values(presets);
-            if (!list.length) {
-              display(`No saved prompt presets (${presetsPath()}).\nUse "/presets save <name> <prompt>" and "/presets run <name>".\n`);
-            } else {
-              const lines = list.map(p => `  ${p.name.padEnd(18)} — ${p.prompt.replace(/\s+/g, ' ').slice(0, 80)}`);
-              display(`Saved Presets (${list.length}):\n${lines.join('\n')}\n`);
-            }
-            return true;
-          }
-          if (rest.toLowerCase().startsWith('save ') || rest.toLowerCase().startsWith('add ')) {
-            const body = rest.replace(/^(?:save|add)\s+/i, '').trim();
-            const sp = body.search(/\s/);
-            if (sp <= 0) {
-              display('Usage: /presets save <name> <prompt text>\n');
+          try {
+            const { loadPresets, savePresets, presetsPath } = await import('./context.js');
+            const rest = cmdInput.replace(/^\/presets?\b/, '').trim();
+            const presets = await loadPresets();
+            if (!rest || rest.toLowerCase() === 'list') {
+              const list = Object.values(presets);
+              if (!list.length) {
+                display(`No saved prompt presets (${presetsPath()}).\nUse "/presets save <name> <prompt>" and "/presets run <name>".\n`);
+              } else {
+                const lines = list.map(p => `  ${p.name.padEnd(18)} — ${p.prompt.replace(/\s+/g, ' ').slice(0, 80)}`);
+                display(`Saved Presets (${list.length}):\n${lines.join('\n')}\n`);
+              }
               return true;
             }
-            const name = body.slice(0, sp).trim();
-            const promptText = body.slice(sp + 1).trim();
-            presets[name] = { name, prompt: promptText, updatedAt: new Date().toISOString() };
-            await savePresets(presets);
-            display(`Saved preset "${name}". Run it with: /presets run ${name}\n`);
-            return true;
-          }
-          if (rest.toLowerCase().startsWith('rm ') || rest.toLowerCase().startsWith('remove ')) {
-            const name = rest.replace(/^(?:rm|remove)\s+/i, '').trim();
-            if (!presets[name]) {
-              display(`Preset "${name}" not found.\n`);
+            if (rest.toLowerCase().startsWith('save ') || rest.toLowerCase().startsWith('add ')) {
+              const body = rest.replace(/^(?:save|add)\s+/i, '').trim();
+              const sp = body.search(/\s/);
+              if (sp <= 0) {
+                display('Usage: /presets save <name> <prompt text>\n');
+                return true;
+              }
+              const name = body.slice(0, sp).trim();
+              const promptText = body.slice(sp + 1).trim();
+              presets[name] = { name, prompt: promptText, updatedAt: new Date().toISOString() };
+              await savePresets(presets);
+              display(`Saved preset "${name}". Run it with: /presets run ${name}\n`);
               return true;
             }
-            delete presets[name];
-            await savePresets(presets);
-            display(`Removed preset "${name}".\n`);
+            if (rest.toLowerCase().startsWith('rm ') || rest.toLowerCase().startsWith('remove ')) {
+              const name = rest.replace(/^(?:rm|remove)\s+/i, '').trim();
+              if (!presets[name]) {
+                display(`Preset "${name}" not found.\n`);
+                return true;
+              }
+              delete presets[name];
+              await savePresets(presets);
+              display(`Removed preset "${name}".\n`);
+              return true;
+            }
+            // Let "/presets run <name>" fall through to main loop when idle so it executes `run(preset.prompt)`
+            return false;
+          } catch (error) {
+            display(`Failed to load presets: ${safeError(error, runtime.apiKey)}\n`);
             return true;
           }
-          // Let "/presets run <name>" fall through to main loop when idle so it executes `run(preset.prompt)`
-          return false;
         }
         if (cmdInput === '/mention' || cmdInput.startsWith('/mention ')) {
           const target = cmdInput.slice(8).trim();
@@ -3359,17 +3369,21 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             continue;
           }
           if (input.startsWith('/presets ') || input.startsWith('/preset ')) {
-            const { loadPresets } = await import('./context.js');
-            const rest = input.replace(/^\/presets?\s+/, '').trim();
-            const name = rest.replace(/^run\s+/i, '').trim();
-            const presets = await loadPresets();
-            const matched = presets[name];
-            if (!matched) {
-              display(`Preset "${name}" not found. Use "/presets list" or "/presets save <name> <prompt>".\n`);
-              continue;
+            try {
+              const { loadPresets } = await import('./context.js');
+              const rest = input.replace(/^\/presets?\s+/, '').trim();
+              const name = rest.replace(/^run\s+/i, '').trim();
+              const presets = await loadPresets();
+              const matched = presets[name];
+              if (!matched) {
+                display(`Preset "${name}" not found. Use "/presets list" or "/presets save <name> <prompt>".\n`);
+                continue;
+              }
+              display(`Running preset "${matched.name}":\n`);
+              await run(matched.prompt);
+            } catch (error) {
+              display(`Failed to run preset: ${safeError(error, apiKey)}\n`);
             }
-            display(`Running preset "${matched.name}":\n`);
-            await run(matched.prompt);
             continue;
           }
           if (input.startsWith('/workflow ') || input.startsWith('/workflows ')) {
@@ -3453,23 +3467,22 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                     tools.budget = previousBudget;
                   }
                 },
-                runNetwork: async (topic, roles, rounds, stepSig) => {
-                  if (!subagents) {
-                    display('Agent Network is disabled (--no-subagents); skipping the network step.\n');
-                    return '';
-                  }
-                  const netRes = await subagents.network.brainstorm({
-                    topic,
-                    roles,
-                    rounds,
-                    signal: stepSig,
-                    budget: wfBudget,
-                    onProgress: text => display(text),
-                  });
-                  const report = formatBrainstormReport(netRes);
-                  display(`\n${netRes.synthesis}\n`);
-                  return report;
-                },
+                runNetwork: subagents
+                  ? async (topic, roles, rounds, stepSig) => {
+                      const sa = subagents!;
+                      const netRes = await sa.network.brainstorm({
+                        topic,
+                        roles,
+                        rounds,
+                        signal: stepSig,
+                        budget: wfBudget,
+                        onProgress: text => display(text),
+                      });
+                      const report = formatBrainstormReport(netRes);
+                      display(`\n${netRes.synthesis}\n`);
+                      return report;
+                    }
+                  : undefined,
                 confirmStep: async (msg, stepSig) => {
                   if (mode === 'auto') return true;
                   const block = `\n▲ Workflow approval gate: ${msg}\n`;
