@@ -511,6 +511,11 @@ test('bash deny and ask rules cannot be bypassed by quoting or escaping the comm
     'xargs -r rm -rf /',
     'find / -exec rm -rf {} \\;',
     '{rm,-rf,/}',
+    // A brace or glob anywhere in the command word still runs `rm`; only the
+    // leading-brace form used to fail closed.
+    'r{m,} -rf /',
+    'r{m,-rf,/}',
+    '[r]m -rf /',
     'FOO=$(date) rm -rf /',
     'x=$(date) rm -rf /',
     'x=$(a $(b)) rm -rf /',

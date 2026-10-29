@@ -73,15 +73,27 @@ function normalizeCommandWord(segment: string): { word: string; rest: string; dy
   return { word, rest: segment.slice(index), dynamic };
 }
 
+/**
+ * True when the segment's command word is built by the shell rather than
+ * written literally: brace expansion (`{rm,-rf,/}`, `r{m,}`), glob patterns
+ * (`[r]m`, `*`) or `$'..'` quoting. Deny/ask rules must fail closed on these,
+ * because bash decides the real word at run time.
+ */
+function hasShellGeneratedWord(segment: string): boolean {
+  const word = segment.trim().split(/[\s;&|<>()`]/, 1)[0] ?? '';
+  return /[{}[\]]/.test(word) || word.startsWith('$');
+}
+
 function cleanCommandSegment(
   segment: string,
   depth = 0,
   platform: NodeJS.Platform = process.platform,
 ): { texts: string[]; dynamic: boolean } {
   let cleaned = segment.trim();
-  // `{a,b}` is brace expansion: the shell builds the command word, so deny/ask
-  // rules must fail closed instead of reading it as a literal name.
-  if (/^\{[^\s}]*,[^\s}]*\}/.test(cleaned)) return { texts: [cleaned], dynamic: true };
+  // Brace and glob expansion both let the shell build the command word from
+  // syntax the rule cannot see: `{rm,-rf,/}`, `r{m,}` and `[r]m` all run `rm`.
+  // A rule written for `rm` must fail closed instead of reading the literal.
+  if (hasShellGeneratedWord(cleaned)) return { texts: [cleaned], dynamic: true };
   let previous = '';
   while (previous !== cleaned) {
     previous = cleaned;
