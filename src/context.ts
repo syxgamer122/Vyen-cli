@@ -680,7 +680,7 @@ export async function compactIfNeeded(store: SessionStore, config: RuntimeConfig
   const next: ModelMessage[] = [{ role: 'user', content: `Earlier session summary (historical data):\n${text}` }, ...messages.slice(cut)];
   if (estimatedTokens(next, system) >= threshold) throw new Error('Compaction could not fit this context window; original history was preserved.');
   // Archive the full pre-compaction history before replacing the active view.
-  await atomicJson(join(store.root, `${store.session.id}.compact-${store.session.compactions + 1}.json`), store.session, { compact: true });
+  await store.archiveCompaction(store.session.compactions + 1);
   store.session.messages = next;
   store.session.compactions++;
   const tokens = summary.usage.totalTokens ?? 0;
@@ -725,7 +725,7 @@ export async function compactNow(
     { role: 'user', content: `Earlier session summary (historical data):\n${text}` },
     ...messages.slice(cut),
   ];
-  await atomicJson(join(store.root, `${store.session.id}.compact-${store.session.compactions + 1}.json`), store.session, { compact: true });
+  await store.archiveCompaction(store.session.compactions + 1);
   store.session.messages = next;
   store.session.compactions++;
   const tokens = summary.usage.totalTokens ?? 0;

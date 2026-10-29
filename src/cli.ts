@@ -20,7 +20,7 @@ import {
   resolveRuntime,
   saveConfig,
 } from './config.js';
-import { safeError, redactObject } from './errors.js';
+import { safeError, redactObject, redactSecrets } from './errors.js';
 import { VERSION } from './version.js';
 import { HELP } from './help.js';
 import { EVENT_SCHEMA_VERSION } from './events.js';
@@ -1097,7 +1097,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           } else {
             rawPreview = JSON.stringify(request.input, null, 2);
           }
-          const preview = cleanTerminal(rawPreview.split(runtime.apiKey).join('[REDACTED]').slice(0, 8000));
+          const preview = cleanTerminal(redactSecrets(rawPreview, { secretKeys: runtime.apiKey ? [runtime.apiKey] : [] }).slice(0, 8000));
           const prefix = request.tool === 'bash' ? bashApprovalPrefix(request.input) : undefined;
           const fullCommand = request.input && typeof request.input === 'object' ? String((request.input as { command?: unknown }).command ?? '').trim().split(/\s+/).join(' ') : '';
           const prefixHint = !prefix ? ''
@@ -2553,7 +2553,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           ];
           for (const m of store.session.messages) {
             lines.push(`## ${m.role.toUpperCase()}`);
-            lines.push(typeof m.content === 'string' ? m.content : JSON.stringify(m.content, null, 2));
+            const text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content, null, 2);
+            lines.push(redactSecrets(text, { secretKeys: apiKey ? [apiKey] : [] }));
             lines.push('');
           }
           try {
@@ -3503,7 +3504,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                 },
               });
               if (jsonOutput) {
-                stdout.write(JSON.stringify({ type: 'workflow_done', result: wfRes, sessionId: store.session.id }) + '\n');
+                const payload = redactObject({ type: 'workflow_done', result: wfRes, sessionId: store.session.id }, { secretKeys: apiKey ? [apiKey] : [] });
+                stdout.write(JSON.stringify(payload) + '\n');
               }
             } catch (error) {
               display(`\nWorkflow error: ${safeError(error, apiKey)}\n`);
@@ -3571,7 +3573,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               );
               await store.save();
               if (jsonOutput) {
-                stdout.write(JSON.stringify({ type: 'network_done', synthesis: netRes.synthesis, rounds: netRes.rounds }) + '\n');
+                const payload = redactObject({ type: 'network_done', synthesis: netRes.synthesis, rounds: netRes.rounds }, { secretKeys: apiKey ? [apiKey] : [] });
+                stdout.write(JSON.stringify(payload) + '\n');
               }
             } catch (error) {
               display(`\nAgent Network failed: ${safeError(error, apiKey)}\n`);

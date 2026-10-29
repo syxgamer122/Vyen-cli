@@ -80,13 +80,6 @@ export class AuditLogger {
   public async recordToolDecision(data: Omit<ToolAuditRecord, 'type' | 'timestamp'> & { timestamp?: string }): Promise<void> {
     if (!this.enabled) return;
 
-    let errorClass = data.errorClass;
-    if (errorClass && this.secretKeys.length > 0) {
-      for (const key of this.secretKeys) {
-        errorClass = errorClass.split(key).join('[REDACTED]');
-      }
-    }
-
     const record: ToolAuditRecord = {
       type: 'tool_decision',
       timestamp: data.timestamp ?? new Date().toISOString(),
@@ -95,7 +88,7 @@ export class AuditLogger {
       decision: data.decision,
       durationMs: data.durationMs,
       tokens: data.tokens,
-      errorClass,
+      errorClass: data.errorClass,
       subagentId: data.subagentId,
     };
 

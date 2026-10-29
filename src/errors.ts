@@ -8,7 +8,9 @@ export const COMMON_SECRET_PATTERNS: RegExp[] = [
   /sk-ant-[a-zA-Z0-9_-]{20,}/g,
   /AIza[0-9A-Za-z_-]{30,}/g,
   /gh[pousr]_[A-Za-z0-9_]{20,}/g,
+  /github_pat_[A-Za-z0-9_]{22,}/g,
   /glpat-[a-zA-Z0-9_-]{20,}/g,
+  /AKIA[0-9A-Z]{16}/g,
   /Bearer\s+[a-zA-Z0-9_.-]{20,}/gi,
 ];
 
@@ -51,6 +53,9 @@ export function redactObject<T>(obj: T, options: RedactOptions = {}): T {
     return obj.map(item => redactObject(item, options)) as unknown as T;
   }
   if (typeof obj === 'object') {
+    if (obj instanceof Date || (typeof Buffer !== 'undefined' && Buffer.isBuffer(obj)) || ArrayBuffer.isView(obj)) {
+      return obj;
+    }
     const copy: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj)) {
       copy[key] = redactObject(value, options);

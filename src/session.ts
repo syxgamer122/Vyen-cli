@@ -382,9 +382,17 @@ export class SessionStore {
         await unlink(lock);
         await SessionStore.acquire(lock);
       } finally { await unlink(recovery); }
-      return SessionStore.load(root, input, id, lock, !!resume, options?.secretKeys ?? []);
+      const secretKeys = [...(options?.secretKeys ?? [])];
+      if ((input as { apiKey?: string }).apiKey && !secretKeys.includes((input as { apiKey?: string }).apiKey!)) {
+        secretKeys.push((input as { apiKey?: string }).apiKey!);
+      }
+      return SessionStore.load(root, input, id, lock, !!resume, secretKeys);
     }
-    return SessionStore.load(root, input, id, lock, !!resume, options?.secretKeys ?? []);
+    const secretKeys = [...(options?.secretKeys ?? [])];
+    if ((input as { apiKey?: string }).apiKey && !secretKeys.includes((input as { apiKey?: string }).apiKey!)) {
+      secretKeys.push((input as { apiKey?: string }).apiKey!);
+    }
+    return SessionStore.load(root, input, id, lock, !!resume, secretKeys);
   }
   private static async acquire(lock: string) {
     const handle = await open(lock, 'wx', 0o600);
@@ -497,6 +505,10 @@ export class SessionStore {
     const scrubbed = redactObject(forked, { secretKeys: this.secretKeys });
     await atomicJson(join(this.root, `${forkedId}.json`), scrubbed, { compact: true });
     return forkedId;
+  }
+  async archiveCompaction(compactionIndex: number): Promise<void> {
+    const scrubbed = redactObject(this.session, { secretKeys: this.secretKeys });
+    await atomicJson(join(this.root, `${this.session.id}.compact-${compactionIndex}.json`), scrubbed, { compact: true });
   }
   /**
    * Saves are serialized: overlapping callers (tool batches, goal updates, UI commands) share one

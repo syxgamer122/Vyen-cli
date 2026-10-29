@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionStore } from '../dist/session.js';
-import { safeError, redactSecrets } from '../dist/errors.js';
+import { safeError, redactSecrets, redactObject } from '../dist/errors.js';
 import { AuditLogger } from '../dist/audit.js';
 
 test('configured API keys are redacted from persisted session checkpoints', async () => {
@@ -22,6 +22,11 @@ test('configured API keys are redacted from persisted session checkpoints', asyn
       role: 'assistant',
       content: `I received key: ${secretKey}`,
     });
+    store.session.checkpoints = [{
+      turn: 1,
+      prompt: `Save key ${secretKey}`,
+      files: [{ path: 'test.txt', content: `SECRET=${secretKey}` }],
+    }];
     await store.save();
 
     const filePath = join(dir, `${store.session.id}.json`);
@@ -132,4 +137,60 @@ test('audit log and error traces sanitize configured keys across all fields', as
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+
+test('compaction archives (.compact-N.json) redact secret keys and token patterns', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vyen-scrub-compact-'));
+  try {
+    const input = { cwd: dir, provider: 'test', model: 'model', baseUrl: 'http://localhost/v1' };
+    const secretKey = 'vyen-compact-secret-key-12345';
+    const anthropicToken = 'sk-ant-api03-compacttesttoken12345678901234567890';
+    const store = await SessionStore.open(dir, input);
+    store.addSecretKey(secretKey);
+    store.session.messages.push({
+      role: 'user',
+      content: `Pre-compaction secret: ${secretKey} and ${anthropicToken}`,
+    });
+    await store.archiveCompaction(1);
+
+    const compactPath = join(dir, `${store.session.id}.compact-1.json`);
+    const content = await readFile(compactPath, 'utf8');
+
+    assert.equal(content.includes(secretKey), false, 'compaction archive must not contain raw secretKey');
+    assert.equal(content.includes(anthropicToken), false, 'compaction archive must not contain raw token');
+    assert.equal(content.includes('[REDACTED]'), true, 'compaction archive must contain [REDACTED]');
+    await store.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('redactObject preserves Date and Buffer instances without converting to plain object', () => {
+  const d = new Date('2026-10-29T12:00:00Z');
+  const buf = Buffer.from('binary-payload');
+  const obj = {
+    date: d,
+    buffer: buf,
+    text: 'my sk-proj-12345678901234567890123456789012 key',
+  };
+
+  const scrubbed = redactObject(obj);
+  assert.equal(scrubbed.date instanceof Date, true, 'Date instance must be preserved');
+  assert.equal(scrubbed.date.toISOString(), d.toISOString());
+  assert.equal(Buffer.isBuffer(scrubbed.buffer), true, 'Buffer instance must be preserved');
+  assert.equal(scrubbed.buffer.toString(), 'binary-payload');
+  assert.equal(scrubbed.text.includes('sk-proj'), false);
+  assert.equal(scrubbed.text.includes('[REDACTED]'), true);
+});
+
+test('redactSecrets redacts fine-grained GitHub PATs and AWS access keys', () => {
+  const githubPat = 'github_pat_11ABCDE1234567890abcdef1234567890ABCDEF';
+  const awsKey = 'AKIAIOSFODNN7EXAMPLE';
+  const text = `Keys: ${githubPat} and ${awsKey}`;
+
+  const redacted = redactSecrets(text);
+  assert.equal(redacted.includes(githubPat), false, 'fine-grained GitHub PAT must be redacted');
+  assert.equal(redacted.includes(awsKey), false, 'AWS access key must be redacted');
+  assert.equal(redacted.includes('[REDACTED]'), true);
 });
