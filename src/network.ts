@@ -679,6 +679,9 @@ export class AgentNetwork {
       const harness = new Harness(this.config, store, tools, this.emitEvent, undefined, this.hookBus);
       // A network round is an ephemeral nested runner: tool hooks apply, global lifecycle does not.
       harness.sessionLifecycle = false;
+      // The round prompt carries the user's topic and peers' model output, not user-typed
+      // text: it may only attach workspace images, like a subagent task.
+      harness.untrustedPrompts = true;
       await harness.run(prompt, params.signal, params.budget);
       const answer = lastAssistantAnswer(store.session.messages, this.config.inlineReasoning);
       return limitText(answer || '(no response)', 6_000);
@@ -727,6 +730,7 @@ export class AgentNetwork {
 
       const harness = new Harness(this.config, store, tools, this.emitEvent, undefined, this.hookBus);
       harness.sessionLifecycle = false;
+      harness.untrustedPrompts = true;
       await harness.run(prompt, params.signal, params.budget);
       const answer = lastAssistantAnswer(store.session.messages, this.config.inlineReasoning);
       return limitText(answer || '(no synthesis generated)', 12_000);

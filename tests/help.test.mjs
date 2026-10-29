@@ -14,7 +14,7 @@ test('help lists the documented flags and subcommands', () => {
   ]) assert.ok(HELP.includes(token), token);
 });
 
-test('--help answers even when the rest of the line is invalid or incomplete', async t => {
+test('--help answers even when the rest of the line is invalid or incomplete', async () => {
   const { spawn } = await import('node:child_process');
   const { resolve } = await import('node:path');
   for (const args of [['--help', '-p'], ['-h', '--bad-flag'], ['--help', 'doctor']]) {

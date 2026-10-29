@@ -1346,6 +1346,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                     );
                     // A workflow step is an ephemeral nested runner: tool hooks apply, global lifecycle does not.
                     wfHarness.sessionLifecycle = false;
+                    // The step prompt is written by a model (workflow file or tool input), not typed
+                    // by the user, so it may only attach workspace images - same rule as subagents.
+                    wfHarness.untrustedPrompts = true;
                     await wfHarness.run(stepPrompt, stepSig, reg.budget);
                     const { lastAssistantAnswer } = await import('./reasoning.js');
                     return lastAssistantAnswer(childStore.session.messages, runtime.inlineReasoning);
@@ -3454,7 +3457,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                       ? new Harness({ ...runtime, effort: step.effort }, store, tools, emit, undefined, harness.hookBus)
                       : harness;
                     if (stepHarness !== harness) stepHarness.sessionLifecycle = false;
-                    return await stepHarness.run(stepPrompt, stepSig, wfBudget);
+                    const restoreUntrusted = stepHarness.untrustedPrompts;
+                    // A slash workflow step is model-written text (the command or the workflow
+                    // file), so it may only attach workspace images; restored in finally.
+                    stepHarness.untrustedPrompts = true;
+                    try {
+                      return await stepHarness.run(stepPrompt, stepSig, wfBudget);
+                    } finally {
+                      stepHarness.untrustedPrompts = restoreUntrusted;
+                    }
                   } finally {
                     applyPermissionMode(tools, restoreMode);
                   }
