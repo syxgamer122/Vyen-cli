@@ -414,7 +414,7 @@ export class Subagents {
       ...(input.reasoning_effort ? { effort: input.reasoning_effort } : {}),
     };
     const nickname = this.allocateNickname(input.nickname);
-    const store = await SessionStore.open(this.subagentsRoot, childConfig);
+    const store = await SessionStore.open(this.subagentsRoot, childConfig, undefined, undefined, { secretKeys: this.parent.secretKeys });
     const id = store.session.id;
     store.session.title = `${nickname} [${role}]`;
 
@@ -503,7 +503,7 @@ export class Subagents {
       if (budget.limit > 0 && budget.spent >= budget.limit) {
         throw new Error('Shared run token budget reached.');
       }
-      store = await SessionStore.open(this.subagentsRoot, childConfig, managed.id);
+      store = await SessionStore.open(this.subagentsRoot, childConfig, managed.id, undefined, { secretKeys: this.parent.secretKeys });
       this.emit({ type: 'subagent', id: managed.id, task: managed.task, state: 'start' });
       const tools = new ToolRegistry(
         childConfig.cwd,
@@ -840,7 +840,7 @@ export class Subagents {
     let failure: { error: unknown } | undefined;
     try {
       if (budget.limit && budget.spent >= budget.limit) throw new Error('Shared run token budget reached.');
-      store = await SessionStore.open(this.subagentsRoot, this.config);
+      store = await SessionStore.open(this.subagentsRoot, this.config, undefined, undefined, { secretKeys: this.parent.secretKeys });
       const id = store.session.id;
       const nickname = this.allocateNickname();
       const role: AgentRoleType = readOnly ? 'explorer' : 'worker';

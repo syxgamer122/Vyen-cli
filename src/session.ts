@@ -322,6 +322,14 @@ export function sameWorkspace(a: string, b: string): boolean {
   return process.platform === 'win32' ? na.toLowerCase() === nb.toLowerCase() : na === nb;
 }
 
+export interface SessionStoreInput {
+  cwd: string;
+  provider: string;
+  model: string;
+  baseUrl: string;
+  apiKey?: string;
+}
+
 export class SessionStore {
   private closed = false;
   readonly secretKeys: string[] = [];
@@ -333,7 +341,7 @@ export class SessionStore {
       this.secretKeys.push(key);
     }
   }
-  static async open(root: string, input: { cwd: string; provider: string; model: string; baseUrl: string }, resume?: string, excludeId?: string, options?: { secretKeys?: string[] }): Promise<SessionStore> {
+  static async open(root: string, input: SessionStoreInput, resume?: string, excludeId?: string, options?: { secretKeys?: string[] }): Promise<SessionStore> {
     await mkdir(root, { recursive: true, mode: 0o700 });
     let id = resume?.trim();
     if (id === 'latest') {
@@ -383,14 +391,14 @@ export class SessionStore {
         await SessionStore.acquire(lock);
       } finally { await unlink(recovery); }
       const secretKeys = [...(options?.secretKeys ?? [])];
-      if ((input as { apiKey?: string }).apiKey && !secretKeys.includes((input as { apiKey?: string }).apiKey!)) {
-        secretKeys.push((input as { apiKey?: string }).apiKey!);
+      if (input.apiKey && !secretKeys.includes(input.apiKey)) {
+        secretKeys.push(input.apiKey);
       }
       return SessionStore.load(root, input, id, lock, !!resume, secretKeys);
     }
     const secretKeys = [...(options?.secretKeys ?? [])];
-    if ((input as { apiKey?: string }).apiKey && !secretKeys.includes((input as { apiKey?: string }).apiKey!)) {
-      secretKeys.push((input as { apiKey?: string }).apiKey!);
+    if (input.apiKey && !secretKeys.includes(input.apiKey)) {
+      secretKeys.push(input.apiKey);
     }
     return SessionStore.load(root, input, id, lock, !!resume, secretKeys);
   }
@@ -398,7 +406,7 @@ export class SessionStore {
     const handle = await open(lock, 'wx', 0o600);
     try { await handle.writeFile(String(process.pid)); } finally { await handle.close(); }
   }
-  private static async load(root: string, input: { cwd: string; provider: string; model: string; baseUrl: string }, id: string, lock: string, resume: boolean, secretKeys: string[] = []) {
+  private static async load(root: string, input: SessionStoreInput, id: string, lock: string, resume: boolean, secretKeys: string[] = []) {
     try {
       const now = new Date().toISOString();
       // Copy an explicit allowlist, never the caller's runtime configuration:

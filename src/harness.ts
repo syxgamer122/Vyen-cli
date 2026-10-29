@@ -302,13 +302,18 @@ export class Harness {
   private turnHadSuccessfulTool = false;
   private turnHadFailedExec = false;
   private flushGoalProgressHook?: (allowStopped?: boolean) => void;
+  subagentId?: string;
   readonly auditLogger?: AuditLogger;
   constructor(readonly config: RuntimeConfig, readonly store: SessionStore, readonly tools: ToolRegistry,
-    readonly emit: (event: HarnessEvent) => void = () => {}, model?: LanguageModel, readonly hookBus?: HookBus, auditLogger?: AuditLogger) {
+    readonly emit: (event: HarnessEvent) => void = () => {}, model?: LanguageModel, readonly hookBus?: HookBus, auditLogger?: AuditLogger, subagentId?: string) {
+    this.subagentId = subagentId;
     this.model = model ?? createModel(config, this.store.session.id);
     this.auditLogger = auditLogger ?? getAuditLogger({ secretKeys: config.apiKey ? [config.apiKey] : [] });
     if (config.apiKey) {
       this.store.addSecretKey(config.apiKey);
+    }
+    for (const key of this.store.secretKeys) {
+      this.auditLogger?.addSecretKey(key);
     }
     if (this.store.session.todos?.length) {
       this.tools.todos = [...this.store.session.todos];
@@ -814,6 +819,7 @@ export class Harness {
             };
             void this.auditLogger?.recordToolDecision({
               sessionId: this.store.session.id,
+              subagentId: this.subagentId,
               tool: canonicalName,
               decision: 'deny',
               durationMs: meta.durationMs,
@@ -870,6 +876,7 @@ export class Harness {
         output = { type: result.denied ? 'error-text' : 'text', value: result.text + loopNote };
         void this.auditLogger?.recordToolDecision({
           sessionId: this.store.session.id,
+          subagentId: this.subagentId,
           tool: canonicalName,
           decision: result.decision ?? (result.denied ? 'deny' : 'allow'),
           durationMs: meta.durationMs,
@@ -893,6 +900,7 @@ export class Harness {
         output = { type: 'error-text', value: errText };
         void this.auditLogger?.recordToolDecision({
           sessionId: this.store.session.id,
+          subagentId: this.subagentId,
           tool: canonicalName,
           decision: 'deny',
           durationMs: meta.durationMs,

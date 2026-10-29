@@ -963,7 +963,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           return;
         }
         if (jsonOutput) {
-          const scrubbed = redactObject(event, { secretKeys: apiKey ? [apiKey] : [] });
+          const scrubbed = redactObject(event, { secretKeys: store?.secretKeys ?? (apiKey ? [apiKey] : []) });
           stdout.write(JSON.stringify(scrubbed) + '\n');
           return;
         }
@@ -1590,7 +1590,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                 schemaErrors: validation.errors,
               };
               if (jsonOutput) {
-                const scrubbed = redactObject(errorPayload, { secretKeys: apiKey ? [apiKey] : [] });
+                const scrubbed = redactObject(errorPayload, { secretKeys: store?.secretKeys ?? (apiKey ? [apiKey] : []) });
                 stdout.write(JSON.stringify(scrubbed) + '\n');
               }
               else display(`\nvyen: Final output does not conform to --json-schema: ${validation.errors?.map(e => `${e.path}: ${e.message}`).join(', ')}\n`);
@@ -1612,7 +1612,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             donePayload.structuredOutput = structuredOutput;
           }
           if (jsonOutput) {
-            const scrubbed = redactObject(donePayload, { secretKeys: apiKey ? [apiKey] : [] });
+            const scrubbed = redactObject(donePayload, { secretKeys: store?.secretKeys ?? (apiKey ? [apiKey] : []) });
             stdout.write(JSON.stringify(scrubbed) + '\n');
           }
           else if (tui) tui.write('\n'); else stdout.write('\n');
@@ -1725,18 +1725,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                   const cleaned = raw
                     .replace(/<referenced_file\s+path="([^"]+)"[\s\S]*?<\/referenced_file>/g, '[@$1]')
                     .trim();
-                  if (cleaned) out.push({ role: 'user', text: cleaned });
+                  if (cleaned) out.push({ role: 'user', text: redactSecrets(cleaned, { secretKeys: store?.secretKeys ?? (apiKey ? [apiKey] : []) }) });
                 } else if (m.role === 'assistant') {
                   if (typeof m.content === 'string') {
                     const cleaned = m.content.trim();
-                    if (cleaned) out.push({ role: 'assistant', text: cleaned });
+                    if (cleaned) out.push({ role: 'assistant', text: redactSecrets(cleaned, { secretKeys: store?.secretKeys ?? (apiKey ? [apiKey] : []) }) });
                   } else if (Array.isArray(m.content)) {
                     const textParts = m.content
                       .filter(p => p.type === 'text' && 'text' in p && typeof p.text === 'string')
                       .map(p => (p as { text: string }).text.trim())
                       .filter(Boolean)
                       .join('\n\n');
-                    if (textParts) out.push({ role: 'assistant', text: textParts });
+                    if (textParts) out.push({ role: 'assistant', text: redactSecrets(textParts, { secretKeys: store?.secretKeys ?? (apiKey ? [apiKey] : []) }) });
                   }
                 }
               }
@@ -3504,7 +3504,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                 },
               });
               if (jsonOutput) {
-                const payload = redactObject({ type: 'workflow_done', result: wfRes, sessionId: store.session.id }, { secretKeys: apiKey ? [apiKey] : [] });
+                const payload = redactObject({ type: 'workflow_done', result: wfRes, sessionId: store.session.id }, { secretKeys: store?.secretKeys ?? (apiKey ? [apiKey] : []) });
                 stdout.write(JSON.stringify(payload) + '\n');
               }
             } catch (error) {
@@ -3573,7 +3573,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               );
               await store.save();
               if (jsonOutput) {
-                const payload = redactObject({ type: 'network_done', synthesis: netRes.synthesis, rounds: netRes.rounds }, { secretKeys: apiKey ? [apiKey] : [] });
+                const payload = redactObject({ type: 'network_done', synthesis: netRes.synthesis, rounds: netRes.rounds }, { secretKeys: store?.secretKeys ?? (apiKey ? [apiKey] : []) });
                 stdout.write(JSON.stringify(payload) + '\n');
               }
             } catch (error) {

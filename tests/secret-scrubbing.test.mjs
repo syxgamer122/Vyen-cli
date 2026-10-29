@@ -107,6 +107,20 @@ test('headless stream-json output redacts secrets from event payloads', async ()
   assert.equal(redacted.includes(secretKey), false, 'redacted text must not contain secretKey');
   assert.equal(redacted.includes(openAiToken), false, 'redacted text must not contain OpenAI token');
   assert.equal(redacted.includes('[REDACTED]'), true, 'redacted text must contain [REDACTED]');
+
+  const event = {
+    type: 'tool',
+    id: 't_1',
+    meta: {
+      summary: `Running tool with ${secretKey}`,
+      nested: { token: openAiToken },
+    },
+  };
+  const scrubbedEvent = redactObject(event, { secretKeys: [secretKey] });
+  assert.equal(scrubbedEvent.meta.summary.includes(secretKey), false);
+  assert.equal(scrubbedEvent.meta.summary.includes('[REDACTED]'), true);
+  assert.equal(scrubbedEvent.meta.nested.token.includes(openAiToken), false);
+  assert.equal(scrubbedEvent.meta.nested.token, '[REDACTED]');
 });
 
 test('audit log and error traces sanitize configured keys across all fields', async () => {
@@ -177,6 +191,14 @@ test('redactObject preserves Date and Buffer instances without converting to pla
 
   const scrubbed = redactObject(obj);
   assert.equal(scrubbed.date instanceof Date, true, 'Date instance must be preserved');
+  const err = new Error('test error');
+  const rx = /test-regex/i;
+  assert.equal(redactObject(err) instanceof Error, true, 'Error instance must be preserved');
+  assert.equal(redactObject(rx) instanceof RegExp, true, 'RegExp instance must be preserved');
+  const circular = { key: 'val' };
+  circular.self = circular;
+  const scrubbedCircular = redactObject(circular);
+  assert.equal(scrubbedCircular.key, 'val', 'Circular reference should be handled safely');
   assert.equal(scrubbed.date.toISOString(), d.toISOString());
   assert.equal(Buffer.isBuffer(scrubbed.buffer), true, 'Buffer instance must be preserved');
   assert.equal(scrubbed.buffer.toString(), 'binary-payload');
@@ -195,4 +217,8 @@ test('redactSecrets redacts fine-grained GitHub PATs and AWS access keys', () =>
   assert.equal(redacted.includes(awsKey), false, 'AWS access key must be redacted');
   assert.equal(redacted.includes(awsStsKey), false, 'AWS STS temporary key must be redacted');
   assert.equal(redacted.includes('[REDACTED]'), true);
+
+  const normalWord = 'EURASIA1234567890ABCDEF';
+  const textWithWord = `Prefix ${normalWord} suffix`;
+  assert.equal(redactSecrets(textWithWord), textWithWord, 'longer identifiers containing ASIA must not be corrupted');
 });
