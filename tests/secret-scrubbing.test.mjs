@@ -187,10 +187,12 @@ test('redactObject preserves Date and Buffer instances without converting to pla
 test('redactSecrets redacts fine-grained GitHub PATs and AWS access keys', () => {
   const githubPat = 'github_pat_11ABCDE1234567890abcdef1234567890ABCDEF';
   const awsKey = 'AKIAIOSFODNN7EXAMPLE';
-  const text = `Keys: ${githubPat} and ${awsKey}`;
+  const awsStsKey = 'ASIAIOSFODNN7EXAMPLE';
+  const text = `Keys: ${githubPat} and ${awsKey} and ${awsStsKey}`;
 
   const redacted = redactSecrets(text);
   assert.equal(redacted.includes(githubPat), false, 'fine-grained GitHub PAT must be redacted');
   assert.equal(redacted.includes(awsKey), false, 'AWS access key must be redacted');
+  assert.equal(redacted.includes(awsStsKey), false, 'AWS STS temporary key must be redacted');
   assert.equal(redacted.includes('[REDACTED]'), true);
 });

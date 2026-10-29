@@ -2554,7 +2554,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           for (const m of store.session.messages) {
             lines.push(`## ${m.role.toUpperCase()}`);
             const text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content, null, 2);
-            lines.push(redactSecrets(text, { secretKeys: apiKey ? [apiKey] : [] }));
+            lines.push(redactSecrets(text, { secretKeys: store.secretKeys }));
             lines.push('');
           }
           try {
