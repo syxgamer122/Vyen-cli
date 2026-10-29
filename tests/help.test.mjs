@@ -13,3 +13,17 @@ test('help lists the documented flags and subcommands', () => {
     'vyen setup', 'vyen mcp list', 'vyen upgrade',
   ]) assert.ok(HELP.includes(token), token);
 });
+
+test('--help answers even when the rest of the line is invalid or incomplete', async t => {
+  const { spawn } = await import('node:child_process');
+  const { resolve } = await import('node:path');
+  for (const args of [['--help', '-p'], ['-h', '--bad-flag'], ['--help', 'doctor']]) {
+    const child = spawn(process.execPath, [resolve('bin/vyen.mjs'), ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    child.stdout.on('data', chunk => { out += chunk; });
+    child.stderr.on('data', chunk => { err += chunk; });
+    const code = await new Promise(r => child.once('close', r));
+    assert.equal(code, 0, `vyen ${args.join(' ')} exited ${code}: ${err}`);
+    assert.ok(out.startsWith(`vyen cli ${VERSION}`), `vyen ${args.join(' ')} did not print help: ${out.slice(0, 60)}`);
+  }
+});

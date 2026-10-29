@@ -381,6 +381,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       return;
     }
 
+    // --help wins over everything else on the line, like every other CLI. Parsing
+    // first would reject `vyen --help -p` before the user could read the usage.
+    if (argv.includes('--help') || argv.includes('-h')) { stdout.write(HELP); return; }
     const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, strict: true, options: {
       help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
       prompt: { type: 'string', short: 'p' }, cwd: { type: 'string', short: 'C' },
