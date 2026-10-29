@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { modelMessageSchema, type ModelMessage, type ToolResultPart } from 'ai';
 import { z } from 'zod';
 import { atomicJson } from './config.js';
+import { redactObject } from './errors.js';
 
 export const fileBackupSchema = z.object({
   path: z.string(),
@@ -323,8 +324,16 @@ export function sameWorkspace(a: string, b: string): boolean {
 
 export class SessionStore {
   private closed = false;
-  private constructor(readonly root: string, readonly session: Session, private readonly lock: string) {}
-  static async open(root: string, input: { cwd: string; provider: string; model: string; baseUrl: string }, resume?: string, excludeId?: string): Promise<SessionStore> {
+  readonly secretKeys: string[] = [];
+  constructor(readonly root: string, readonly session: Session, private readonly lock: string, secretKeys: string[] = []) {
+    this.secretKeys = [...secretKeys];
+  }
+  addSecretKey(key?: string): void {
+    if (key && !this.secretKeys.includes(key)) {
+      this.secretKeys.push(key);
+    }
+  }
+  static async open(root: string, input: { cwd: string; provider: string; model: string; baseUrl: string }, resume?: string, excludeId?: string, options?: { secretKeys?: string[] }): Promise<SessionStore> {
     await mkdir(root, { recursive: true, mode: 0o700 });
     let id = resume?.trim();
     if (id === 'latest') {
@@ -373,15 +382,15 @@ export class SessionStore {
         await unlink(lock);
         await SessionStore.acquire(lock);
       } finally { await unlink(recovery); }
-      return SessionStore.load(root, input, id, lock, !!resume);
+      return SessionStore.load(root, input, id, lock, !!resume, options?.secretKeys ?? []);
     }
-    return SessionStore.load(root, input, id, lock, !!resume);
+    return SessionStore.load(root, input, id, lock, !!resume, options?.secretKeys ?? []);
   }
   private static async acquire(lock: string) {
     const handle = await open(lock, 'wx', 0o600);
     try { await handle.writeFile(String(process.pid)); } finally { await handle.close(); }
   }
-  private static async load(root: string, input: { cwd: string; provider: string; model: string; baseUrl: string }, id: string, lock: string, resume: boolean) {
+  private static async load(root: string, input: { cwd: string; provider: string; model: string; baseUrl: string }, id: string, lock: string, resume: boolean, secretKeys: string[] = []) {
     try {
       const now = new Date().toISOString();
       // Copy an explicit allowlist, never the caller's runtime configuration:
@@ -391,7 +400,7 @@ export class SessionStore {
         version: 1, id, ...route, createdAt: now, updatedAt: now, messages: [], tokens: 0, compactions: 0,
       };
       if (session.id !== id || !sameWorkspace(await realpath(session.cwd), input.cwd)) throw new Error('Session belongs to a different workspace.');
-      const store = new SessionStore(root, session, lock);
+      const store = new SessionStore(root, session, lock, secretKeys);
       repairInterrupted(session.messages);
       // Provider changes are explicit CLI/config choices, not restored secrets.
       Object.assign(session, route);
@@ -485,7 +494,8 @@ export class SessionStore {
       updatedAt: now,
       ...(title ? { title } : this.session.title ? { title: `${this.session.title} (fork)` } : {}),
     };
-    await atomicJson(join(this.root, `${forkedId}.json`), forked, { compact: true });
+    const scrubbed = redactObject(forked, { secretKeys: this.secretKeys });
+    await atomicJson(join(this.root, `${forkedId}.json`), scrubbed, { compact: true });
     return forkedId;
   }
   /**
@@ -508,7 +518,8 @@ export class SessionStore {
   private async writeNow(): Promise<void> {
     this.session.updatedAt = new Date().toISOString();
     pruneCheckpointBackups(this.session);
-    const write = atomicJson(join(this.root, `${this.session.id}.json`), this.session, { compact: true });
+    const scrubbed = redactObject(this.session, { secretKeys: this.secretKeys });
+    const write = atomicJson(join(this.root, `${this.session.id}.json`), scrubbed, { compact: true });
     this.saving = write;
     try { await write; } finally { if (this.saving === write) this.saving = undefined; }
   }

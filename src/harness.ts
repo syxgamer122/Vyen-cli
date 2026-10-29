@@ -307,6 +307,9 @@ export class Harness {
     readonly emit: (event: HarnessEvent) => void = () => {}, model?: LanguageModel, readonly hookBus?: HookBus, auditLogger?: AuditLogger) {
     this.model = model ?? createModel(config, this.store.session.id);
     this.auditLogger = auditLogger ?? getAuditLogger({ secretKeys: config.apiKey ? [config.apiKey] : [] });
+    if (config.apiKey) {
+      this.store.addSecretKey(config.apiKey);
+    }
     if (this.store.session.todos?.length) {
       this.tools.todos = [...this.store.session.todos];
     }

@@ -2,6 +2,7 @@ import { mkdir, appendFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { dataDir } from './config.js';
+import { redactObject } from './errors.js';
 
 export const toolDecisionSchema = z.enum(['allow', 'deny', 'ask_approved', 'ask_denied']);
 export type ToolDecision = z.infer<typeof toolDecisionSchema>;
@@ -129,7 +130,8 @@ export class AuditLogger {
         }
 
         const filePath = await this.resolveActiveFilePath();
-        const line = JSON.stringify(record) + '\n';
+        const scrubbed = redactObject(record, { secretKeys: this.secretKeys });
+        const line = JSON.stringify(scrubbed) + '\n';
         await appendFile(filePath, line, 'utf8');
       } catch {
         // Audit log writes must never crash the caller or agent run

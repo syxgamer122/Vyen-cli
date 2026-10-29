@@ -20,7 +20,7 @@ import {
   resolveRuntime,
   saveConfig,
 } from './config.js';
-import { safeError } from './errors.js';
+import { safeError, redactObject } from './errors.js';
 import { VERSION } from './version.js';
 import { HELP } from './help.js';
 import { EVENT_SCHEMA_VERSION } from './events.js';
@@ -962,7 +962,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           if (tui) tui.event(event);
           return;
         }
-        if (jsonOutput) { stdout.write(JSON.stringify(event) + '\n'); return; }
+        if (jsonOutput) {
+          const scrubbed = redactObject(event, { secretKeys: apiKey ? [apiKey] : [] });
+          stdout.write(JSON.stringify(scrubbed) + '\n');
+          return;
+        }
         if (tui) { tui.event(event); return; }
         if (event.type === 'reasoning') {
           if (viewMode === 'normal') return;
@@ -1585,7 +1589,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                 message: 'Final output does not conform to --json-schema',
                 schemaErrors: validation.errors,
               };
-              if (jsonOutput) stdout.write(JSON.stringify(errorPayload) + '\n');
+              if (jsonOutput) {
+                const scrubbed = redactObject(errorPayload, { secretKeys: apiKey ? [apiKey] : [] });
+                stdout.write(JSON.stringify(scrubbed) + '\n');
+              }
               else display(`\nvyen: Final output does not conform to --json-schema: ${validation.errors?.map(e => `${e.path}: ${e.message}`).join(', ')}\n`);
               return { aborted, hadError: true, text: outText };
             }
@@ -1604,7 +1611,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           if (structuredOutput !== undefined) {
             donePayload.structuredOutput = structuredOutput;
           }
-          if (jsonOutput) stdout.write(JSON.stringify(donePayload) + '\n');
+          if (jsonOutput) {
+            const scrubbed = redactObject(donePayload, { secretKeys: apiKey ? [apiKey] : [] });
+            stdout.write(JSON.stringify(scrubbed) + '\n');
+          }
           else if (tui) tui.write('\n'); else stdout.write('\n');
           if (denied && !interactive) process.exitCode = 2;
         } catch (error) {

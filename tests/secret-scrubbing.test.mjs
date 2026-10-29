@@ -10,8 +10,10 @@ import { AuditLogger } from '../dist/audit.js';
 test('configured API keys are redacted from persisted session checkpoints', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vyen-scrub-key-'));
   try {
+    const input = { cwd: dir, provider: 'test', model: 'model', baseUrl: 'http://localhost/v1' };
     const secretKey = 'vyen-super-secret-key-99999';
-    const store = new SessionStore(dir, undefined, { secretKeys: [secretKey] });
+    const store = await SessionStore.open(dir, input);
+    store.addSecretKey(secretKey);
     store.session.messages.push({
       role: 'user',
       content: `Here is my key: ${secretKey}`,
@@ -36,12 +38,13 @@ test('configured API keys are redacted from persisted session checkpoints', asyn
 test('common token patterns are scrubbed from persisted sessions', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vyen-scrub-patterns-'));
   try {
+    const input = { cwd: dir, provider: 'test', model: 'model', baseUrl: 'http://localhost/v1' };
     const openAiToken = 'sk-proj-12345678901234567890123456789012';
     const anthropicToken = 'sk-ant-api03-1234567890123456789012345678901234567890';
     const githubToken = 'ghp_123456789012345678901234567890123456';
     const bearerToken = 'Bearer mysecretbearertoken12345678901234567890';
 
-    const store = new SessionStore(dir);
+    const store = await SessionStore.open(dir, input);
     store.session.messages.push({
       role: 'user',
       content: `Tokens: ${openAiToken} and ${anthropicToken} and ${githubToken} and ${bearerToken}`,
@@ -65,9 +68,11 @@ test('common token patterns are scrubbed from persisted sessions', async () => {
 test('resuming a session cannot recover the raw secret from disk', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vyen-scrub-resume-'));
   try {
+    const input = { cwd: dir, provider: 'test', model: 'model', baseUrl: 'http://localhost/v1' };
     const secretKey = 'vyen-secret-token-recovery-test';
-    const sessionId = 'session-scrub-resume-1';
-    const store = new SessionStore(dir, sessionId, { secretKeys: [secretKey] });
+    const store = await SessionStore.open(dir, input);
+    const sessionId = store.session.id;
+    store.addSecretKey(secretKey);
     store.session.messages.push({
       role: 'user',
       content: `Sensitive token: ${secretKey}`,
@@ -76,7 +81,7 @@ test('resuming a session cannot recover the raw secret from disk', async () => {
     await store.close();
 
     // Reopen session from disk
-    const resumedStore = new SessionStore(dir, sessionId, { secretKeys: [secretKey] });
+    const resumedStore = await SessionStore.open(dir, input, sessionId, true);
     const userMsg = resumedStore.session.messages[0];
     const textContent = typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content);
 

@@ -22,7 +22,11 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   can run in consecutive batches of up to six; mutations execute in declaration order.
 - SessionStore owns atomic JSON checkpoints and a process lock. A session is
   bound to its real workspace. Loading repairs interrupted tool calls with error
-  results; it never replays a side effect. A live lock is never stolen.
+  results; it never replays a side effect. A live lock is never stolen. Transcripts,
+  checkpoints and persisted session files redact configured API keys and standard
+  token patterns (OpenAI, Anthropic, Google, GitHub, GitLab, Bearer) before writing
+  to disk, ensuring raw secrets cannot be recovered after restart. Output in
+  `--output-format stream-json` and audit logs similarly sanitize secret values and patterns.
 - Provider owns HTTP/model protocol handling through AI SDK: OpenAI chat,
   OpenAI Responses, Anthropic Messages. Three retries; configurable request timeout.
 - Tools own file/shell I/O. File paths resolve within the real workspace;
