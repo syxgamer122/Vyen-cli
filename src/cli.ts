@@ -912,6 +912,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         buildGoalContinuationPrompt,
         buildGoalObjectiveUpdatedPrompt,
         buildUserGoalContextMessage,
+        buildWorkspaceChangedNotice,
       } = await import('./context.js');
       const syncTuiHeader = (resetContext = false) => {
         if (!tui) return;
@@ -3328,6 +3329,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               const real = await realpath(candidate).catch(() => candidate);
               runtime = { ...runtime, cwd: real };
               const workspaceChanged = retargetSessionWorkspace(store, real);
+              // The conversation above was written against the old root. A relative
+              // path the model read as "src/app.ts" now means a different file, so
+              // tell it which root is live and that older relatives are stale.
+              harness.addContextMessage({
+                role: 'user',
+                content: buildWorkspaceChangedNotice(real, workspaceChanged),
+              });
               await store.save();
               await rebuildHarness({ reconnectMcp: true });
               if (workspaceChanged) {

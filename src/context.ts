@@ -507,6 +507,21 @@ export function buildUserGoalContextMessage(update: {
   return `<codex_internal_context source="user_goal">\n${lines.join('\n')}\n</codex_internal_context>`;
 }
 
+/**
+ * Tells the model that the workspace root moved (`/cd`), which absolute root
+ * now applies, and that paths mentioned earlier resolved against the old one.
+ * `changed` is false when only the spelling of the same directory changed.
+ */
+export function buildWorkspaceChangedNotice(newRoot: string, changed: boolean): string {
+  const stale = changed
+    ? 'Paths named earlier in this conversation were relative to the previous root; do not reuse them. Re-read every file by its new path before editing.'
+    : 'Paths in this conversation still refer to the same directory.';
+  return `<codex_internal_context source="workspace">
+The workspace root is now ${newRoot}
+${stale}
+</codex_internal_context>`;
+}
+
 /** Per-run cache for the disk-backed parts of the system prompt (AGENTS.md chain, memories). */
 export interface SystemPromptCache {
   instructions?: Promise<string>;
