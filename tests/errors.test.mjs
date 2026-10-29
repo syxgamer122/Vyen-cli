@@ -53,3 +53,18 @@ test('safeError extracts actionable upstream detail from provider responseBody a
   const normalErr = new Error('Network timeout after 5000ms');
   assert.equal(safeError(normalErr), 'Network timeout after 5000ms');
 });
+
+test('safeError never prints [object Object] for a thrown provider payload', () => {
+  // The AI SDK re-throws the provider's raw JSON when a stream fails mid-way.
+  assert.equal(
+    safeError({ type: 'invalid_request_error', message: 'upstream rejected key sk-live-abcdefghijklmnopqrstuv' }),
+    'upstream rejected key [REDACTED]',
+  );
+  assert.equal(safeError({ error: { message: 'context length exceeded' } }), 'context length exceeded');
+  assert.equal(safeError({ status: 500 }), '{"status":500}');
+  assert.equal(safeError({}), 'Unknown provider error.');
+  assert.equal(safeError({ responseBody: 'quota exhausted' }), 'quota exhausted');
+  const cyclic = { message: '' };
+  cyclic.self = cyclic;
+  assert.equal(safeError(cyclic), 'Unknown provider error.');
+});

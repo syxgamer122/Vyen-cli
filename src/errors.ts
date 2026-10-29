@@ -75,8 +75,37 @@ export function redactObject<T>(obj: T, options: RedactOptions = {}, seen: WeakS
   return copy as T;
 }
 
+/**
+ * A thrown value that is not an `Error` still has to say something useful. The
+ * AI SDK re-throws the provider's raw JSON payload when a stream fails, so
+ * `String(value)` printed `[object Object]` exactly when the user needed the
+ * upstream reason.
+ */
+function describeNonError(error: unknown): string {
+  if (typeof error === 'string') return error;
+  if (typeof error !== 'object' || error === null) return String(error);
+  const record = error as Record<string, unknown>;
+  for (const key of ['message', 'error', 'detail', 'reason'] as const) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (value && typeof value === 'object') {
+      const nested = describeNonError(value);
+      if (nested && nested !== '[object Object]') return nested;
+    }
+  }
+  const body = typeof record.responseBody === 'string' ? record.responseBody.trim() : '';
+  if (body) return body;
+  try {
+    const json = JSON.stringify(error);
+    if (json && json !== '{}') return json;
+  } catch {
+    // fall through: a cyclic payload has no printable form
+  }
+  return 'Unknown provider error.';
+}
+
 export function safeError(error: unknown, apiKey?: string): string {
-  let message = error instanceof Error ? error.message : String(error);
+  let message = error instanceof Error ? error.message : describeNonError(error);
   if (typeof error === 'object' && error !== null) {
     const err = error as Record<string, unknown>;
     const body = typeof err.responseBody === 'string' ? err.responseBody.trim() : undefined;
