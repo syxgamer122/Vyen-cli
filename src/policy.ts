@@ -28,6 +28,15 @@ const WRAPPER_PREFIX_REGEX = /^(?:(?:(?:\/usr)?\/bin\/)?sudo(?:\s+(?:-[ugpCDRTrt
 const SHELL_WORD_DELIMITER = /[\s;&|<>()`]/;
 
 /**
+ * Commands whose whole meaning is in their arguments (what gets deleted, moved,
+ * published or installed). A wildcard allow rule must never cover them: the
+ * pattern `bash(rm *)` reads as "rm in this folder" but `*` spans spaces, so it
+ * would also auto-approve `rm -rf /`. Those commands are approved one line at a
+ * time (see `EXACT_ONLY` in approval.ts for the same rule).
+ */
+const ARGUMENT_DRIVEN_COMMAND_RE = /^(?:(?:\/usr)?\/bin\/)?(?:rm|rmdir|mv|cp|ln|chmod|chown|chgrp|dd|truncate|shred|mkfs|curl|wget|scp|rsync|nc|ncat|kill|pkill|killall|docker|podman|kubectl|ssh)(?:\.exe)?(?:\s|$)/i;
+
+/**
  * Reads the command word of one shell segment the way bash would: quotes and
  * backslash escapes are removed, so `"rm"`, `r\m` and `r""m` all become `rm`.
  * `dynamic` marks a word built from an expansion (`$CMD`, `rm${IFS}-rf`): the
@@ -204,6 +213,11 @@ export function matchToolPattern(
       if (options.isAllow) {
         // Security: In allow rules, wildcard patterns must never match compound or chained commands
         if (rawArgPattern.includes('*') && CHAINING_PATTERN.test(argStr)) {
+          return false;
+        }
+        // `*` spans spaces, so `bash(rm *)` would also cover `rm -rf /`. Argument-driven
+        // commands are approved by the exact line, never by a wildcard.
+        if (rawArgPattern.includes('*') && ARGUMENT_DRIVEN_COMMAND_RE.test(argStr)) {
           return false;
         }
         return matchSimplePattern(rawArgPattern, argStr);

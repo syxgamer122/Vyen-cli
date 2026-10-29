@@ -462,6 +462,31 @@ test('bash deny rules strip eval and exec command wrappers', () => {
   );
 });
 
+test('a wildcard allow rule never auto-approves an argument-driven command', () => {
+  // `*` spans spaces, so "bash(rm *)" would otherwise cover "rm -rf /".
+  for (const [pattern, command] of [
+    ['bash(rm *)', 'rm -rf build'],
+    ['bash(rm *)', 'rm -rf /'],
+    ['bash(r*m -rf *)', 'rm -rf /build'],
+    ['bash(cp *)', 'cp -r . /tmp/x'],
+    ['bash(chmod *)', 'chmod -R 777 .'],
+    ['bash(kubectl *)', 'kubectl delete ns prod'],
+  ]) {
+    assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command } }, { cliAllowed: [pattern] }), 'default', `${pattern} on ${command}`);
+  }
+  // Read-only prefixes keep working, and the exact line still auto-approves.
+  for (const [pattern, command] of [
+    ['bash(git *)', 'git status'],
+    ['bash(git diff *)', 'git diff --stat'],
+    ['bash(npm test *)', 'npm test --silent'],
+    ['bash(ls *)', 'ls -la'],
+    ['bash(rm -rf build)', 'rm -rf build'],
+  ]) {
+    assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command } }, { cliAllowed: [pattern] }), 'allow', `${pattern} on ${command}`);
+  }
+  assert.equal(evaluateToolPolicy({ tool: 'bash', input: { command: 'rm -rf /' } }, { cliAllowed: ['bash(rm -rf build)'] }), 'default');
+});
+
 test('bash deny and ask rules cannot be bypassed by quoting or escaping the command word', () => {
   const denyCtx = {
     projectRules: {
