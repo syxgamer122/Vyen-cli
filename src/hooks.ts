@@ -216,9 +216,13 @@ export async function recordWorkspaceTrust(
   let records: Record<string, string> = {};
   try {
     const raw = await readFile(storePath, 'utf8');
-    records = JSON.parse(raw) as Record<string, string>;
-  } catch {
-    records = {};
+    records = JSON.parse(raw.replace(/^\uFEFF/, '')) as Record<string, string>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      records = {};
+    } else {
+      throw new Error(`Failed to parse trusted workspaces at ${storePath}: ${(error as Error).message}`);
+    }
   }
 
   records[normalizeWorkspaceDir(cwd)] = hash;

@@ -32,17 +32,28 @@ export const memoriesPath = () => join(configDir(), 'memories.json');
 export const presetsPath = () => join(configDir(), 'presets.json');
 
 export async function loadMemories(): Promise<MemoryEntry[]> {
+  const filePath = memoriesPath();
+  let raw: string;
   try {
-    const raw = JSON.parse(await readFile(memoriesPath(), 'utf8'));
-    if (!Array.isArray(raw)) return [];
-    return raw.filter(m => m && typeof m.text === 'string').map((m, idx) => ({
-      id: typeof m.id === 'string' ? m.id : String(idx + 1),
-      text: String(m.text).trim(),
-      createdAt: typeof m.createdAt === 'string' ? m.createdAt : new Date().toISOString(),
-    }));
-  } catch {
-    return [];
+    raw = await readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
+  } catch (error) {
+    throw new Error(`Failed to parse memories at ${filePath}: ${(error as Error).message}`);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`Invalid memories at ${filePath}: expected an array of memory objects`);
+  }
+  return parsed.filter(m => m && typeof m.text === 'string').map((m, idx) => ({
+    id: typeof m.id === 'string' ? m.id : String(idx + 1),
+    text: String(m.text).trim(),
+    createdAt: typeof m.createdAt === 'string' ? m.createdAt : new Date().toISOString(),
+  }));
 }
 
 export async function saveMemories(entries: MemoryEntry[]): Promise<void> {
@@ -51,25 +62,36 @@ export async function saveMemories(entries: MemoryEntry[]): Promise<void> {
 }
 
 export async function loadPresets(): Promise<Record<string, PresetEntry>> {
+  const filePath = presetsPath();
+  let raw: string;
   try {
-    const raw = JSON.parse(await readFile(presetsPath(), 'utf8'));
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
-    const out: Record<string, PresetEntry> = {};
-    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-      if (v && typeof v === 'object' && typeof (v as Record<string, unknown>).prompt === 'string') {
-        const rec = v as Record<string, unknown>;
-        out[k] = {
-          name: k,
-          prompt: String(rec.prompt),
-          ...(typeof rec.description === 'string' ? { description: rec.description } : {}),
-          updatedAt: typeof rec.updatedAt === 'string' ? rec.updatedAt : new Date().toISOString(),
-        };
-      }
-    }
-    return out;
-  } catch {
-    return {};
+    raw = await readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw error;
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
+  } catch (error) {
+    throw new Error(`Failed to parse presets at ${filePath}: ${(error as Error).message}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Invalid presets at ${filePath}: expected an object mapping preset names to entries`);
+  }
+  const out: Record<string, PresetEntry> = {};
+  for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    if (v && typeof v === 'object' && typeof (v as Record<string, unknown>).prompt === 'string') {
+      const rec = v as Record<string, unknown>;
+      out[k] = {
+        name: k,
+        prompt: String(rec.prompt),
+        ...(typeof rec.description === 'string' ? { description: rec.description } : {}),
+        updatedAt: typeof rec.updatedAt === 'string' ? rec.updatedAt : new Date().toISOString(),
+      };
+    }
+  }
+  return out;
 }
 
 export async function savePresets(presets: Record<string, PresetEntry>): Promise<void> {
@@ -515,9 +537,9 @@ export async function systemPrompt(
         '4. When ready, call exit_plan_mode({ plan }) to present the plan for approval and transition to implementation (or wrap your plan in <proposed_plan>...</proposed_plan>).',
       ].join('\n')
     : readOnly
-      ? 'READ-ONLY MODE: inspect and explain only. Do not modify files or execute shell commands. When delegate_task is available, use delegate_task({ tasks: [...] }) to parallelize independent codebase research. Use sequential_thinking and Knowledge Graph inspection tools to analyze the repository without mutating files.'
+      ? 'READ-ONLY MODE: inspect and explain only. Do not modify files or execute shell commands. When delegate_task is available, use delegate_task({ tasks: [...] }) to parallelize independent codebase research.'
       : [
-          'ACTIVE MODE: Standard Execution Mode (you are NOT in Plan Mode or Read-Only Mode; read_file, list_files, search, write_file, edit_file, apply_patch, bash, todo_read, todo_write, update_plan, get_goal, create_goal, update_goal, request_user_input, view_image, spawn_agent, wait_agent, send_input, close_agent, list_agents, delegate_task, delegate_edit, agent_network, run_workflow, sequential_thinking, mcp_create_entities, mcp_create_relations, mcp_add_observations, mcp_read_graph, mcp_search_nodes are available).',
+          'ACTIVE MODE: Standard Execution Mode (you are NOT in Plan Mode or Read-Only Mode; read_file, list_files, search, write_file, edit_file, apply_patch, bash, todo_read, todo_write, update_plan, get_goal, create_goal, update_goal, request_user_input, view_image, spawn_agent, wait_agent, send_input, close_agent, resume_agent, list_agents, delegate_task, delegate_edit, agent_network, run_workflow, sequential_thinking, mcp_create_entities, mcp_create_relations, mcp_add_observations, mcp_read_graph, mcp_search_nodes are available).',
           'Multi-agent / Subagents (Codex workflow): When subagent tools are available in your tool list, proactively use them whenever a request asks for subagents/agents or involves multiple independent codebase questions, broad exploration, or parallelizable tasks:',
           '  • Background / interactive sub-agents: Call `spawn_agent({ message: "<self-contained task>", agent_type: "explorer" | "worker" })` (you may spawn multiple agents in parallel), then call `wait_agent({ targets: [agent_id, ...] })` to collect their final reports. Use `send_input` for follow-ups and `close_agent` when done.',
           '  • Synchronous batch delegation: Call `delegate_task({ tasks: ["<task 1>", "<task 2>"] })` for parallel read-only exploration, or `delegate_edit({ tasks: ["<task 1>", ...] })` for sequential coding subtasks.',

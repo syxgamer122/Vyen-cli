@@ -255,7 +255,7 @@ test('slash workflow and network use one shared budget and honour step permissio
   const toolIdx = source.indexOf("reg.register('run_workflow'");
   const toolEnd = source.indexOf("return { tools: reg", toolIdx);
   const toolBlock = source.slice(toolIdx, toolEnd > -1 ? toolEnd : toolIdx + 4000);
-  assert.match(toolBlock, /runSubagents:\s*async\s*\(tasks,\s*readOnly,\s*stepSig\)/, 'run_workflow tool must wire runSubagents hook');
+  assert.match(toolBlock, /runSubagents:\s*(?:subagents\s*\?\s*)?async\s*\(tasks,\s*readOnly,\s*stepSig\)/, 'run_workflow tool must wire runSubagents hook');
 
   // The slash command is a separate wiring from the model tool; it must not regress either.
   const workflowStart = source.indexOf("input.startsWith('/workflow ')");

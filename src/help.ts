@@ -57,7 +57,7 @@ Interactive commands:
   /help, /setup, /key, /model, /effort, /mode, /auto, /view, /transcript, /copy, /btw,
   /goal, /recap, /skills, /prompts, /memories, /presets, /mention, /pair, /workflow, /network,
   /cd, /pwd, /mcp, /subagents, /plan, /revert, /undo, /checkpoints, /todo, /compact, /diff, /review, /fork, /rename,
-  /delete, /export, /init, /status, /tools, /sessions, /debug-config, /warnings, /doctor, /clear, /exit, or !<cmd>.
+  /new, /resume, /delete, /export, /init, /status, /tools, /sessions, /debug-config, /warnings, /doctor, /clear, /exit, or !<cmd>.
 Shortcuts: Shift+Tab mode, Ctrl+T transcript, Ctrl+O copy, Alt+. / Alt+, effort, Tab autocomplete, Esc Esc rewind, Ctrl+C cancel.
 API keys are read from environment variables or ~/.config/vyen/credentials.json.
 Shell commands run as your OS user; approvals are not an OS sandbox.

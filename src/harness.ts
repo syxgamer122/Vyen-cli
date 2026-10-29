@@ -200,6 +200,16 @@ function buildToolMeta(toolName: string, rawInput: unknown): ToolEventMeta {
     const target = typeof rec.target === 'string' ? rec.target : typeof rec.id === 'string' ? rec.id : 'agent';
     return { kind: 'other', summary: target };
   }
+  if (canonical === 'resume_agent') {
+    const target = typeof rec.target === 'string' ? rec.target : typeof rec.id === 'string' ? rec.id : 'agent';
+    return { kind: 'other', summary: target };
+  }
+  if (canonical === 'list_agents') {
+    return { kind: 'list', summary: 'active subagents' };
+  }
+  if (canonical === 'peer_list') {
+    return { kind: 'list', summary: 'network peers' };
+  }
   if (canonical === 'delegate_task' || canonical === 'delegate_edit') {
     const count = Array.isArray(rec.tasks) ? rec.tasks.length : 1;
     return { kind: 'other', summary: `${count} subagent task(s)` };

@@ -134,3 +134,50 @@ test('loadProjectInstructions loads AGENT_LEARNINGS.md alongside AGENTS.md', asy
   assert.match(instructions, /never anchor bash regexes\./);
 });
 
+test('loadMemories throws on corrupt JSON and strips BOM instead of returning empty array', async t => {
+  const f = await fixture(t);
+  const prevConfig = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = f.config;
+  t.after(() => {
+    if (prevConfig === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prevConfig;
+  });
+
+  const { loadMemories, memoriesPath } = await import('../dist/context.js');
+  const filePath = memoriesPath();
+  const { mkdir } = await import('node:fs/promises');
+  const { dirname } = await import('node:path');
+  await mkdir(dirname(filePath), { recursive: true });
+
+  await writeFile(filePath, 'corrupted invalid json {{{');
+  await assert.rejects(loadMemories(), /Failed to parse memories/);
+
+  await writeFile(filePath, '\uFEFF' + JSON.stringify([{ id: '1', text: 'remember this' }]));
+  const loaded = await loadMemories();
+  assert.equal(loaded.length, 1);
+  assert.equal(loaded[0].text, 'remember this');
+});
+
+test('loadPresets throws on corrupt JSON and strips BOM instead of returning empty object', async t => {
+  const f = await fixture(t);
+  const prevConfig = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = f.config;
+  t.after(() => {
+    if (prevConfig === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prevConfig;
+  });
+
+  const { loadPresets, presetsPath } = await import('../dist/context.js');
+  const filePath = presetsPath();
+  const { mkdir } = await import('node:fs/promises');
+  const { dirname } = await import('node:path');
+  await mkdir(dirname(filePath), { recursive: true });
+
+  await writeFile(filePath, 'corrupted invalid json {{{');
+  await assert.rejects(loadPresets(), /Failed to parse presets/);
+
+  await writeFile(filePath, '\uFEFF' + JSON.stringify({ review: { prompt: 'review diff' } }));
+  const loaded = await loadPresets();
+  assert.ok(loaded.review);
+  assert.equal(loaded.review.prompt, 'review diff');
+});

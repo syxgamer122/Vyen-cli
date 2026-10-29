@@ -1347,34 +1347,37 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                     await unlink(join(wfSessionsRoot, `${childId}.json`)).catch(() => {});
                   }
                 },
-                runSubagents: async (tasks, readOnly, stepSig) => {
-                  if (!subagents) return '';
-                  const previousBudget = reg.budget;
-                  try {
-                    const res = await reg.execute(
-                      {
-                        toolCallId: `wf_${Date.now()}`,
-                        toolName: readOnly ? 'delegate_task' : 'delegate_edit',
-                        input: { tasks },
-                      },
-                      stepSig,
-                    );
-                    return res.text;
-                  } finally {
-                    reg.budget = previousBudget;
-                  }
-                },
-                runNetwork: async (topic, roles, rounds, stepSig) => {
-                  if (!subagents) return '';
-                  const netRes = await subagents.network.brainstorm({
-                    topic,
-                    roles,
-                    rounds,
-                    signal: stepSig,
-                    budget: reg.budget,
-                  });
-                  return formatBrainstormReport(netRes);
-                },
+                runSubagents: subagents
+                  ? async (tasks, readOnly, stepSig) => {
+                      const previousBudget = reg.budget;
+                      try {
+                        const res = await reg.execute(
+                          {
+                            toolCallId: `wf_${Date.now()}`,
+                            toolName: readOnly ? 'delegate_task' : 'delegate_edit',
+                            input: { tasks },
+                          },
+                          stepSig,
+                        );
+                        return res.text;
+                      } finally {
+                        reg.budget = previousBudget;
+                      }
+                    }
+                  : undefined,
+                runNetwork: subagents
+                  ? async (topic, roles, rounds, stepSig) => {
+                      const sa = subagents!;
+                      const netRes = await sa.network.brainstorm({
+                        topic,
+                        roles,
+                        rounds,
+                        signal: stepSig,
+                        budget: reg.budget,
+                      });
+                      return formatBrainstormReport(netRes);
+                    }
+                  : undefined,
               });
               return JSON.stringify(res, null, 2);
             },
