@@ -447,9 +447,14 @@ export class Harness {
     const session = this.store.session;
     const checkpoints = session.checkpoints ?? [];
     if (!checkpoints.length) throw new Error('No turn checkpoints available to revert.');
-    const count = Math.min(Math.max(1, options?.steps ?? 1), checkpoints.length);
     const scope = options?.scope ?? 'both';
-    const target = checkpoints.slice(-count);
+    // "steps" counts turns that touched the workspace. A read-only turn has no
+    // files to restore, so counting it would spend the user's /revert 3 on
+    // turns that cannot undo anything.
+    const revertible = checkpoints.filter(cp => cp.files.length > 0);
+    if (!revertible.length) throw new Error('No turn checkpoints with file changes available to revert.');
+    const count = Math.min(Math.max(1, options?.steps ?? 1), revertible.length);
+    const target = revertible.slice(-count);
     const restoredSet = new Set<string>();
     const deletedSet = new Set<string>();
     const conflictSet = new Set<string>();
@@ -482,7 +487,10 @@ export class Harness {
         session.messages.length = first.messageIndex;
       }
       session.tokens = first.tokensBefore;
-      checkpoints.splice(checkpoints.length - count, count);
+      // Remove the reverted turns and everything after them: a newer read-only
+      // turn cannot stay once the turn it followed is gone.
+      const oldest = checkpoints.indexOf(first);
+      checkpoints.splice(oldest);
       session.checkpoints = checkpoints;
     } else if (scope === 'code') {
       for (const cp of target) cp.files = [];
