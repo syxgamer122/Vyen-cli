@@ -557,9 +557,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       }
       if (sub === 'get') {
         const target = positionals[2];
+        if (!target) throw new Error('Usage: vyen mcp get <name> [--scope=user|project] [--project]');
         const view = await loadView();
         if (view.projectError) throw new Error(view.projectError);
-        if (!target || !view.merged.servers[target]) throw new Error(`MCP server "${target ?? ''}" not found.`);
+        if (!view.merged.servers[target]) throw new Error(`MCP server "${target}" not found.`);
         const server = view.merged.servers[target];
         stdout.write(JSON.stringify({
           name: target,
