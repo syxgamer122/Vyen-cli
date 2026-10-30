@@ -127,6 +127,45 @@ export function normalizeToolInput(toolName: string, input: unknown): unknown {
     delete obj.file_path;
     delete obj.directory;
   }
+  if (toolName === 'read_file') {
+    if (obj.offset === undefined) {
+      const aliasOffset = obj.start_line ?? obj.startLine ?? obj.line ?? obj.from_line ?? obj.fromLine;
+      if (typeof aliasOffset === 'number' && Number.isInteger(aliasOffset) && aliasOffset > 0) {
+        obj.offset = aliasOffset;
+      }
+    }
+    if (obj.lines === undefined) {
+      const aliasEnd = obj.end_line ?? obj.endLine ?? obj.to_line ?? obj.toLine;
+      if (typeof aliasEnd === 'number' && Number.isInteger(aliasEnd)) {
+        const start = typeof obj.offset === 'number' ? obj.offset : 1;
+        if (aliasEnd >= start) {
+          obj.lines = Math.min(500, aliasEnd - start + 1);
+        }
+      }
+    }
+    delete obj.start_line;
+    delete obj.startLine;
+    delete obj.from_line;
+    delete obj.fromLine;
+    delete obj.end_line;
+    delete obj.endLine;
+    delete obj.to_line;
+    delete obj.toLine;
+    delete obj.line;
+  }
+  if (toolName === 'wait_agent') {
+    if (obj.timeout_ms === undefined) {
+      const aliasTimeout = obj.timeoutMs ?? obj.timeout;
+      if (typeof aliasTimeout === 'number') obj.timeout_ms = aliasTimeout;
+    }
+    delete obj.timeoutMs;
+    delete obj.timeout;
+  }
+  if (toolName === 'update_goal') {
+    if (obj.status === 'completed') {
+      obj.status = 'complete';
+    }
+  }
   if (toolName === 'search') {
     if (obj.query === undefined && obj.pattern !== undefined) {
       obj.query = obj.pattern;

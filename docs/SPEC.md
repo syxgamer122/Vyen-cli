@@ -33,7 +33,7 @@ tools and persistence. No ZCode runtime source is copied or loaded.
   symlink escapes fail. Existing files must be read before overwrite/edit;
   changed revisions are rejected. Shell commands require approval and execute
   as the current user, without an OS sandbox. Read-only mode omits all mutations
-  and shell. --yes explicitly authorizes them without prompts. Project settings
+  and shell. --yes (or interactive /auto, /yolo) explicitly authorizes them without prompts. Project settings
   in `.vyen/settings.json` define permissions (`allow`, `ask`, `deny`) and lifecycle
   `hooks` (`SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
   `PostToolUseFailure`, `PreCompact`, `Stop`). Hooks receive a JSON payload on stdin with

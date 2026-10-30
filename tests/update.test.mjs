@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  fetchLatestVersion,
   checkForUpdates,
   detectInstallMethod,
   methodFromPath,
@@ -222,3 +223,41 @@ async function runUpgradeCli(t, args, latestVersion, options = {}) {
   clearTimeout(timer);
   return result;
 }
+
+test('fetchLatestVersion fetches and parses latest semver from npm registry with timeout and error fallback', async t => {
+  let responseStatus = 200;
+  let responseBody = JSON.stringify({ version: '0.6.1' });
+  const server = createServer((req, res) => {
+    assert.equal(req.headers.accept, 'application/json');
+    assert.ok(req.url.includes('%2F') || req.url.includes('vyen'));
+    res.writeHead(responseStatus, { 'content-type': 'application/json' });
+    res.end(responseBody);
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  const registry = `http://127.0.0.1:${port}`;
+  t.after(() => new Promise(r => server.close(r)));
+
+  // Valid version
+  const v1 = await fetchLatestVersion({ registry });
+  assert.equal(v1, '0.6.1');
+
+  // Trailing slashes are stripped
+  const v2 = await fetchLatestVersion({ registry: `${registry}///` });
+  assert.equal(v2, '0.6.1');
+
+  // Invalid semver string in body -> undefined
+  responseBody = JSON.stringify({ version: 'not-a-semver' });
+  const vInvalid = await fetchLatestVersion({ registry });
+  assert.equal(vInvalid, undefined);
+
+  // 404 response -> undefined
+  responseStatus = 404;
+  responseBody = JSON.stringify({ error: 'Not found' });
+  const v404 = await fetchLatestVersion({ registry });
+  assert.equal(v404, undefined);
+
+  // Network failure / unreachable port -> undefined
+  const vDead = await fetchLatestVersion({ registry: 'http://127.0.0.1:1' });
+  assert.equal(vDead, undefined);
+});

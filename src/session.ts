@@ -341,30 +341,52 @@ export class SessionStore {
       this.secretKeys.push(key);
     }
   }
+  static resolveSessionId(
+    list: SessionSummary[],
+    target: string,
+    options?: { cwd?: string; excludeId?: string },
+  ): string | undefined {
+    const trimmed = target.trim();
+    if (!trimmed) return undefined;
+
+    const inWorkspace = options?.cwd ? (s: SessionSummary) => sameWorkspace(s.cwd, options.cwd!) : () => true;
+    const resumable = (s: SessionSummary) => (s.messagesCount ?? 0) > 0 || Boolean(s.title);
+
+    if (trimmed === 'latest') {
+      const wsNonEmpty = list.filter(s => inWorkspace(s) && s.id !== options?.excludeId && resumable(s));
+      const wsAll = list.filter(s => inWorkspace(s) && s.id !== options?.excludeId);
+      if (options?.cwd) return wsNonEmpty[0]?.id ?? wsAll[0]?.id;
+      const anyNonEmpty = list.filter(s => s.id !== options?.excludeId && resumable(s));
+      return wsNonEmpty[0]?.id ?? wsAll[0]?.id ?? anyNonEmpty[0]?.id ?? list.find(s => s.id !== options?.excludeId)?.id;
+    }
+
+    if (/^\d{1,3}$/.test(trimmed)) {
+      const idx = Number(trimmed) - 1;
+      const wsNonEmpty = list.filter(s => inWorkspace(s) && s.id !== options?.excludeId && resumable(s));
+      const wsAll = list.filter(s => inWorkspace(s) && s.id !== options?.excludeId);
+      const candidates = wsNonEmpty.length ? wsNonEmpty : wsAll;
+      return candidates[idx]?.id;
+    }
+
+    const lower = trimmed.toLowerCase();
+    const exact = list.find(s => s.id.toLowerCase() === lower);
+    if (exact) return exact.id;
+
+    if (/^[0-9a-f-]{4,36}$/i.test(trimmed)) {
+      const wsMatches = list.filter(s => inWorkspace(s) && s.id.toLowerCase().startsWith(lower));
+      if (wsMatches.length === 1) return wsMatches[0].id;
+      const allMatches = list.filter(s => s.id.toLowerCase().startsWith(lower));
+      if (allMatches.length === 1) return allMatches[0].id;
+    }
+
+    return undefined;
+  }
   static async open(root: string, input: SessionStoreInput, resume?: string, excludeId?: string, options?: { secretKeys?: string[] }): Promise<SessionStore> {
     await mkdir(root, { recursive: true, mode: 0o700 });
     let id = resume?.trim();
-    if (id === 'latest') {
+    if (id && (id === 'latest' || /^\d{1,3}$/.test(id) || !z.string().uuid().safeParse(id).success)) {
       const list = await SessionStore.list(root);
-      const wsList = list.filter(s => sameWorkspace(s.cwd, input.cwd) && s.id !== excludeId);
-      id = wsList.find(s => (s.messagesCount ?? 0) > 0)?.id
-        ?? wsList[0]?.id
-        ?? list.find(s => sameWorkspace(s.cwd, input.cwd) && (s.messagesCount ?? 0) > 0)?.id
-        ?? list.find(s => sameWorkspace(s.cwd, input.cwd))?.id;
-    } else if (id && /^\d{1,3}$/.test(id)) {
-      // List index (vyen resume 3). Longer all-digit input is an ID prefix: ~2.3% of UUIDs start with 8 digits.
-      const idx = Number(id) - 1;
-      const list = await SessionStore.list(root);
-      const wsNonEmpty = list.filter(s => sameWorkspace(s.cwd, input.cwd) && (s.messagesCount ?? 0) > 0 && s.id !== excludeId);
-      const wsAll = list.filter(s => sameWorkspace(s.cwd, input.cwd) && s.id !== excludeId);
-      const candidates = wsNonEmpty.length ? wsNonEmpty : wsAll;
-      id = candidates[idx]?.id ?? id;
-    } else if (id && !z.string().uuid().safeParse(id).success && /^[0-9a-f-]{4,35}$/i.test(id)) {
-      const prefix = id.toLowerCase();
-      const list = await SessionStore.list(root);
-      id = list.find(s => sameWorkspace(s.cwd, input.cwd) && s.id.toLowerCase().startsWith(prefix))?.id
-        ?? list.find(s => s.id.toLowerCase().startsWith(prefix))?.id
-        ?? id;
+      id = SessionStore.resolveSessionId(list, id, { cwd: input.cwd, excludeId });
     }
     if (resume && !id) throw new Error('No matching session to resume in this workspace.');
     if (id && !z.string().uuid().safeParse(id).success) throw new Error('Invalid session ID.');
@@ -483,18 +505,27 @@ export class SessionStore {
     }
     return summaries.filter((s): s is SessionSummary => !!s).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
-  static async deleteSession(root: string, idOrPrefix: string): Promise<string> {
-    const trimmed = idOrPrefix.trim().toLowerCase();
+  static async deleteSession(root: string, idOrPrefix: string, options?: { cwd?: string; excludeId?: string }): Promise<string> {
+    const trimmed = idOrPrefix.trim();
     if (!trimmed) throw new Error('Session id is required.');
     const list = await SessionStore.list(root);
-    const exact = list.find(s => s.id.toLowerCase() === trimmed);
-    const matches = exact ? [exact] : list.filter(s => s.id.toLowerCase().startsWith(trimmed));
-    if (!matches.length) throw new Error(`No saved session matches "${idOrPrefix.trim()}".`);
+    let resolvedId: string | undefined;
+    if (/^\d{1,3}$/.test(trimmed) || trimmed === 'latest') {
+      resolvedId = SessionStore.resolveSessionId(list, trimmed, options);
+      if (!resolvedId) throw new Error(`No saved session matches "${trimmed}".`);
+    }
+    const lower = (resolvedId ?? trimmed).toLowerCase();
+    const exact = list.find(s => s.id.toLowerCase() === lower);
+    const matches = exact ? [exact] : list.filter(s => s.id.toLowerCase().startsWith(lower));
+    if (!matches.length) throw new Error(`No saved session matches "${trimmed}".`);
     // Deleting is irreversible: an ambiguous prefix must never pick a session at random.
     if (matches.length > 1) {
       throw new Error(`Session prefix "${idOrPrefix.trim()}" is ambiguous (${matches.length} matches: ${matches.slice(0, 4).map(m => m.id.slice(0, 8)).join(', ')}${matches.length > 4 ? ', ...' : ''}). Use more characters.`);
     }
     const match = matches[0];
+    if (options?.excludeId && match.id === options.excludeId) {
+      throw new Error('Cannot delete active session.');
+    }
     const lock = join(root, `${match.id}.lock`);
     // A live owner keeps writing this session; removing its lock would let two processes share it.
     try {

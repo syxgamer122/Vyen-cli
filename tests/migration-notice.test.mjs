@@ -8,7 +8,7 @@ import { fixture, cli } from './helpers.mjs';
 
 test('the legacy-migration notice ends with a real newline', async t => {
   const f = await fixture(t);
-  // Legacy data lives at $XDG_CONFIG_HOME/goon and is copied into .../vyen on first run.
+  // Legacy goon data lives at $XDG_CONFIG_HOME/goon and is copied into .../vyen on first run.
   const legacyConfig = join(f.config, 'goon');
   await mkdir(legacyConfig, { recursive: true });
   await writeFile(join(legacyConfig, 'memories.json'), '[]\n');

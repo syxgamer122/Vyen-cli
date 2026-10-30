@@ -114,8 +114,9 @@ const waitAgentSchema = z.object({
     .int()
     .min(100)
     .max(600_000)
+    .optional()
     .default(120_000)
-    .describe('Maximum wait time in milliseconds (default 120000).'),
+    .describe('Maximum wait time in milliseconds (default 120000 ms = 120 s, max 600000 ms).'),
 });
 
 const sendInputSchema = z.object({
@@ -275,7 +276,7 @@ export class Subagents {
     unregisters.push(
       this.registry.register('wait_agent', {
         description:
-          'Wait for spawned sub-agents to reach a final status (`completed` or `errored`) and return their reports. Pass `targets: [agent_id, ...]` (or omit `targets` to wait for all active spawned agents).',
+          'Wait for spawned sub-agents to reach a final status (`completed` or `errored`) and return their reports. Pass `targets: [agent_id, ...]` (or omit `targets` to wait for all active spawned agents). Optional `timeout_ms` (defaults to 120000ms / 120s, max 600000ms).',
         schema: waitAgentSchema,
         readOnly: true,
         execute: (input, signal) => this.waitAgentTool(input, signal),
@@ -616,6 +617,10 @@ export class Subagents {
           }
         };
         signal.addEventListener('abort', onAbort, { once: true });
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
         for (const r of resolved) {
           r.agent?.waiters.add(check);
         }

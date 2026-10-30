@@ -172,6 +172,26 @@ test('broken or timed out hook does not crash the run', async () => {
   assert.ok(res[1].error, 'timed out hook records error');
 });
 
+test('hook execution spawn error fails closed for PreToolUse without throwing exception', async () => {
+  const bus = new HookBus({
+    cwd: import.meta.filename,
+    isTrusted: true,
+    hooks: [
+      {
+        event: 'PreToolUse',
+        matcher: 'bash',
+        command: 'echo hi',
+      },
+    ],
+  });
+
+  const res = await bus.dispatch('PreToolUse', { tool: 'bash', input: { command: 'ls' } });
+  assert.equal(res.length, 1);
+  assert.equal(res[0].denied, true);
+  assert.equal(res[0].executed, false);
+  assert.ok(res[0].error);
+});
+
 test('hook process environment never receives sensitive API keys', async () => {
   const originalKey = process.env.VYEN_API_KEY;
   const originalToken = process.env.ANTHROPIC_API_KEY;

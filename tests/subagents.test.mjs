@@ -216,6 +216,11 @@ test('model autonomously invokes Codex multi-agent tools (spawn_agent, wait_agen
       assert(toolNames.includes('close_agent'));
       const spawnTool = body.tools.find(tl => tl.function.name === 'spawn_agent');
       assert(spawnTool.function.parameters.properties.message, 'spawn_agent schema must expose message property to LLM');
+      const waitTool = body.tools.find(tl => tl.function.name === 'wait_agent');
+      assert(waitTool.function.parameters.properties.timeout_ms, 'wait_agent schema must expose timeout_ms property to LLM');
+      assert.equal(waitTool.function.parameters.properties.timeout_ms.default, 120000, 'timeout_ms default must be 120000');
+      assert.match(waitTool.function.parameters.properties.timeout_ms.description, /120\s*s/, 'timeout_ms description must clarify 120 s');
+      assert.match(waitTool.function.description, /timeout_ms|120\s*s/i, 'wait_agent tool description must document timeout');
       return sse(response, {
         calls: [
           { id: 'spawn-1', name: 'spawn_agent', input: { prompt: 'Explore module A', role: 'explorer' } },
@@ -428,6 +433,31 @@ test('wait_agent reports timed_out while a target is still running', async t => 
   const statuses = Object.values(waited.status).map(s => typeof s === 'string' ? s : Object.keys(s)[0]);
   assert.ok(statuses.includes('running'), 'the slow child must still be running');
   assert.equal(waited.timed_out, true, 'a target that is still running means the wait timed out');
+
+  // Signal aborts while waiting rejects with AbortError quickly
+  const abortWhileWaiting = new AbortController();
+  setTimeout(20).then(() => abortWhileWaiting.abort());
+  const t0 = Date.now();
+  await assert.rejects(
+    tools.execute(
+      { toolCallId: 'w2', toolName: 'wait_agent', input: { targets: [slow.agent_id], timeout_ms: 10_000 } },
+      abortWhileWaiting.signal,
+    ),
+    /aborted/i,
+  );
+  assert.ok(Date.now() - t0 < 1000, 'wait_agent must resolve/reject quickly when signal aborts');
+
+  // Pre-aborted signal rejects with AbortError at entry
+  const preAborted = new AbortController();
+  preAborted.abort();
+  await assert.rejects(
+    tools.execute(
+      { toolCallId: 'w3', toolName: 'wait_agent', input: { targets: [slow.agent_id], timeout_ms: 10_000 } },
+      preAborted.signal,
+    ),
+    /aborted/i,
+  );
+
   await subagents.closeAll();
 });
 

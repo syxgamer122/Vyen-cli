@@ -11,7 +11,7 @@ rules from `AGENTS.md`.
 ## 2. Shell Security: Segment-Aware Matching vs. Start-Anchored Regexes
 - **Detail:** split on compound operators (`;`, `&&`, `||`, `|`, newline, `$()`, `<()`, `>()`, backticks); strip subshells `(...)`, `{...}`, quotes, wrappers (`sudo`, `env`, `sh -c`, `bash -c`, `eval`, `exec`); deny if ANY segment matches.
 - **Seen (2026-10-25):** stripping only outer quotes allowed `"rm" -rf /`, `r\m -rf /`, `/bin/rm -rf /` to bypass `deny: ["bash(rm *)"]`.
-- **Rule:** tokenize with shell quoting; strip wrappers and redirections; match basename (`.exe` on Windows); fail closed on `$`, backticks, command substitution.
+- **Rule:** tokenize with shell quoting; strip wrappers and redirections (including `VAR="..."` and `sudo -u "user"` with quoted spaces); match basename (`.exe` on Windows); fail closed on `$`, backticks, command substitution.
 - **Guard:** `tests/policy.test.mjs` › "bash deny and ask rules cannot be bypassed by quoting or escaping the command word".
 
 ## 3. Trust Coverage: Executables in Auto-Allow Rules
@@ -20,6 +20,7 @@ rules from `AGENTS.md`.
 ## 4. Fail-Closed vs. Fail-Open Architecture
 - **Anti-Pattern:** `isTrusted` defaulting to `true`, hook timeouts defaulting to `denied: false`, or `loadProjectSettings` catching errors into `{}`.
 - **Deny Precedence:** persistent project/user `deny` rules evaluate before `cliAllowed`.
+- **HookBus Spawn (2026-10-30):** wrap `spawn()` in `try...catch` so synchronous spawn errors resolve fail-closed (`denied: true`).
 
 ## 5. Lifecycle Synchronization: Process vs. Session Lifetime
 - **Anti-Pattern:** dispatching `SessionEnd` only on CLI exit, `SessionStart` only on `messages.length === 0`, or storing flags on transient `Harness`.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionStore } from '../dist/session.js';
-import { compactIfNeeded, estimatedTokens } from '../dist/context.js';
+import { compactIfNeeded, estimatedTokens, compactionThreshold, isNearCompactionThreshold } from '../dist/context.js';
 import { createModel } from '../dist/provider.js';
 import { fixture, provider } from './helpers.mjs';
 
@@ -180,4 +180,17 @@ test('loadPresets throws on corrupt JSON and strips BOM instead of returning emp
   const loaded = await loadPresets();
   assert.ok(loaded.review);
   assert.equal(loaded.review.prompt, 'review diff');
+});
+
+test('compactionThreshold and isNearCompactionThreshold are single-source-of-truth across harness and context', () => {
+  const cfg = { contextWindow: 100_000, maxOutputTokens: 10_000 };
+  const expectedThreshold = 100_000 * 0.7 - 10_000; // 60,000
+  assert.equal(compactionThreshold(cfg), expectedThreshold);
+
+  // Under threshold
+  assert.equal(isNearCompactionThreshold([], '', cfg, 59_999), false);
+  // Exactly at threshold
+  assert.equal(isNearCompactionThreshold([], '', cfg, 60_000), true);
+  // Above threshold
+  assert.equal(isNearCompactionThreshold([], '', cfg, 65_000), true);
 });

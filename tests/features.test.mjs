@@ -23,17 +23,144 @@ import {
 import { HookBus } from '../dist/hooks.js';
 import { fixture, provider, sse } from './helpers.mjs';
 
+const QR_ALIGNMENT = {
+  1: [],
+  2: [6, 18],
+  3: [6, 22],
+  4: [6, 26],
+  5: [6, 30],
+  6: [6, 34],
+  7: [6, 22, 38],
+  8: [6, 24, 42],
+  9: [6, 26, 46],
+  10: [6, 28, 50],
+};
+
+function decodeQrMatrix(matrix) {
+  const size = matrix.length;
+  const version = (size - 17) / 4;
+  const isFunction = Array.from({ length: size }, () => Array(size).fill(false));
+
+  const setFunc = (r, c) => {
+    if (r >= 0 && r < size && c >= 0 && c < size) isFunction[r][c] = true;
+  };
+
+  const drawFinder = (top, left) => {
+    for (let dr = -1; dr <= 7; dr++) {
+      for (let dc = -1; dc <= 7; dc++) {
+        setFunc(top + dr, left + dc);
+      }
+    }
+  };
+  drawFinder(0, 0);
+  drawFinder(0, size - 7);
+  drawFinder(size - 7, 0);
+
+  for (let i = 8; i < size - 8; i++) {
+    setFunc(6, i);
+    setFunc(i, 6);
+  }
+
+  const align = QR_ALIGNMENT[version] || [];
+  for (let i = 0; i < align.length; i++) {
+    for (let j = 0; j < align.length; j++) {
+      if ((i === 0 && j === 0) || (i === 0 && j === align.length - 1) || (i === align.length - 1 && j === 0)) continue;
+      const cr = align[i];
+      const cc = align[j];
+      for (let dr = -2; dr <= 2; dr++) {
+        for (let dc = -2; dc <= 2; dc++) setFunc(cr + dr, cc + dc);
+      }
+    }
+  }
+
+  setFunc(size - 8, 8);
+  for (let i = 0; i <= 8; i++) { setFunc(8, i); setFunc(i, 8); }
+  for (let i = 0; i < 8; i++) { setFunc(8, size - 1 - i); setFunc(size - 1 - i, 8); }
+
+  if (version >= 7) {
+    for (let i = 0; i < 6; i++) {
+      for (let j = 0; j < 3; j++) {
+        setFunc(i, size - 11 + j);
+        setFunc(size - 11 + j, i);
+      }
+    }
+  }
+
+  let fBits = 0;
+  for (let i = 0; i <= 5; i++) if (matrix[8][i]) fBits |= (1 << i);
+  if (matrix[8][7]) fBits |= (1 << 6);
+  if (matrix[8][8]) fBits |= (1 << 7);
+  if (matrix[7][8]) fBits |= (1 << 8);
+  for (let i = 9; i < 15; i++) if (matrix[14 - i][8]) fBits |= (1 << i);
+  const unmasked = fBits ^ 0x5412;
+  const mask = (unmasked >>> 10) & 0x07;
+
+  const grid = matrix.map((row, r) => row.map((dark, c) => {
+    if (isFunction[r][c]) return dark;
+    const invert =
+      mask === 0 ? (r + c) % 2 === 0 :
+      mask === 1 ? r % 2 === 0 :
+      mask === 2 ? c % 3 === 0 :
+      (r + c) % 3 === 0;
+    return invert ? !dark : dark;
+  }));
+
+  const bits = [];
+  let upward = true;
+  for (let right = size - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5;
+    for (let vert = 0; vert < size; vert++) {
+      const r = upward ? size - 1 - vert : vert;
+      for (let j = 0; j < 2; j++) {
+        const c = right - j;
+        if (!isFunction[r][c]) {
+          bits.push(grid[r][c] ? 1 : 0);
+        }
+      }
+    }
+    upward = !upward;
+  }
+
+  let bitIdx = 0;
+  const readBits = (n) => {
+    let val = 0;
+    for (let i = 0; i < n; i++) val = (val << 1) | bits[bitIdx++];
+    return val;
+  };
+
+  const mode = readBits(4);
+  assert.equal(mode, 0b0100, 'mode must be byte mode');
+  const countBits = version <= 9 ? 8 : 16;
+  const count = readBits(countBits);
+  const bytes = [];
+  for (let i = 0; i < count; i++) bytes.push(readBits(8));
+  return Buffer.from(bytes).toString('utf8');
+}
+
 test('QR encoder produces valid ISO/IEC 18004 finder patterns and half-block terminal output', () => {
   const url = 'https://vyen-test-tunnel.trycloudflare.com/?t=abc123xyz789';
   const matrix = encodeQrMatrix(url);
   assert(matrix.length >= 21 && matrix.length <= 57);
   assert.equal(matrix.length, matrix[0].length);
-  // Top-left 7x7 finder corners must be dark (true)
-  assert.equal(matrix[0][0], true);
-  assert.equal(matrix[0][6], true);
-  assert.equal(matrix[6][0], true);
-  assert.equal(matrix[6][6], true);
-  assert.equal(matrix[3][3], true);
+
+  // Validate all three 7x7 concentric finder patterns (outer border dark, inner border light, core dark)
+  const checkFinder = (top, left) => {
+    for (let dr = 0; dr <= 6; dr++) {
+      for (let dc = 0; dc <= 6; dc++) {
+        const onBorder = dr === 0 || dr === 6 || dc === 0 || dc === 6;
+        const inInner = dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4;
+        assert.equal(matrix[top + dr][left + dc], onBorder || inInner);
+      }
+    }
+  };
+  checkFinder(0, 0);
+  checkFinder(0, matrix.length - 7);
+  checkFinder(matrix.length - 7, 0);
+
+  // Validate payload decodability
+  assert.equal(decodeQrMatrix(matrix), url);
+  const shortUrl = 'http://127.0.0.1:8080/?key=123';
+  assert.equal(decodeQrMatrix(encodeQrMatrix(shortUrl)), shortUrl);
 
   const rendered = renderQrTerminal(url, '  ');
   const lines = rendered.split('\n');

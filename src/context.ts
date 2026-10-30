@@ -666,11 +666,25 @@ function cleanSummaryText(raw: string, inlineReasoning: RuntimeConfig['inlineRea
   return visible.replace(/<analysis>[\s\S]*?<\/analysis>\s*/gi, '').trim();
 }
 
+export function compactionThreshold(config: Pick<RuntimeConfig, 'contextWindow' | 'maxOutputTokens'>): number {
+  return config.contextWindow * 0.7 - config.maxOutputTokens;
+}
+
+export function isNearCompactionThreshold(
+  messages: ModelMessage[],
+  system: string,
+  config: Pick<RuntimeConfig, 'contextWindow' | 'maxOutputTokens'>,
+  measuredInput = 0,
+): boolean {
+  return Math.max(estimatedTokens(messages, system), measuredInput) >= compactionThreshold(config);
+}
+
 export async function compactIfNeeded(store: SessionStore, config: RuntimeConfig, model: LanguageModel,
   system: string, signal: AbortSignal, measuredInput = 0): Promise<number> {
   const messages = store.session.messages;
-  const threshold = config.contextWindow * 0.7 - config.maxOutputTokens;
-  if (Math.max(estimatedTokens(messages, system), measuredInput) < threshold) return 0;
+  if (!isNearCompactionThreshold(messages, system, config, measuredInput)) return 0;
+  const threshold = compactionThreshold(config);
+
   let cut = Math.max(2, messages.length - 4);
   // Preserve recent work while cutting only before an assistant/user boundary.
   // A single long turn still needs compaction, not just many short user turns.

@@ -736,4 +736,42 @@ test('normalizeToolInput maps standard snake_case arguments for edit_file and ba
     command: 'echo 123',
     timeoutMs: 5000,
   });
+
+  const readNormalized = normalizeToolInput('read_file', {
+    file_path: 'foo.ts',
+    start_line: 10,
+    end_line: 25,
+  });
+  assert.deepEqual(readNormalized, {
+    path: 'foo.ts',
+    offset: 10,
+    lines: 16,
+  });
+
+  const goalNormalized = normalizeToolInput('update_goal', {
+    status: 'completed',
+  });
+  assert.deepEqual(goalNormalized, {
+    status: 'complete',
+  });
+
+  const readClamped = normalizeToolInput('read_file', {
+    file_path: 'foo.ts',
+    start_line: 1,
+    end_line: 1000,
+  });
+  assert.deepEqual(readClamped, {
+    path: 'foo.ts',
+    offset: 1,
+    lines: 500,
+  });
+
+  const waitNormalized = normalizeToolInput('wait_agent', {
+    targets: ['agent-1'],
+    timeoutMs: 5000,
+  });
+  assert.deepEqual(waitNormalized, {
+    targets: ['agent-1'],
+    timeout_ms: 5000,
+  });
 });

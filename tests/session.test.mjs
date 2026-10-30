@@ -199,4 +199,72 @@ test('/sessions command: supports /sessions list, /sessions delete, and drops th
   assert.ok(source.includes("if (cmdInput === '/sessions delete' || cmdInput.startsWith('/sessions delete ')"), '/sessions delete must exist in immediate commands');
   assert.ok(source.includes("if (input === '/resume' || input.startsWith('/resume ') || input === '/sessions' || input.startsWith('/sessions '))"), '/sessions must drop through to interactive picker in mainLoop');
   assert.ok(source.includes("onDelete: async (item) =>"), 'session picker must wire up onDelete handler');
+  assert.ok(source.includes("!/^\\d{1,3}$/.test(target) && target.toLowerCase() !== 'latest' && store.session.id.toLowerCase().startsWith(target.toLowerCase())"), 'numeric index deletion must not be blocked by active session prefix');
+});
+
+test('deleteSession supports numeric index matching /resume selection rule', async t => {
+  const f = await fixture(t), root = join(f.root, 'sessions');
+  const input = { cwd: f.cwd, provider: 'test', model: 'model', baseUrl: 'http://localhost/v1' };
+
+  // Create session 1
+  const s1 = await SessionStore.open(root, input);
+  s1.session.messages.push({ role: 'user', content: 'hello from s1' });
+  await s1.save();
+  const id1 = s1.session.id;
+  await s1.close();
+
+  // Create session 2 (more recent)
+  const s2 = await SessionStore.open(root, input);
+  s2.session.messages.push({ role: 'user', content: 'hello from s2' });
+  await s2.save();
+  const id2 = s2.session.id;
+  await s2.close();
+
+  // Resume 1 opens s2 (most recent)
+  const resumed = await SessionStore.open(root, input, '1');
+  assert.equal(resumed.session.id, id2);
+  await resumed.close();
+
+  // deleteSession '1' must delete s2, not fail or search prefix '1'
+  const deletedId = await SessionStore.deleteSession(root, '1', { cwd: f.cwd });
+  assert.equal(deletedId, id2);
+
+  // Now s1 becomes index 1, and deleting it with excludeId starting with '1' must still delete s1
+  const fakeActiveId = '10000000-0000-0000-0000-000000000000';
+  const deletedRemaining = await SessionStore.deleteSession(root, '1', { cwd: f.cwd, excludeId: fakeActiveId });
+  assert.equal(deletedRemaining, id1);
+});
+
+test('positional session lookups (latest, numeric index) never cross workspaces when cwd is specified', async t => {
+  const f = await fixture(t), root = join(f.root, 'sessions');
+  const ws1 = join(f.cwd, 'ws1');
+  const ws2 = join(f.cwd, 'ws2');
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(ws1, { recursive: true });
+  await mkdir(ws2, { recursive: true });
+  const input1 = { cwd: ws1, provider: 'test', model: 'model', baseUrl: 'http://localhost/v1' };
+  const input2 = { cwd: ws2, provider: 'test', model: 'model', baseUrl: 'http://localhost/v1' };
+
+  // Create a session in ws1
+  const s1 = await SessionStore.open(root, input1);
+  s1.session.messages.push({ role: 'user', content: 'ws1 turn' });
+  await s1.save();
+  const id1 = s1.session.id;
+  await s1.close();
+
+  // In ws2 (empty workspace), resolveSessionId for '1' or 'latest' must NOT return s1
+  const list = await SessionStore.list(root);
+  assert.equal(SessionStore.resolveSessionId(list, '1', { cwd: ws2 }), undefined);
+  assert.equal(SessionStore.resolveSessionId(list, 'latest', { cwd: ws2 }), undefined);
+
+  // deleteSession '1' in ws2 must NOT delete s1 from ws1
+  await assert.rejects(SessionStore.deleteSession(root, '1', { cwd: ws2 }), /No saved session matches "1"/);
+
+  // open latest in ws2 must reject with workspace mismatch / no matching session
+  await assert.rejects(SessionStore.open(root, input2, 'latest'), /No matching session to resume in this workspace/);
+
+  // s1 in ws1 must still exist
+  const remaining = await SessionStore.open(root, input1, '1');
+  assert.equal(remaining.session.id, id1);
+  await remaining.close();
 });

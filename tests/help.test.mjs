@@ -11,7 +11,9 @@ test('help lists the documented flags and subcommands', () => {
     '--no-subagents', '--run-token-budget', '--output-last-message',
     '--allowed-tools', '--disallowed-tools', '--trust-workspace',
     'vyen setup', 'vyen mcp list', 'vyen upgrade',
+    '/yolo',
   ]) assert.ok(HELP.includes(token), token);
+  assert.match(HELP, /--no-subagents\s+.*Agent Network/, '--no-subagents description must mention Agent Network');
 });
 
 test('--help answers even when the rest of the line is invalid or incomplete', async () => {

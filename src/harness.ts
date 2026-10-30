@@ -4,7 +4,7 @@ import { SessionStore, repairInterrupted, type SessionGoal, type TodoItem, type 
 import { ToolRegistry, normalizeToolInput, normalizeToolName, type ToolCall, type RunBudget } from './tools.js';
 import { auxiliaryEffortHeaders, buildProviderOptions, createModel, resolveModelCapabilities } from './provider.js';
 import { safeError } from './errors.js';
-import { buildGoalBudgetLimitPrompt, compactIfNeeded, compactNow, estimatedTokens, expandFileMentions, recapSession, systemPrompt, type SystemPromptCache } from './context.js';
+import { buildGoalBudgetLimitPrompt, compactIfNeeded, compactNow, estimatedTokens, expandFileMentions, isNearCompactionThreshold, recapSession, systemPrompt, type SystemPromptCache } from './context.js';
 import { AnswerProjection, visibleAnswer, withReasoningReplay, type AnswerPart } from './reasoning.js';
 import type { HookBus } from './hooks.js';
 import type { ToolEventMeta } from './events.js';
@@ -595,8 +595,8 @@ export class Harness {
         if (exhausted()) throw new Error('Run token budget reached. Resume with a new prompt or increase --run-token-budget.');
         const system = await systemPrompt(this.config, this.tools.readOnly, this.tools.planMode, session.goal, promptCache);
         const oldCount = session.compactions;
-        const threshold = this.config.contextWindow * 0.7 - this.config.maxOutputTokens;
-        if (this.hookBus && Math.max(estimatedTokens(session.messages, system), measuredInput) >= threshold) {
+
+        if (this.hookBus && isNearCompactionThreshold(session.messages, system, this.config, measuredInput)) {
           await this.hookBus.dispatch('PreCompact', {
             trigger: 'token_limit',
             tokens: session.tokens,

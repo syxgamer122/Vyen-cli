@@ -31,7 +31,7 @@ Options:
       --json                Emit NDJSON events (alias for --output-format stream-json)
       --no-tui              Use plain readline instead of the full-screen UI
       --no-mcp              Disable configured MCP servers for this run
-      --no-subagents        Disable delegation tools for this run
+      --no-subagents        Disable delegation tools and Agent Network for this run
       --inline-reasoning MODE leading-think (default) | off
       --show-reasoning      Separate reasoning events / labeled stderr output
       --context-window N    Actual model context window (default 128000)
@@ -54,7 +54,7 @@ Piping: with -p, text piped on stdin is attached as context, e.g.
   -v, --version             Show version
 
 Interactive commands:
-  /help, /setup, /key, /model, /effort, /mode, /auto, /view, /transcript, /copy, /btw,
+  /help, /setup, /key, /model, /effort, /mode, /auto, /yolo, /view, /transcript, /copy, /btw,
   /goal, /recap, /skills, /prompts, /memories, /presets, /mention, /pair, /workflow, /network,
   /cd, /pwd, /mcp, /subagents, /plan, /revert, /undo, /checkpoints, /todo, /compact, /diff, /review, /fork, /rename,
   /new, /resume, /delete, /export, /init, /status, /tools, /sessions, /debug-config, /warnings, /doctor, /clear, /exit, or !<cmd>.

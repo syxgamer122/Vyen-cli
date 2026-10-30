@@ -1333,6 +1333,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
                     const childTools = new ToolRegistry(runtime.cwd, req => reg.approve(req));
                     childTools.policy = reg.policy;
                     kg.registerTools(childTools);
+                    if (manager?.connected) {
+                      manager.attach(childTools);
+                    }
                     applyPermissionMode(
                       childTools,
                       stepReadOnly ? 'readonly' : reg.planMode || step.mode === 'plan' ? 'plan' : 'ask',
@@ -2492,13 +2495,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             display('Usage: /sessions delete <id>\n');
             return true;
           }
-          if (target.toLowerCase() === 'current' || store.session.id.toLowerCase().startsWith(target.toLowerCase())) {
+          if (target.toLowerCase() === 'current' || (!/^\d{1,3}$/.test(target) && target.toLowerCase() !== 'latest' && store.session.id.toLowerCase().startsWith(target.toLowerCase()))) {
             display('Cannot delete active session. Run /delete current to close and delete the active session.\n');
             return true;
           }
           try {
             const sessionsRoot = join(runtime.dataDir, 'sessions');
-            const deletedId = await SessionStore.deleteSession(sessionsRoot, target);
+            const deletedId = await SessionStore.deleteSession(sessionsRoot, target, { cwd: runtime.cwd, excludeId: store.session.id });
             display(`Deleted saved session: ${deletedId}\n`);
           } catch (err) {
             display(`Failed to delete session: ${safeError(err, apiKey)}\n`);
@@ -3241,17 +3244,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               arg = targetId;
             }
             try {
-              const candidates = folderSessions.length ? folderSessions : projectSessions;
-              const num = Number(arg);
-              const prefix = arg.toLowerCase();
-              const targetMatch = Number.isInteger(num) && num >= 1 && num <= candidates.length && !/^[0-9a-f]{4,}$/i.test(arg)
-                ? candidates[num - 1].id
-                : arg === 'latest'
-                  ? candidates.find(s => s.id !== store.session.id)?.id ?? candidates[0]?.id
-                  : allList.find(s => s.id.toLowerCase() === prefix)?.id
-                    ?? folderSessions.find(s => s.id.toLowerCase().startsWith(prefix))?.id
-                    ?? allList.find(s => s.id.toLowerCase().startsWith(prefix))?.id
-                    ?? arg;
+              const targetMatch = SessionStore.resolveSessionId(allList, arg, { cwd: runtime.cwd, excludeId: store.session.id }) ?? arg;
               if (targetMatch === store.session.id) {
                 display(`Already in session ${store.session.id.slice(0, 8)}.\n`);
                 renderResumedHistory();
@@ -3395,11 +3388,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               continue;
             }
             try {
-              if (store.session.id.toLowerCase().startsWith(target.toLowerCase())) {
+              if (!/^\d{1,3}$/.test(target) && target.toLowerCase() !== 'latest' && store.session.id.toLowerCase().startsWith(target.toLowerCase())) {
                 display('To delete the currently active session, run: /delete current\n');
                 continue;
               }
-              const deletedId = await SessionStore.deleteSession(sessionsRoot, target);
+              const deletedId = await SessionStore.deleteSession(sessionsRoot, target, { cwd: runtime.cwd, excludeId: store.session.id });
               display(`Deleted saved session: ${deletedId}\n`);
             } catch (error) {
               display(`Failed to delete session: ${safeError(error, apiKey)}\n`);

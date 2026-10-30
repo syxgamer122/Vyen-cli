@@ -23,7 +23,7 @@ const COMPOUND_SPLIT_REGEX = /[;\r\n|&]+|\$\(|[<>]+\(|`/g;
 // A command position that starts with a substitution has no static command
 // word; deny/ask rules must fail closed instead of guessing what it expands to.
 const DYNAMIC_COMMAND_PREFIX_REGEX = /(?:^|[;&|\r\n])\s*(?:\$\(|`)/;
-const WRAPPER_PREFIX_REGEX = /^(?:(?:(?:\/usr)?\/bin\/)?sudo(?:\s+(?:-[ugpCDRTrtU]\s+[^\s]+|-[a-zA-Z]+|--[a-zA-Z-]*(?:=[^\s]+)?))*\s+|(?:(?:\/usr)?\/bin\/)?env(?:\s+(?:-[uC]\s+[^\s]+|-[a-zA-Z0-9]+|--[a-zA-Z-]*(?:=[^\s]+)?|[a-zA-Z_][a-zA-Z0-9_]*=[^\s]*))*\s+|(?:[a-zA-Z_][a-zA-Z0-9_]*=[^\s]*\s+)+|(?:(?:\/usr)?\/bin\/)?(?:bash|sh)(?:\s+(?:--?[a-zA-Z][a-zA-Z0-9-]*))*\s+|(?:eval|exec|command|builtin)(?:\s+--?[a-zA-Z-]*)*\s+|(?:nohup|setsid)(?:\s+--?[a-zA-Z-]*)*\s+|time(?:\s+(?:-o\s+[^\s]+|-f\s+[^\s]+|-[a-zA-Z]+|--[a-zA-Z-]*(?:=[^\s]+)?))*\s+|nice(?:\s+(?:-n\s*\d+|-\d+|--adjustment=\d+|-[a-zA-Z]+|--[a-zA-Z-]*))*\s+|stdbuf(?:\s+(?:-[ioe]\s*[^\s]+|-[a-zA-Z]+|--[a-zA-Z-]*(?:=[^\s]+)?))*\s+|timeout(?:\s+(?:-[ks]\s*[^\s]+|-[a-zA-Z]+|--[a-zA-Z-]*(?:=[^\s]+)?))*\s+\d+(?:\.\d+)?[smhd]?\s+|xargs(?:\s+(?:-[0rtx]+|-[adEILnPs]\s*[^\s]+|--[a-zA-Z-]*(?:=[^\s]+)?))*\s+|(?:!|then|do|else|elif|if|while|until|for|select|case|function)\s+|(?:\d*(?:>>?|<<?|>&|<&)\s*(?:&?\d+|[^\s;&|]+)\s+)+)/i;
+const WRAPPER_PREFIX_REGEX = /^(?:(?:(?:\/usr)?\/bin\/)?sudo(?:\s+(?:-[ugpCDRTrtU]\s+(?:"[^"]*"|'[^']*'|[^\s]+)|-[a-zA-Z]+|--[a-zA-Z-]*(?:=(?:"[^"]*"|'[^']*'|[^\s]+))?))*\s+|(?:(?:\/usr)?\/bin\/)?env(?:\s+(?:-[uC]\s+(?:"[^"]*"|'[^']*'|[^\s]+)|-[a-zA-Z0-9]+|--[a-zA-Z-]*(?:=(?:"[^"]*"|'[^']*'|[^\s]+))?|[a-zA-Z_][a-zA-Z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]*)))*\s+|(?:[a-zA-Z_][a-zA-Z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]*)\s+)+|(?:(?:\/usr)?\/bin\/)?(?:bash|sh)(?:\s+(?:--?[a-zA-Z][a-zA-Z0-9-]*))*\s+|(?:eval|exec|command|builtin)(?:\s+--?[a-zA-Z-]*)*\s+|(?:nohup|setsid)(?:\s+--?[a-zA-Z-]*)*\s+|time(?:\s+(?:-o\s+(?:"[^"]*"|'[^']*'|[^\s]+)|-f\s+(?:"[^"]*"|'[^']*'|[^\s]+)|-[a-zA-Z]+|--[a-zA-Z-]*(?:=(?:"[^"]*"|'[^']*'|[^\s]+))?))*\s+|nice(?:\s+(?:-n\s*\d+|-\d+|--adjustment=\d+|-[a-zA-Z]+|--[a-zA-Z-]*))*\s+|stdbuf(?:\s+(?:-[ioe]\s*(?:"[^"]*"|'[^']*'|[^\s]+)|-[a-zA-Z]+|--[a-zA-Z-]*(?:=(?:"[^"]*"|'[^']*'|[^\s]+))?))*\s+|timeout(?:\s+(?:-[ks]\s*(?:"[^"]*"|'[^']*'|[^\s]+)|-[a-zA-Z]+|--[a-zA-Z-]*(?:=(?:"[^"]*"|'[^']*'|[^\s]+))?))*\s+\d+(?:\.\d+)?[smhd]?\s+|xargs(?:\s+(?:-[0rtx]+|-[adEILnPs]\s*(?:"[^"]*"|'[^']*'|[^\s]+)|--[a-zA-Z-]*(?:=(?:"[^"]*"|'[^']*'|[^\s]+))?))*\s+|(?:!|then|do|else|elif|if|while|until|for|select|case|function)\s+|(?:\d*(?:>>?|<<?|>&|<&)\s*(?:&?\d+|"[^"]*"|'[^']*'|[^\s;&|]+)\s+)+)/i;
 
 const SHELL_WORD_DELIMITER = /[\s;&|<>()`]/;
 
@@ -228,7 +228,7 @@ export function matchToolPattern(
       // closed below).
       const commandText = argStr
         .replace(/\\\r?\n/g, '')
-        .replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:\$\([^()]*\)|[^\s]*)\s+)+/, '');
+        .replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\$\([^()]*\)|[^\s]*)\s+)+/, '');
       // Security: In deny/ask rules, match if either full command or ANY segment matches
       if (matchSimplePattern(rawArgPattern, commandText)) return true;
       // A command substitution in command position has no static command word.

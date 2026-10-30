@@ -16,6 +16,7 @@ import {
   projectMcpCommandCandidates,
   projectMcpConfigPath,
   saveProjectMcpConfig,
+  sanitizeAndCompactToolSchema,
 } from '../dist/mcp.js';
 import { ToolRegistry } from '../dist/tools.js';
 import { mockMcpServer } from './fixtures/mcp-server.mjs';
@@ -583,4 +584,105 @@ test('MCP HTTP server cannot forward protected provider credentials via headers 
   });
   const manager = new McpManager(config, f.cwd);
   await assert.rejects(manager.connect(), /cannot forward protected credential variable "VYEN_API_KEY"/);
+});
+
+test('sanitizeAndCompactToolSchema sanitizes non-standard schemas and applies 4-pass compaction', () => {
+  // 1. Basic sanitization: null, primitives, arrays coerced to object with properties
+  assert.deepEqual(sanitizeAndCompactToolSchema(null), { type: 'object', properties: {} });
+  assert.deepEqual(sanitizeAndCompactToolSchema([]), { type: 'object', properties: {} });
+  assert.deepEqual(sanitizeAndCompactToolSchema('foo'), { type: 'object', properties: {} });
+
+  // 2. Draft 2020-12 $schema is stripped and missing properties defaulted
+  const rawWithSchema = {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: 'user name' },
+    },
+  };
+  const sanitized = sanitizeAndCompactToolSchema(rawWithSchema);
+  assert.equal(sanitized.$schema, undefined);
+  assert.equal(sanitized.type, 'object');
+  assert.deepEqual(sanitized.properties.name, { type: 'string', description: 'user name' });
+
+  // 3. Compaction pass 1: stripSchemaDescriptions
+  const schemaWithBigDesc = {
+    type: 'object',
+    properties: {
+      field: { type: 'string', description: 'A'.repeat(500) },
+    },
+  };
+  const compactedDesc = sanitizeAndCompactToolSchema(schemaWithBigDesc, 100);
+  assert.equal(compactedDesc.properties.field.description, undefined);
+
+  // 4. Compaction pass 2: dropSchemaDefinitions ($defs / definitions)
+  const schemaWithDefs = {
+    type: 'object',
+    $defs: { BigDef: { type: 'string', description: 'B'.repeat(500) } },
+    definitions: { OldDef: { type: 'number' } },
+    properties: { item: { type: 'string' } },
+  };
+  const compactedDefs = sanitizeAndCompactToolSchema(schemaWithDefs, 120);
+  assert.equal(compactedDefs.$defs, undefined);
+  assert.equal(compactedDefs.definitions, undefined);
+  assert.ok(compactedDefs.properties.item);
+
+  // 5. Compaction pass 3: collapseDeepSchemaObjects (depth >= 3)
+  const deepSchema = {
+    type: 'object',
+    properties: {
+      level1: {
+        type: 'object',
+        properties: {
+          level2: {
+            type: 'object',
+            properties: {
+              level3: {
+                type: 'string',
+                description: 'deep value',
+                properties: { deepChild: { type: 'string' } },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+  const compactedDeep = sanitizeAndCompactToolSchema(deepSchema, 120);
+  assert.ok(compactedDeep.properties.level1);
+
+  // 6. Compaction pass 4: pruneSchemaCompositions (oneOf / anyOf / allOf)
+  const schemaWithCompositions = {
+    type: 'object',
+    properties: {
+      choice: {
+        oneOf: [
+          { type: 'string', minLength: 5 },
+          { type: 'number', minimum: 10 },
+        ],
+      },
+      fallback: {
+        anyOf: [{ type: 'boolean' }],
+      },
+    },
+  };
+  const compactedComp = sanitizeAndCompactToolSchema(schemaWithCompositions, 65);
+  assert.equal(compactedComp.properties.choice.oneOf, undefined);
+  assert.equal(compactedComp.properties.fallback.anyOf, undefined);
+
+  // 7. Final safety pass: flattens properties to primitive types when exceeding maxBytes
+  const hugeSchema = {
+    type: 'object',
+    properties: {
+      p1: { type: 'string', description: 'x'.repeat(200) },
+      p2: { type: 'number', description: 'y'.repeat(200) },
+      p3: { type: 'boolean', description: 'z'.repeat(200) },
+      p4: { type: 'custom_complex', description: 'w'.repeat(200) },
+    },
+  };
+  const flat = sanitizeAndCompactToolSchema(hugeSchema, 80);
+  assert.deepEqual(flat.properties.p1, { type: 'string' });
+  assert.deepEqual(flat.properties.p2, { type: 'number' });
+  assert.deepEqual(flat.properties.p3, { type: 'boolean' });
+  assert.deepEqual(flat.properties.p4, {});
 });

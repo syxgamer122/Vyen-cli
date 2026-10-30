@@ -544,6 +544,11 @@ test('bash deny and ask rules cannot be bypassed by quoting or escaping the comm
     'FOO=$(date) rm -rf /',
     'x=$(date) rm -rf /',
     'x=$(a $(b)) rm -rf /',
+    'FOO="any string with spaces" rm -rf /',
+    "FOO='single quoted space' rm -rf /",
+    'sudo -u "admin user" rm -rf /',
+    '> "quoted path with spaces" rm -rf /',
+    'env VAR="value with space" rm -rf /',
   ]) {
     assert.equal(
       evaluateToolPolicy({ tool: 'bash', input: { command } }, denyCtx),

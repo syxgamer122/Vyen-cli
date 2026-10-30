@@ -14,7 +14,7 @@ export { runSetupWizard, PROVIDER_PRESETS, EFFORT_DESCRIPTIONS, parseEffortInput
 export type { ProviderPreset, SetupIO } from './setup.js';
 export { computeUnifiedDiff, parsePatchText, applyHunksToContent, WorkspaceFiles, limitText, WINDOWS_RESERVED_DEVICE_RE, toWinExtendedPath, unlinkSafe } from './files.js';
 export type { PatchHunk, PatchOperation } from './files.js';
-export { compactIfNeeded, compactNow, expandFileMentions, loadProjectInstructions, systemPrompt, estimatedTokens } from './context.js';
+export { compactIfNeeded, compactNow, expandFileMentions, loadProjectInstructions, systemPrompt, estimatedTokens, compactionThreshold, isNearCompactionThreshold } from './context.js';
 export {
   McpManager,
   loadMcpConfig,

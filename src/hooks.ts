@@ -301,7 +301,8 @@ export async function evaluateWorkspaceTrust(
   return { layered, isTrusted, trustRequired: true, hash, reasons };
 }
 
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { Writable, Readable } from 'node:stream';
 
 const PRESERVED_ENV_KEYS = new Set([
   'SSH_AUTH_SOCK',
@@ -433,14 +434,27 @@ export class HookBus {
       let aborted = false;
       const MAX_OUTPUT = 1024 * 1024; // 1MB buffer ceiling
 
-      const child = spawn(command, {
-        cwd: this.cwd,
-        env,
-        shell: true,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: process.platform !== 'win32',
-        windowsHide: true,
-      });
+      let child: ChildProcessByStdio<Writable, Readable, Readable>;
+      try {
+        child = spawn(command, {
+          cwd: this.cwd,
+          env,
+          shell: true,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          detached: process.platform !== 'win32',
+          windowsHide: true,
+        });
+      } catch (err) {
+        resolvePromise({
+          executed: false,
+          exitCode: 1,
+          stdout: '',
+          stderr: '',
+          denied: event === 'PreToolUse',
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
 
       child.stdin.on('error', () => {
         // Prevent unhandled stream error (e.g. EPIPE) if child exits before reading stdin

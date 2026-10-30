@@ -150,7 +150,7 @@ untouched.
 A tool that runs is not yet a finished tool. Adding one means all of:
 
 - `src/tools.ts` — the registration and its schema, the alias normalisation in
-  `normalizeToolInput`, and the state-transition classification in `isReadOnly`
+  `normalizeToolInput`, and the state-transition classification in `isReadOnly` / `canBatchParallel`
 - `src/context.ts` — the ACTIVE MODE tool list inside the system prompt
 - `src/harness.ts` — `buildToolMeta`, which produces the TUI summary line
 - `src/tui.ts` — the slash-command list, when the tool has a slash command
